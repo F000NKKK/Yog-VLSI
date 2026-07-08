@@ -21,34 +21,32 @@ command    = "../Yog-Mod-Loader/forge/gradlew"
 args       = ["runClient", "-Pminecraft_version=1.21.1"]
 cwd        = "../Yog-Mod-Loader/forge"
 
-# Uncomment to switch the dev target to another loader/version. Same repo,
-# same `run/yog-mods` convention — only the platform subdir + gradlew changes.
-# [run.forge-1.20.1]
-# export_dir = "../Yog-Mod-Loader/forge/run/yog-mods"
-# command    = "../Yog-Mod-Loader/forge/gradlew"
-# args       = ["runClient", "-Pminecraft_version=1.20.1"]
-# cwd        = "../Yog-Mod-Loader/forge"
+[run.forge-1.20.1]
+export_dir = "../Yog-Mod-Loader/forge/run/yog-mods"
+command    = "../Yog-Mod-Loader/forge/gradlew"
+args       = ["runClient", "-Pminecraft_version=1.20.1"]
+cwd        = "../Yog-Mod-Loader/forge"
 
-# [run.fabric-1.21.1]
-# export_dir = "../Yog-Mod-Loader/fabric/run/yog-mods"
-# command    = "../Yog-Mod-Loader/fabric/gradlew"
-# args       = ["runClient", "-Pminecraft_version=1.21.1"]
-# cwd        = "../Yog-Mod-Loader/fabric"
+[run.fabric-1.21.1]
+export_dir = "../Yog-Mod-Loader/fabric/run/yog-mods"
+command    = "../Yog-Mod-Loader/fabric/gradlew"
+args       = ["runClient", "-Pminecraft_version=1.21.1"]
+cwd        = "../Yog-Mod-Loader/fabric"
 
-# [run.fabric-1.20.1]
-# export_dir = "../Yog-Mod-Loader/fabric/run/yog-mods"
-# command    = "../Yog-Mod-Loader/fabric/gradlew"
-# args       = ["runClient", "-Pminecraft_version=1.20.1"]
-# cwd        = "../Yog-Mod-Loader/fabric"
+[run.fabric-1.20.1]
+export_dir = "../Yog-Mod-Loader/fabric/run/yog-mods"
+command    = "../Yog-Mod-Loader/fabric/gradlew"
+args       = ["runClient", "-Pminecraft_version=1.20.1"]
+cwd        = "../Yog-Mod-Loader/fabric"
 
-# [run.neoforge-1.21.1]
-# export_dir = "../Yog-Mod-Loader/neoforge/run/yog-mods"
-# command    = "../Yog-Mod-Loader/neoforge/gradlew"
-# args       = ["runClient", "-Pminecraft_version=1.21.1"]
-# cwd        = "../Yog-Mod-Loader/neoforge"
+[run.neoforge-1.21.1]
+export_dir = "../Yog-Mod-Loader/neoforge/run/yog-mods"
+command    = "../Yog-Mod-Loader/neoforge/gradlew"
+args       = ["runClient", "-Pminecraft_version=1.21.1"]
+cwd        = "../Yog-Mod-Loader/neoforge"
 
-# [run.neoforge-1.20.1]
-# export_dir = "../Yog-Mod-Loader/neoforge/run/yog-mods"
-# command    = "../Yog-Mod-Loader/neoforge/gradlew"
-# args       = ["runClient", "-Pminecraft_version=1.20.1"]
-# cwd        = "../Yog-Mod-Loader/neoforge"
+[run.neoforge-1.20.1]
+export_dir = "../Yog-Mod-Loader/neoforge/run/yog-mods"
+command    = "../Yog-Mod-Loader/neoforge/gradlew"
+args       = ["runClient", "-Pminecraft_version=1.20.1"]
+cwd        = "../Yog-Mod-Loader/neoforge"
