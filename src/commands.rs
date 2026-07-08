@@ -380,7 +380,7 @@ fn create_test_chip(tier: Tier, srv: &dyn yog_api::Server) -> ChipMeta {
 // ── Resource cost calculator ────────────────────────────────────────────────
 
 /// Calculate fabrication cost at 25% vanilla rate.
-fn calculate_cost(blocks: &[CircuitBlock]) -> Vec<(String, u64)> {
+pub fn calculate_cost(blocks: &[CircuitBlock]) -> Vec<(String, u64)> {
     let mut costs: HashMap<String, u64> = HashMap::new();
     for block in blocks {
         let recipe = block_cost(block);
