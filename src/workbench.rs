@@ -72,6 +72,71 @@ pub fn register(registry: &mut Registry) {
             .key('I', "minecraft:iron_ingot")
     );
 
+
+    // ── Cable blocks ───────────────────────────────────────────────────────
+    // Analog Cable
+    registry.register_block(
+        BlockDef::new("yog-vlsi:analog_cable")
+            .strength(0.5, 0.5)
+            .sound("stone")
+            .no_collision()
+    );
+    registry.register_item(
+        ItemDef::new("yog-vlsi:analog_cable")
+            .name("Analog Cable")
+            .tooltip("§7Carries a single analog redstone signal (0–15).
+§7Connects Redstone Port to external redstone.")
+    );
+    registry.add_shaped_recipe(
+        yog_api::ShapedRecipe::new("yog-vlsi:analog_cable_craft", "yog-vlsi:analog_cable", 3)
+            .row("RRR")
+            .key('R', "minecraft:redstone")
+    );
+
+    // Digital Cable
+    registry.register_block(
+        BlockDef::new("yog-vlsi:digital_cable")
+            .strength(0.5, 0.5)
+            .sound("stone")
+            .no_collision()
+    );
+    registry.register_item(
+        ItemDef::new("yog-vlsi:digital_cable")
+            .name("Digital Cable")
+            .tooltip("§7Carries up to 256 digital bits (64 channels × 4 colors).
+§7Connects Digital Ports between ALUs.")
+    );
+    registry.add_shaped_recipe(
+        yog_api::ShapedRecipe::new("yog-vlsi:digital_cable_craft", "yog-vlsi:digital_cable", 4)
+            .row("GRG")
+            .row("RIR")
+            .row("GRG")
+            .key('G', "minecraft:gold_nugget")
+            .key('R', "minecraft:redstone")
+            .key('I', "minecraft:iron_ingot")
+    );
+
+    // Redstone Port (adapter block)
+    registry.register_block(
+        BlockDef::new("yog-vlsi:redstone_port")
+            .strength(2.0, 6.0)
+            .sound("stone")
+    );
+    registry.register_item(
+        ItemDef::new("yog-vlsi:redstone_port")
+            .name("Redstone Port")
+            .tooltip("§7Adapter between ALU and external redstone.
+§7Place on any side of an ALU. Connect Analog Cable on one side, redstone on the other.")
+    );
+    registry.add_shaped_recipe(
+        yog_api::ShapedRecipe::new("yog-vlsi:redstone_port_craft", "yog-vlsi:redstone_port", 1)
+            .row("SSS")
+            .row("SRS")
+            .row("SSS")
+            .key('S', "minecraft:smooth_stone")
+            .key('R', "minecraft:redstone")
+    );
+
     // ── Workbench right-click handler ──────────────────────────────────────
     registry.on_use_block(move |e, phase, srv| -> bool {
         if phase != yog_api::EventPhase::Pre { return true; }
