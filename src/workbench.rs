@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use std::sync::Mutex;
 
 use yog_api::player::Player;
-use yog_api::{BlockDef, ItemDef, Registry};
+use yog_api::{BlockDef, ItemDef, Registry, Storage};
 
 use crate::chip::{ChipMeta, CircuitData};
 use crate::designs;
