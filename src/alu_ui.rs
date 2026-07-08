@@ -15,11 +15,18 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use yog_api::GfxContext;
+use yog_api::{GfxContext, Registry, Storage};
 
 use crate::chip::ChipMeta;
-use crate::commands::ALU_STATE;
-use crate::vm::Tier;
+use crate::commands::{ALU_STATE, VM_CACHE};
+use crate::vm::{RedstoneVM, Tier};
+
+pub const CHIP_LIST_CHANNEL: &str = "yog-vlsi:alu_chips";
+
+/// Chips available in the player's inventory, as reported by the server:
+/// (slot, name, tier_id).
+static CHIP_LIST: LazyLock<Mutex<Vec<(u32, String, String)>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+static SHOW_SELECTOR: Mutex<bool> = Mutex::new(false);
 
 // ── State ────────────────────────────────────────────────────────────────────
 
