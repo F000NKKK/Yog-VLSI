@@ -6,6 +6,7 @@
 mod alu;
 mod chip;
 mod commands;
+mod designs;
 mod vm;
 mod workbench;
 
@@ -29,11 +30,6 @@ impl Mod for YogVlsi {
         registry.on_tick(|srv| {
             alu::tick_all(srv);
         });
-
-        // TODO: chip editing UI via register_ui + on_ui_render
-        // TODO: workbench GUI (resource ammo, design/fabricate buttons)
-        // TODO: virtual world editing mode
-        // TODO: ALU node graph linking GUI
 
         info!("[yog-vlsi] ready.");
     }
