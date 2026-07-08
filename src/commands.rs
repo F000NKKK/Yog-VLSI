@@ -32,6 +32,47 @@ pub static ALU_STATE: LazyLock<Mutex<HashMap<(i32, i32, i32), Vec<(String, Tier)
 pub static VM_CACHE: LazyLock<Mutex<HashMap<String, RedstoneVM>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Port list per installed chip (cached at install time so the tick loop
+/// doesn't need a Storage read every tick): chip_id → ports.
+pub static CHIP_PORTS: LazyLock<Mutex<HashMap<String, Vec<Port>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Server-authoritative link graph, keyed like the UI shows it:
+/// `(chip_id, port_label) → (chip_id, port_label)`. An ALU's own 6 external
+/// ports are addressed with the chip_id `"__ext_<x>_<y>_<z>"` and a label of
+/// `"N"`/`"S"`/`"E"`/`"W"`/`"U"`/`"D"`, so external ↔ chip links live in the
+/// same map as chip ↔ chip links.
+pub static LINKS: LazyLock<Mutex<HashMap<(String, String), (String, String)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// I/O mode per ALU external port: `"__ext_<x>_<y>_<z>:<side>"` → mode string.
+pub static IO_MODES: LazyLock<Mutex<HashMap<String, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Latest computed value for each ALU's external analog ports (what a
+/// Redstone Port *would* drive onto its Analog Cable). Actually asserting
+/// this onto real-world redstone needs a loader-level redstone-power R/W
+/// hook that does not exist yet — see `alu::tick_all` for details.
+pub static EXT_VALUES: LazyLock<Mutex<HashMap<(i32, i32, i32), HashMap<String, u8>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub fn ext_chip_id(alu_pos: (i32, i32, i32)) -> String {
+    format!("__ext_{}_{}_{}", alu_pos.0, alu_pos.1, alu_pos.2)
+}
+
+/// Install a chip (by its item NBT) into the ALU at `alu_pos`, preloading its
+/// VM and port cache. Shared by `/vlsi alu install` and the ALU GUI's
+/// network-driven chip installer.
+pub fn install_chip(srv: &dyn yog_api::Server, meta: &ChipMeta, alu_pos: (i32, i32, i32)) {
+    ALU_STATE.lock().unwrap().entry(alu_pos).or_default().push((meta.id.clone(), meta.tier));
+    if let Some(circuit) = load_circuit(srv, &meta.id) {
+        let mut vm = RedstoneVM::new(meta.tier);
+        load_circuit_into_vm(&mut vm, &circuit);
+        VM_CACHE.lock().unwrap().insert(meta.id.clone(), vm);
+        CHIP_PORTS.lock().unwrap().insert(meta.id.clone(), circuit.ports);
+    }
+}
+
 // ── Tier helper ──────────────────────────────────────────────────────────────
 
 pub fn parse_tier_pub(s: &str) -> Option<Tier> {
@@ -219,14 +260,7 @@ pub fn register(registry: &mut Registry) {
             Some((x, y, z)) => ((x - 1.0) as i32, y as i32, (z - 1.0) as i32),
             None => return Some("§cCannot determine position.".into()),
         };
-        let mut state = ALU_STATE.lock().unwrap();
-        state.entry(pos).or_default().push((meta.id.clone(), meta.tier));
-        // Preload VM
-        if let Some(circuit) = load_circuit(srv, &meta.id) {
-            let mut vm = RedstoneVM::new(meta.tier);
-            load_circuit_into_vm(&mut vm, &circuit);
-            VM_CACHE.lock().unwrap().insert(meta.id.clone(), vm);
-        }
+        install_chip(srv, &meta, pos);
         let _ = srv.set_held_item_nbt(&ctx.source, "");
         Some(format!("§aInstalled '{}' into ALU at {:?}.", meta.name, pos))
     });
