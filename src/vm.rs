@@ -258,28 +258,6 @@ impl Cell {
         )
     }
 
-    /// Blocks that can receive a redstone signal (solid + specific non-solids).
-    fn is_redstone_conductor(&self) -> bool {
-        self.is_solid() || matches!(self.block,
-            BlockType::Hopper { .. }
-            | BlockType::Dropper { .. }
-            | BlockType::Dispenser { .. }
-        )
-    }
-
-    /// Whether this block type outputs power by itself.
-    fn is_power_source(&self) -> bool {
-        matches!(self.block,
-            BlockType::RedstoneTorch { lit: true }
-            | BlockType::RedstoneWallTorch { lit: true, .. }
-            | BlockType::RedstoneBlock
-            | BlockType::Lever { on: true }
-            | BlockType::Observer { powered: true, .. }
-            | BlockType::TargetBlock { .. }
-            | BlockType::DetectorRail { powered: true }
-        )
-    }
-
     /// Power level a source outputs.
     fn source_power(&self) -> u8 {
         match self.block {

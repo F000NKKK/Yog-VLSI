@@ -542,15 +542,17 @@ pub fn load_circuit_into_vm(vm: &mut RedstoneVM, circuit: &CircuitData) {
     }
 }
 
+/// Extract `"key":"value"` out of a compact JSON blob without pulling in a
+/// full parser — `state_json` is always a small, flat object.
+fn state_field<'a>(state_json: &'a str, key: &str) -> Option<&'a str> {
+    let needle = format!("\"{}\":\"", key);
+    let start = state_json.find(&needle)? + needle.len();
+    let end = state_json[start..].find('"')? + start;
+    Some(&state_json[start..end])
+}
+
 pub fn parse_block_type(block_id: &str, state_json: &str) -> BlockType {
-    let facing = || {
-        if state_json.contains("\"facing\":\"north\"") { Facing::North }
-        else if state_json.contains("\"facing\":\"south\"") { Facing::South }
-        else if state_json.contains("\"facing\":\"east\"") { Facing::East }
-        else if state_json.contains("\"facing\":\"west\"") { Facing::West }
-        else if state_json.contains("\"facing\":\"up\"") { Facing::Up }
-        else { Facing::Down }
-    };
+    let facing = || state_field(state_json, "facing").map(Facing::from_minecraft).unwrap_or(Facing::North);
     match block_id {
         "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => BlockType::Air,
         "minecraft:redstone_wire" => BlockType::RedstoneWire,
