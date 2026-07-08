@@ -214,6 +214,22 @@ pub fn register(registry: &mut Registry) {
             }
         }
 
+        // Try to add resources from held item
+        if let Some(ref item_id) = held_item {
+            if !item_id.starts_with("yog-vlsi:") && item_id != "minecraft:air" {
+                let mut resources = RESOURCES.lock().unwrap();
+                let wb_res = resources.entry(key).or_default();
+                let count = wb_res.entry(item_id.clone()).or_default();
+                *count += 1;
+                // Consume one item from hand (simplified)
+                srv.broadcast(&format!(
+                    "§a{} added 1× {} to workbench resources. Total: {}",
+                    e.player_name, item_id, *count
+                ));
+                return false;
+            }
+        }
+
         // No special item — show workbench status
         let resources = RESOURCES.lock().unwrap();
         let res = resources.get(&key);

@@ -22,7 +22,7 @@ use yog_api::{Registry, Storage};
 use crate::chip::{ChipMeta, CircuitBlock, CircuitData, Port, PortDir, PortSide};
 use crate::designs;
 use crate::vm::{BlockType, ComparatorMode, Facing, PortMode, RedstoneVM, Tier};
-use crate::workbench::BLUEPRINT_ID;
+use crate::workbench::{BLUEPRINT_ID, RESOURCES};
 
 /// In-memory ALU state: (x, y, z) → list of (chip_id, tier)
 pub static ALU_STATE: LazyLock<Mutex<HashMap<(i32, i32, i32), Vec<(String, Tier)>>>> =
@@ -204,6 +204,56 @@ pub fn register(registry: &mut Registry) {
 
         // Calculate resource cost
         let cost = calculate_cost(&entry.circuit.blocks);
+        
+        // Try to consume resources from nearest workbench
+        let pos = match Player::new(srv, &ctx.source).position() {
+            Some((px, py, pz)) => {
+                // Search for nearby workbench (within 3 blocks)
+                let mut found = None;
+                for dx in -3..=3i32 {
+                    for dy in -3..=3i32 {
+                        for dz in -3..=3i32 {
+                            let key = ((px as i32) + dx, (py as i32) + dy, (pz as i32) + dz);
+                            let res = RESOURCES.lock().unwrap();
+                            if res.contains_key(&key) {
+                                found = Some(key);
+                                break;
+                            }
+                        }
+                        if found.is_some() { break; }
+                    }
+                    if found.is_some() { break; }
+                }
+                found
+            }
+            None => None,
+        };
+
+        // Consume resources if workbench found
+        if let Some(wb_key) = pos {
+            let mut resources = RESOURCES.lock().unwrap();
+            let wb_res = resources.entry(wb_key).or_default();
+            let mut sufficient = true;
+            for (item, qty) in &cost {
+                let have = wb_res.get(item).copied().unwrap_or(0);
+                if have < *qty { sufficient = false; break; }
+            }
+            if !sufficient {
+                let missing: Vec<String> = cost.iter()
+                    .filter_map(|(item, qty)| {
+                        let have = wb_res.get(item).copied().unwrap_or(0);
+                        if have < *qty { Some(format!("{}: need {} have {}", item, qty, have)) }
+                        else { None }
+                    })
+                    .collect();
+                return Some(format!("§cInsufficient resources in workbench:\n{}", missing.join("\n")));
+            }
+            for (item, qty) in &cost {
+                let have = wb_res.get_mut(item).unwrap();
+                *have = have.saturating_sub(*qty);
+            }
+        }
+
         let cost_str: Vec<String> = cost.iter()
             .map(|(item, qty)| format!("{}: {}", item, qty))
             .collect();
@@ -349,66 +399,63 @@ fn calculate_cost(blocks: &[CircuitBlock]) -> Vec<(String, u64)> {
 fn block_cost(block: &CircuitBlock) -> Vec<(String, u64)> {
     let mut c = Vec::new();
     match block.block_id.as_str() {
+        // Redstone components
         "minecraft:redstone_wire" => { c.push(("minecraft:redstone".into(), 1)); }
         "minecraft:redstone_torch" | "minecraft:redstone_wall_torch" => {
-            c.push(("minecraft:redstone".into(), 1));
-            c.push(("minecraft:stick".into(), 1));
+            c.push(("minecraft:redstone".into(), 1)); c.push(("minecraft:stick".into(), 1));
         }
         "minecraft:repeater" => {
-            c.push(("minecraft:redstone".into(), 3));
-            c.push(("minecraft:stick".into(), 2));
-            c.push(("minecraft:stone".into(), 3));
+            c.push(("minecraft:redstone".into(), 3)); c.push(("minecraft:stick".into(), 2)); c.push(("minecraft:stone".into(), 3));
         }
         "minecraft:comparator" => {
-            c.push(("minecraft:redstone".into(), 3));
-            c.push(("minecraft:quartz".into(), 1));
-            c.push(("minecraft:stone".into(), 3));
+            c.push(("minecraft:redstone".into(), 3)); c.push(("minecraft:quartz".into(), 1)); c.push(("minecraft:stone".into(), 3));
         }
-        "minecraft:redstone_lamp" => {
-            c.push(("minecraft:redstone".into(), 4));
-            c.push(("minecraft:glowstone_dust".into(), 1));
-        }
+        "minecraft:redstone_lamp" => { c.push(("minecraft:redstone".into(), 4)); c.push(("minecraft:glowstone_dust".into(), 1)); }
         "minecraft:redstone_block" => { c.push(("minecraft:redstone".into(), 9)); }
         "minecraft:lever" => { c.push(("minecraft:stick".into(), 1)); c.push(("minecraft:cobblestone".into(), 1)); }
         "minecraft:stone_button" => { c.push(("minecraft:stone".into(), 1)); }
-        "minecraft:observer" => {
-            c.push(("minecraft:cobblestone".into(), 6));
-            c.push(("minecraft:redstone".into(), 2));
-            c.push(("minecraft:quartz".into(), 1));
-        }
-        "minecraft:piston" => {
-            c.push(("minecraft:oak_planks".into(), 3));
-            c.push(("minecraft:cobblestone".into(), 4));
-            c.push(("minecraft:iron_ingot".into(), 1));
-            c.push(("minecraft:redstone".into(), 1));
-        }
-        "minecraft:sticky_piston" => {
-            c.push(("minecraft:piston".into(), 1)); // simplified: count as piston + slime
-            c.push(("minecraft:slime_ball".into(), 1));
-        }
-        "minecraft:hopper" => {
-            c.push(("minecraft:iron_ingot".into(), 5));
-            c.push(("minecraft:chest".into(), 1));
-        }
-        "minecraft:dropper" | "minecraft:dispenser" => {
-            c.push(("minecraft:cobblestone".into(), 7));
-            c.push(("minecraft:redstone".into(), 1));
-            if block.block_id == "minecraft:dispenser" { c.push(("minecraft:bow".into(), 1)); }
-        }
-        "minecraft:chest" => { c.push(("minecraft:oak_planks".into(), 8)); }
-        "minecraft:trapped_chest" => {
-            c.push(("minecraft:oak_planks".into(), 8));
-            c.push(("minecraft:tripwire_hook".into(), 1));
-        }
-        "minecraft:target" => { c.push(("minecraft:redstone".into(), 4)); c.push(("minecraft:hay_block".into(), 1)); }
+        "minecraft:observer" => { c.push(("minecraft:cobblestone".into(), 6)); c.push(("minecraft:redstone".into(), 2)); c.push(("minecraft:quartz".into(), 1)); }
         "minecraft:note_block" => { c.push(("minecraft:oak_planks".into(), 8)); c.push(("minecraft:redstone".into(), 1)); }
+        "minecraft:target" => { c.push(("minecraft:redstone".into(), 4)); c.push(("minecraft:hay_block".into(), 1)); }
+        // Pistons
+        "minecraft:piston" => { c.push(("minecraft:oak_planks".into(), 3)); c.push(("minecraft:cobblestone".into(), 4)); c.push(("minecraft:iron_ingot".into(), 1)); c.push(("minecraft:redstone".into(), 1)); }
+        "minecraft:sticky_piston" => { c.push(("minecraft:slime_ball".into(), 1)); c.push(("minecraft:piston".into(), 1)); }
+        // Containers
+        "minecraft:chest" | "minecraft:barrel" => { c.push(("minecraft:oak_planks".into(), 8)); }
+        "minecraft:trapped_chest" => { c.push(("minecraft:oak_planks".into(), 8)); c.push(("minecraft:tripwire_hook".into(), 1)); }
+        "minecraft:ender_chest" => { c.push(("minecraft:obsidian".into(), 8)); c.push(("minecraft:ender_eye".into(), 1)); }
+        "minecraft:hopper" => { c.push(("minecraft:iron_ingot".into(), 5)); c.push(("minecraft:chest".into(), 1)); }
+        "minecraft:dropper" => { c.push(("minecraft:cobblestone".into(), 7)); c.push(("minecraft:redstone".into(), 1)); }
+        "minecraft:dispenser" => { c.push(("minecraft:cobblestone".into(), 7)); c.push(("minecraft:redstone".into(), 1)); c.push(("minecraft:bow".into(), 1)); }
+        "minecraft:furnace" => { c.push(("minecraft:cobblestone".into(), 8)); }
+        "minecraft:blast_furnace" => { c.push(("minecraft:smooth_stone".into(), 3)); c.push(("minecraft:furnace".into(), 1)); c.push(("minecraft:iron_ingot".into(), 5)); }
+        "minecraft:smoker" => { c.push(("minecraft:oak_log".into(), 4)); c.push(("minecraft:furnace".into(), 1)); }
+        "minecraft:brewing_stand" => { c.push(("minecraft:blaze_rod".into(), 1)); c.push(("minecraft:cobblestone".into(), 3)); }
+        // Movement / utility
         "minecraft:slime_block" => { c.push(("minecraft:slime_ball".into(), 9)); }
         "minecraft:honey_block" => { c.push(("minecraft:honey_bottle".into(), 4)); }
         "minecraft:tnt" => { c.push(("minecraft:sand".into(), 4)); c.push(("minecraft:gunpowder".into(), 5)); }
+        // Rails
+        "minecraft:rail" => { c.push(("minecraft:iron_ingot".into(), 6)); c.push(("minecraft:stick".into(), 1)); }
         "minecraft:powered_rail" => { c.push(("minecraft:gold_ingot".into(), 6)); c.push(("minecraft:stick".into(), 1)); c.push(("minecraft:redstone".into(), 1)); }
         "minecraft:detector_rail" => { c.push(("minecraft:iron_ingot".into(), 6)); c.push(("minecraft:stone_pressure_plate".into(), 1)); c.push(("minecraft:redstone".into(), 1)); }
+        "minecraft:activator_rail" => { c.push(("minecraft:iron_ingot".into(), 6)); c.push(("minecraft:stick".into(), 2)); c.push(("minecraft:redstone_torch".into(), 1)); }
+        // Doors / trapdoors / gates
+        "minecraft:iron_door" => { c.push(("minecraft:iron_ingot".into(), 6)); }
+        "minecraft:iron_trapdoor" => { c.push(("minecraft:iron_ingot".into(), 4)); }
+        // Glass
+        "minecraft:glass" => { c.push(("minecraft:sand".into(), 1)); } // smelted
+        "minecraft:glowstone" => { c.push(("minecraft:glowstone_dust".into(), 4)); }
+        "minecraft:sea_lantern" => { c.push(("minecraft:prismarine_shard".into(), 4)); c.push(("minecraft:prismarine_crystals".into(), 5)); }
+        // VLSI blocks
         "yog-vlsi:port" => { c.push(("minecraft:redstone".into(), 2)); c.push(("minecraft:stone".into(), 4)); }
-        _ => { c.push(("minecraft:stone".into(), 1)); } // default: 1 stone for any other solid block
+        "yog-vlsi:vlsi_workbench" => { c.push(("minecraft:iron_ingot".into(), 4)); c.push(("minecraft:smooth_stone".into(), 3)); c.push(("minecraft:redstone_block".into(), 1)); }
+        "yog-vlsi:alu" => { c.push(("minecraft:gold_ingot".into(), 4)); c.push(("minecraft:copper_ingot".into(), 2)); c.push(("minecraft:repeater".into(), 1)); c.push(("minecraft:diamond".into(), 1)); }
+        "yog-vlsi:analog_cable" => { c.push(("minecraft:redstone".into(), 1)); }
+        "yog-vlsi:digital_cable" => { c.push(("minecraft:gold_nugget".into(), 4)); c.push(("minecraft:redstone".into(), 4)); c.push(("minecraft:iron_ingot".into(), 1)); }
+        "yog-vlsi:redstone_port" => { c.push(("minecraft:smooth_stone".into(), 8)); c.push(("minecraft:redstone".into(), 1)); }
+        // Default: 1 stone
+        _ => { c.push(("minecraft:stone".into(), 1)); }
     }
     c
 }

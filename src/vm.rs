@@ -421,12 +421,16 @@ impl RedstoneVM {
             BlockType::Repeater { .. } => {
                 self.update_repeater_at(x, y, z);
             }
+            BlockType::Comparator { .. } => {
+                self.update_comparator_at(x, y, z);
+            }
             BlockType::Observer { .. } => {
-                // Observer pulse: 2 tick output then off
+                // Observer emits 15 for 1 tick, then drops to 0
                 let cell = &mut self.grid[i];
                 if let BlockType::Observer { powered, .. } = &mut cell.block {
                     *powered = false;
                     cell.power = 0;
+                    cell.strongly_powered = false;
                 }
             }
             _ => {}
@@ -628,6 +632,77 @@ impl RedstoneVM {
         }
         if y > 0 { self.schedule_update(x, y - 1, z); }
         if (y as u32) + 1 < self.height { self.schedule_update(x, y + 1, z); }
+    }
+
+    fn update_comparator_at(&mut self, x: u32, y: u32, z: u32) {
+        let w = self.width;
+        let i = Self::idx_static(x, y, z, w);
+
+        let (mode, facing) = match self.grid[i].block {
+            BlockType::Comparator { mode, facing } => (mode, facing),
+            _ => return,
+        };
+
+        // Read input from back (opposite of facing)
+        let (bx, bz) = facing.opposite().horizontal_offset();
+        let bx = x as i32 + bx;
+        let bz = z as i32 + bz;
+        let back_power = if self.in_bounds(bx, y as i32, bz) {
+            let bi = Self::idx_static(bx as u32, y, bz as u32, w);
+            self.grid[bi].power
+        } else { 0 };
+
+        // Read side inputs (left and right of facing)
+        let perp1 = match facing {
+            Facing::North | Facing::South => (Facing::East, Facing::West),
+            Facing::East | Facing::West => (Facing::North, Facing::South),
+            _ => (Facing::North, Facing::South),
+        };
+        let side1_power = {
+            let (sx, sz) = perp1.0.horizontal_offset();
+            let sx = x as i32 + sx; let sz = z as i32 + sz;
+            if self.in_bounds(sx, y as i32, sz) {
+                let si = Self::idx_static(sx as u32, y, sz as u32, w);
+                self.grid[si].power.max(if self.grid[si].strongly_powered { 15 } else { 0 })
+            } else { 0 }
+        };
+        let side2_power = {
+            let (sx, sz) = perp1.1.horizontal_offset();
+            let sx = x as i32 + sx; let sz = z as i32 + sz;
+            if self.in_bounds(sx, y as i32, sz) {
+                let si = Self::idx_static(sx as u32, y, sz as u32, w);
+                self.grid[si].power.max(if self.grid[si].strongly_powered { 15 } else { 0 })
+            } else { 0 }
+        };
+        let max_side = side1_power.max(side2_power);
+
+        let output = match mode {
+            ComparatorMode::Compare => {
+                if back_power >= max_side { back_power } else { 0 }
+            }
+            ComparatorMode::Subtract => {
+                back_power.saturating_sub(max_side)
+            }
+        };
+
+        let cell = &mut self.grid[i];
+        cell.power = output;
+        cell.strongly_powered = output > 0;
+
+        // Power the block in front
+        let (fx, fz) = facing.horizontal_offset();
+        let fx = x as i32 + fx;
+        let fz = z as i32 + fz;
+        if self.in_bounds(fx, y as i32, fz) {
+            let fi = Self::idx_static(fx as u32, y, fz as u32, w);
+            if self.grid[fi].is_solid() {
+                self.grid[fi].strongly_powered = output > 0;
+            }
+            // Also propagate to wire in front
+            if matches!(self.grid[fi].block, BlockType::RedstoneWire) {
+                self.grid[fi].power = self.grid[fi].power.max(output);
+            }
+        }
     }
 
     fn update_repeater_at(&mut self, x: u32, y: u32, z: u32) {
