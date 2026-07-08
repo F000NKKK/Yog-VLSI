@@ -195,7 +195,7 @@ pub fn register(registry: &mut Registry) {
         let tier = match parse_tier(ctx.arg_str(2).unwrap_or("")) {
             Some(t) => t, None => return Some("§cUsage: /vlsi fabricate <design_name> <tier>".into()),
         };
-        Some(do_fabricate(srv, &ctx.source, design_name, tier))
+        Some(do_fabricate(srv, &ctx.source, &ctx.uuid, design_name, tier))
     });
 
     // ── /vlsi blueprint export <design_name> ───────────────────────────────
@@ -215,7 +215,7 @@ pub fn register(registry: &mut Registry) {
             Some(m) => m, None => return Some("§cNo VLSI chip data.".into()),
         };
         // Install into ALU at player position (simplified: nearest ALU)
-        let pos = match Player::new(srv, &ctx.source).position() {
+        let pos = match Player::with_uuid(srv, &ctx.source, &ctx.uuid).position() {
             Some((x, y, z)) => ((x - 1.0) as i32, y as i32, (z - 1.0) as i32),
             None => return Some("§cCannot determine position.".into()),
         };
@@ -234,7 +234,7 @@ pub fn register(registry: &mut Registry) {
     // ── /vlsi alu list ─────────────────────────────────────────────────────
     registry.on_typed_command("vlsi", "word word", |ctx, srv| {
         if ctx.arg_str(0).unwrap_or("") != "alu" || ctx.arg_str(1).unwrap_or("") != "list" { return None; }
-        let pos = match Player::new(srv, &ctx.source).position() {
+        let pos = match Player::with_uuid(srv, &ctx.source, &ctx.uuid).position() {
             Some((x, y, z)) => ((x - 1.0) as i32, y as i32, (z - 1.0) as i32),
             None => return Some("§cCannot determine position.".into()),
         };
@@ -252,7 +252,7 @@ pub fn register(registry: &mut Registry) {
 
 // ── Fabrication / Blueprint export (shared by commands and GUI network actions) ─
 
-pub fn do_fabricate(srv: &dyn yog_api::Server, player_name: &str, design_name: &str, tier: Tier) -> String {
+pub fn do_fabricate(srv: &dyn yog_api::Server, player_name: &str, player_uuid: &str, design_name: &str, tier: Tier) -> String {
     let game_dir = srv.game_dir();
     let list = designs::list_designs(&game_dir, player_name);
     let design = match list.iter().find(|d| d.name == design_name) {
@@ -267,7 +267,7 @@ pub fn do_fabricate(srv: &dyn yog_api::Server, player_name: &str, design_name: &
     let cost = calculate_cost(&entry.circuit.blocks);
 
     // Try to consume resources from a workbench the player has previously fed.
-    let pos = match Player::with_uuid(srv, player_name, "").position() {
+    let pos = match Player::with_uuid(srv, player_name, player_uuid).position() {
         Some((px, py, pz)) => {
             let mut found = None;
             'search: for dx in -3..=3i32 {
