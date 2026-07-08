@@ -10,3 +10,39 @@ license     = "AGPL-3.0-only"
 serde      = { version = "*", features = ["derive"] }
 serde_json = "*"
 uuid       = { version = "*", features = ["v4"] }
+
+[run.fabric_1_21_1]
+export_dir = "~/Projects/Yog-Mod-Loader/fabric/run/yog-mods"
+command    = "java"
+args       = ["-jar", "server.jar", "--nogui"]
+cwd        = "../my-instance"
+
+[run.forge_1_21_1]
+export_dir = "~/Projects/Yog-Mod-Loader/fabric/run/yog-mods"
+command    = "java"
+args       = ["-jar", "server.jar", "--nogui"]
+cwd        = "../my-instance"
+
+[run.neoforge_1_21_1]
+export_dir = "~/Projects/Yog-Mod-Loader/fabric/run/yog-mods"
+command    = "java"
+args       = ["-jar", "server.jar", "--nogui"]
+cwd        = "../my-instance"
+
+[run.fabric_1_20_1]
+export_dir = "~/Projects/Yog-Mod-Loader/fabric/run/yog-mods"
+command    = "java"
+args       = ["-jar", "server.jar", "--nogui"]
+cwd        = "../my-instance"
+
+[run.forge_1_20_1]
+export_dir = "~/Projects/Yog-Mod-Loader/fabric/run/yog-mods"
+command    = "java"
+args       = ["-jar", "server.jar", "--nogui"]
+cwd        = "../my-instance"
+
+[run.neoforge_1_20_1]
+export_dir = "~/Projects/Yog-Mod-Loader/fabric/run/yog-mods"
+command    = "java"
+args       = ["-jar", "server.jar", "--nogui"]
+cwd        = "../my-instance"
