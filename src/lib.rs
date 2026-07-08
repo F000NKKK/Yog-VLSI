@@ -3,10 +3,11 @@
 //! Design, fabricate, and deploy redstone microchips with a Rust-accelerated
 //! simulation VM. Multi-tier workbench, ALU block, and chip-to-chip linking.
 
-mod chip;
-mod workbench;
 mod alu;
+mod chip;
+mod commands;
 mod vm;
+mod workbench;
 
 use yog_api::{info, Mod, Registry};
 
@@ -16,14 +17,23 @@ impl Mod for YogVlsi {
     fn register(registry: &mut Registry) {
         info!("[yog-vlsi] initializing VLSI microchip system...");
 
+        // Register blocks, items, and recipes.
         workbench::register(registry);
         alu::register(registry);
         chip::register(registry);
 
+        // Register debug/utility commands.
+        commands::register(registry);
+
+        // ALU tick handler: step all installed chip VMs.
+        registry.on_tick(|srv| {
+            alu::tick_all(srv);
+        });
+
         // TODO: chip editing UI via register_ui + on_ui_render
-        // TODO: Rust redstone VM startup
-        // TODO: server-side chip storage (Storage::open_player)
-        // TODO: ALU node graph linking
+        // TODO: workbench GUI (resource ammo, design/fabricate buttons)
+        // TODO: virtual world editing mode
+        // TODO: ALU node graph linking GUI
 
         info!("[yog-vlsi] ready.");
     }
