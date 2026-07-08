@@ -95,9 +95,10 @@ pub fn register(registry: &mut Registry) {
                 if let Some(nbt) = &held_nbt {
                     // Import Blueprint into library
                     if let Some(circuit) = extract_blueprint_circuit(nbt) {
+                        let tier = tier_from_size(circuit.width);
                         let design_id = designs::import_design(
                             &game_dir, &e.uuid.to_string(),
-                            "Imported Design", circuit.width.min(circuit.height).into(), // rough tier guess
+                            "Imported Design", tier,
                             circuit.ports.clone(), circuit,
                         );
                         srv.broadcast(&format!(
@@ -202,5 +203,17 @@ fn extract_blueprint_circuit(nbt: &str) -> Option<CircuitData> {
         CircuitData::from_json(json)
     } else {
         None
+    }
+}
+
+/// Infer chip tier from world size.
+fn tier_from_size(size: u32) -> Tier {
+    match size {
+        16 => Tier::Wood,
+        32 => Tier::Stone,
+        64 => Tier::Gold, // also Iron — but same size, default to Gold
+        128 => Tier::Diamond,
+        256 => Tier::Netherite,
+        _ => Tier::Wood,
     }
 }
