@@ -226,7 +226,7 @@ pub fn register(registry: &mut Registry) {
     });
 
     // ── /vlsi designs create <name> <tier> ─────────────────────────────────
-    registry.on_typed_command("vlsi", "word word word", |ctx, srv| {
+    registry.on_typed_command("vlsi", "word word word word", |ctx, srv| {
         if ctx.arg_str(0).unwrap_or("") != "designs" || ctx.arg_str(1).unwrap_or("") != "create" { return None; }
         let name = ctx.arg_str(2).unwrap_or("Unnamed");
         let tier = match parse_tier(ctx.arg_str(3).unwrap_or("")) {

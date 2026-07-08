@@ -58,7 +58,15 @@ pub fn list_designs(game_dir: &str, player_name: &str) -> Vec<DesignMeta> {
     let json = store.get(&designs_index_key())
         .and_then(|v| v.as_str())
         .map(String::from);
-    json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
+    json.and_then(|j| {
+        match serde_json::from_str(&j) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                yog_api::warn!("[yog-vlsi] failed to parse designs_index JSON: {e}");
+                None
+            }
+        }
+    }).unwrap_or_default()
 }
 
 /// Save the design index.
@@ -94,7 +102,16 @@ pub fn load_design(game_dir: &str, player_name: &str, design_id: &str) -> Option
     let json = store.get(&design_circuit_key(design_id))
         .and_then(|v| v.as_str())
         .map(String::from);
-    let circuit = json.and_then(|j| CircuitData::from_json(&j))?;
+    let circuit = json
+        .and_then(|j| {
+            match CircuitData::from_json(&j) {
+                Some(c) => Some(c),
+                None => {
+                    yog_api::warn!("[yog-vlsi] failed to parse circuit JSON for design {design_id}");
+                    None
+                }
+            }
+        })?;
 
     Some(DesignEntry { meta, circuit })
 }
