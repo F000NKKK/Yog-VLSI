@@ -7,5 +7,6 @@ authors     = ["F000NK", "Yog Team"]
 license     = "AGPL-3.0-only"
 
 [dependencies]
-serde      = "*"
+serde      = { version = "*", features = ["derive"] }
 serde_json = "*"
+uuid       = { version = "*", features = ["v4"] }
