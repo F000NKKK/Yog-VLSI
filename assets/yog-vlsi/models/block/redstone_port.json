@@ -1,5 +1,6 @@
 {
   "textures": {
+    "particle": "yog-vlsi:block/redstone_port",
     "all": "yog-vlsi:block/redstone_port"
   },
   "elements": [
