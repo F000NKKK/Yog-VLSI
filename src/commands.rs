@@ -34,6 +34,10 @@ pub static VM_CACHE: LazyLock<Mutex<HashMap<String, RedstoneVM>>> =
 
 // ── Tier helper ──────────────────────────────────────────────────────────────
 
+pub fn parse_tier_pub(s: &str) -> Option<Tier> {
+    parse_tier(s)
+}
+
 fn parse_tier(s: &str) -> Option<Tier> {
     match s.to_lowercase().as_str() {
         "wood" => Some(Tier::Wood),
@@ -191,117 +195,14 @@ pub fn register(registry: &mut Registry) {
         let tier = match parse_tier(ctx.arg_str(2).unwrap_or("")) {
             Some(t) => t, None => return Some("§cUsage: /vlsi fabricate <design_name> <tier>".into()),
         };
-        let game_dir = srv.game_dir();
-        let list = designs::list_designs(&game_dir, &ctx.source);
-        let design = match list.iter().find(|d| d.name == design_name) {
-            Some(d) => d.clone(),
-            None => return Some(format!("§cDesign '{}' not found.", design_name)),
-        };
-        let entry = match designs::load_design(&game_dir, &ctx.source, &design.id) {
-            Some(e) => e,
-            None => return Some("§cFailed to load design data.".into()),
-        };
-
-        // Calculate resource cost
-        let cost = calculate_cost(&entry.circuit.blocks);
-        
-        // Try to consume resources from nearest workbench
-        let pos = match Player::new(srv, &ctx.source).position() {
-            Some((px, py, pz)) => {
-                // Search for nearby workbench (within 3 blocks)
-                let mut found = None;
-                for dx in -3..=3i32 {
-                    for dy in -3..=3i32 {
-                        for dz in -3..=3i32 {
-                            let key = ((px as i32) + dx, (py as i32) + dy, (pz as i32) + dz);
-                            let res = RESOURCES.lock().unwrap();
-                            if res.contains_key(&key) {
-                                found = Some(key);
-                                break;
-                            }
-                        }
-                        if found.is_some() { break; }
-                    }
-                    if found.is_some() { break; }
-                }
-                found
-            }
-            None => None,
-        };
-
-        // Consume resources if workbench found
-        if let Some(wb_key) = pos {
-            let mut resources = RESOURCES.lock().unwrap();
-            let wb_res = resources.entry(wb_key).or_default();
-            let mut sufficient = true;
-            for (item, qty) in &cost {
-                let have = wb_res.get(item).copied().unwrap_or(0);
-                if have < *qty { sufficient = false; break; }
-            }
-            if !sufficient {
-                let missing: Vec<String> = cost.iter()
-                    .filter_map(|(item, qty)| {
-                        let have = wb_res.get(item).copied().unwrap_or(0);
-                        if have < *qty { Some(format!("{}: need {} have {}", item, qty, have)) }
-                        else { None }
-                    })
-                    .collect();
-                return Some(format!("§cInsufficient resources in workbench:\n{}", missing.join("\n")));
-            }
-            for (item, qty) in &cost {
-                let have = wb_res.get_mut(item).unwrap();
-                *have = have.saturating_sub(*qty);
-            }
-        }
-
-        let cost_str: Vec<String> = cost.iter()
-            .map(|(item, qty)| format!("{}: {}", item, qty))
-            .collect();
-
-        // Create the chip
-        let meta = ChipMeta {
-            id: crate::chip::new_chip_id(),
-            tier,
-            name: design_name.to_string(),
-            ports: entry.circuit.ports.clone(),
-        };
-        save_circuit(srv, &entry.circuit);
-
-        let item_id = format!("yog-vlsi:chip_{}", tier.id());
-        Player::new(srv, &ctx.source).give(&item_id, 1);
-        let _ = srv.set_held_item_nbt(&ctx.source, &meta.to_nbt());
-
-        Some(format!(
-            "§aFabricated '{}' ({} tier, {} ports).\n§7Cost: {}",
-            meta.name, tier.name(), meta.ports.len(),
-            if cost_str.is_empty() { "free (empty design)".into() } else { cost_str.join(", ") }
-        ))
+        Some(do_fabricate(srv, &ctx.source, design_name, tier))
     });
 
     // ── /vlsi blueprint export <design_name> ───────────────────────────────
     registry.on_typed_command("vlsi", "word word word", |ctx, srv| {
         if ctx.arg_str(0).unwrap_or("") != "blueprint" || ctx.arg_str(1).unwrap_or("") != "export" { return None; }
         let design_name = ctx.arg_str(2).unwrap_or("");
-        let game_dir = srv.game_dir();
-        let list = designs::list_designs(&game_dir, &ctx.source);
-        let design = match list.iter().find(|d| d.name == design_name) {
-            Some(d) => d.clone(),
-            None => return Some(format!("§cDesign '{}' not found.", design_name)),
-        };
-        let entry = match designs::load_design(&game_dir, &ctx.source, &design.id) {
-            Some(e) => e,
-            None => return Some("§cFailed to load design data.".into()),
-        };
-
-        // Create Blueprint with CircuitData in NBT
-        let circuit_json = entry.circuit.to_json();
-        let escaped = circuit_json.replace('\\', "\\\\").replace('"', "\\\"");
-        let nbt = format!("{{YogVlsiBlueprint: \"{}\"}}", escaped);
-
-        Player::new(srv, &ctx.source).give(BLUEPRINT_ID, 1);
-        let _ = srv.set_held_item_nbt(&ctx.source, &nbt);
-        Some(format!("§aBlueprint exported: '{}' ({} blocks, {} ports).",
-            design_name, entry.circuit.blocks.len(), entry.circuit.ports.len()))
+        Some(do_export_blueprint(srv, &ctx.source, design_name))
     });
 
     // ── /vlsi alu install ──────────────────────────────────────────────────
@@ -347,6 +248,103 @@ pub fn register(registry: &mut Registry) {
             Some("§7No chips in nearby ALU.".into())
         }
     });
+}
+
+// ── Fabrication / Blueprint export (shared by commands and GUI network actions) ─
+
+pub fn do_fabricate(srv: &dyn yog_api::Server, player_name: &str, design_name: &str, tier: Tier) -> String {
+    let game_dir = srv.game_dir();
+    let list = designs::list_designs(&game_dir, player_name);
+    let design = match list.iter().find(|d| d.name == design_name) {
+        Some(d) => d.clone(),
+        None => return format!("§cDesign '{}' not found.", design_name),
+    };
+    let entry = match designs::load_design(&game_dir, player_name, &design.id) {
+        Some(e) => e,
+        None => return "§cFailed to load design data.".into(),
+    };
+
+    let cost = calculate_cost(&entry.circuit.blocks);
+
+    // Try to consume resources from a workbench the player has previously fed.
+    let pos = match Player::with_uuid(srv, player_name, "").position() {
+        Some((px, py, pz)) => {
+            let mut found = None;
+            'search: for dx in -3..=3i32 {
+                for dy in -3..=3i32 {
+                    for dz in -3..=3i32 {
+                        let key = ((px as i32) + dx, (py as i32) + dy, (pz as i32) + dz);
+                        if RESOURCES.lock().unwrap().contains_key(&key) {
+                            found = Some(key);
+                            break 'search;
+                        }
+                    }
+                }
+            }
+            found
+        }
+        None => None,
+    };
+
+    if let Some(wb_key) = pos {
+        let mut resources = RESOURCES.lock().unwrap();
+        let wb_res = resources.entry(wb_key).or_default();
+        let missing: Vec<String> = cost.iter()
+            .filter_map(|(item, qty)| {
+                let have = wb_res.get(item).copied().unwrap_or(0);
+                if have < *qty { Some(format!("{}: need {} have {}", item, qty, have)) } else { None }
+            })
+            .collect();
+        if !missing.is_empty() {
+            return format!("§cInsufficient resources in workbench:\n{}", missing.join("\n"));
+        }
+        for (item, qty) in &cost {
+            let have = wb_res.get_mut(item).unwrap();
+            *have = have.saturating_sub(*qty);
+        }
+    }
+
+    let cost_str: Vec<String> = cost.iter().map(|(item, qty)| format!("{}: {}", item, qty)).collect();
+
+    let meta = ChipMeta {
+        id: crate::chip::new_chip_id(),
+        tier,
+        name: design_name.to_string(),
+        ports: entry.circuit.ports.clone(),
+    };
+    save_circuit(srv, &entry.circuit);
+
+    let item_id = format!("yog-vlsi:chip_{}", tier.id());
+    Player::new(srv, player_name).give(&item_id, 1);
+    let _ = srv.set_held_item_nbt(player_name, &meta.to_nbt());
+
+    format!(
+        "§aFabricated '{}' ({} tier, {} ports).\n§7Cost: {}",
+        meta.name, tier.name(), meta.ports.len(),
+        if cost_str.is_empty() { "free (empty design)".into() } else { cost_str.join(", ") }
+    )
+}
+
+pub fn do_export_blueprint(srv: &dyn yog_api::Server, player_name: &str, design_name: &str) -> String {
+    let game_dir = srv.game_dir();
+    let list = designs::list_designs(&game_dir, player_name);
+    let design = match list.iter().find(|d| d.name == design_name) {
+        Some(d) => d.clone(),
+        None => return format!("§cDesign '{}' not found.", design_name),
+    };
+    let entry = match designs::load_design(&game_dir, player_name, &design.id) {
+        Some(e) => e,
+        None => return "§cFailed to load design data.".into(),
+    };
+
+    let circuit_json = entry.circuit.to_json();
+    let escaped = circuit_json.replace('\\', "\\\\").replace('"', "\\\"");
+    let nbt = format!("{{YogVlsiBlueprint: \"{}\"}}", escaped);
+
+    Player::new(srv, player_name).give(BLUEPRINT_ID, 1);
+    let _ = srv.set_held_item_nbt(player_name, &nbt);
+    format!("§aBlueprint exported: '{}' ({} blocks, {} ports).",
+        design_name, entry.circuit.blocks.len(), entry.circuit.ports.len())
 }
 
 // ── Test chip factory ──────────────────────────────────────────────────────
