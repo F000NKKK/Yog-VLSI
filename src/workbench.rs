@@ -233,7 +233,7 @@ pub fn register(registry: &mut Registry) {
 
         // No special item — open workbench GUI
         crate::workbench_ui::set_player(&game_dir, &player_name);
-        yog_api::open_ui("yog-vlsi:workbench", true, false);
+        crate::network::open_ui_for(srv, &player_name, "yog-vlsi:workbench");
 
         false
     });

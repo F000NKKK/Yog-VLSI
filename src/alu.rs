@@ -62,11 +62,11 @@ pub fn register(registry: &mut Registry) {
     }
 
     // Right-click any ALU tier → open the node editor.
-    registry.on_use_block(|e, phase, _srv| -> bool {
+    registry.on_use_block(|e, phase, srv| -> bool {
         if phase != yog_api::EventPhase::Pre { return true; }
         if !is_alu_block(&e.block_id) { return true; }
         crate::alu_ui::set_alu_pos((e.pos.x, e.pos.y, e.pos.z));
-        yog_api::open_ui("yog-vlsi:alu", true, false);
+        crate::network::open_ui_for(srv, &e.player_name, "yog-vlsi:alu");
         false
     });
 }

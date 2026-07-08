@@ -13,6 +13,7 @@ use yog_api::{Registry, Server};
 
 pub const WORKBENCH_CHANNEL: &str = "yog-vlsi:wb_action";
 pub const ALU_CHANNEL: &str = "yog-vlsi:alu_action";
+pub const OPEN_UI_CHANNEL: &str = "yog-vlsi:open_ui";
 
 const SEP: char = '\u{1f}';
 
@@ -39,11 +40,26 @@ pub fn request_chip_list() {
     send_alu_action(&["list_chips"]);
 }
 
+/// Ask a specific player's client to open a Yog UI. Call from server-side
+/// code (e.g. an `on_use_block` handler): `yog_api::open_ui()` only actually
+/// opens a screen when called from client-side code — the loader invokes
+/// `on_use_block`/`on_use_item` server-side only, so calling it directly from
+/// those handlers silently no-ops. This bridges the gap with a packet the
+/// client immediately turns back into a real `open_ui()` call.
+pub fn open_ui_for(srv: &dyn yog_api::Server, player_name: &str, ui_id: &str) {
+    srv.send_to_player(player_name, OPEN_UI_CHANNEL, ui_id.as_bytes());
+}
+
 fn split(payload: &[u8]) -> Vec<String> {
     String::from_utf8_lossy(payload).split(SEP).map(str::to_owned).collect()
 }
 
 pub fn register(registry: &mut Registry) {
+    registry.on_client_packet(OPEN_UI_CHANNEL, |ev, _srv| {
+        let ui_id = String::from_utf8_lossy(&ev.payload).into_owned();
+        yog_api::open_ui(&ui_id, true, false);
+    });
+
     registry.on_packet(WORKBENCH_CHANNEL, |ev, srv| {
         let parts = split(&ev.payload);
         let player = ev.player.clone();
