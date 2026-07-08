@@ -147,7 +147,7 @@ pub fn render(gfx: &GfxContext) {
     let mut hit_rects = Vec::new();
 
     if *SHOW_SELECTOR.lock().unwrap() {
-        render_chip_selector(d2d, px, py, pw, ph, &mut hit_rects);
+        render_chip_selector(&d2d, px, py, pw, ph, &mut hit_rects);
         *HIT_RECTS.lock().unwrap() = hit_rects;
         return;
     }

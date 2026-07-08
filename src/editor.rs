@@ -27,7 +27,7 @@ fn player_pos(srv: &dyn yog_api::Server, name: &str, uuid: &str) -> (f64, f64, f
     Player::with_uuid(srv, name, uuid).position().unwrap_or((BASE_X as f64, 64.0, BASE_Z as f64))
 }
 
-use crate::chip::{CircuitBlock, CircuitData, Port, PortDir, PortSide};
+use crate::chip::{CircuitBlock, CircuitData, Port, PortSide};
 use crate::designs::{self, DesignEntry, DesignMeta};
 use crate::port;
 use crate::vm::Tier;

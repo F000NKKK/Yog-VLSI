@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use yog_api::GfxContext;
+use yog_api::{GfxContext, Server};
 
 use crate::designs::{list_designs, load_design, DesignMeta};
 use crate::network;

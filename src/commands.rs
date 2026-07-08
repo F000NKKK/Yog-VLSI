@@ -21,7 +21,8 @@ use yog_api::{Registry, Storage};
 
 use crate::chip::{ChipMeta, CircuitBlock, CircuitData, Port, PortDir, PortSide};
 use crate::designs;
-use crate::vm::{BlockType, ComparatorMode, Facing, PortMode, RedstoneVM, Tier};
+use crate::port;
+use crate::vm::{BlockType, ComparatorMode, Facing, PortMode, RedstoneVM, ShulkerColor, Tier};
 use crate::workbench::{BLUEPRINT_ID, RESOURCES};
 
 /// In-memory ALU state: (x, y, z) → list of (chip_id, tier)
@@ -576,21 +577,57 @@ pub fn parse_block_type(block_id: &str, state_json: &str) -> BlockType {
         "minecraft:sticky_piston" => BlockType::StickyPiston { extended: state_json.contains("\"extended\":\"true\""), facing: facing() },
         "minecraft:chest" => BlockType::Chest,
         "minecraft:trapped_chest" => BlockType::TrappedChest,
+        "minecraft:ender_chest" => BlockType::EnderChest,
         "minecraft:barrel" => BlockType::Barrel,
         "minecraft:hopper" => BlockType::Hopper { facing: facing(), enabled: !state_json.contains("\"enabled\":\"false\"") },
         "minecraft:dropper" => BlockType::Dropper { facing: facing(), triggered: state_json.contains("\"triggered\":\"true\"") },
         "minecraft:dispenser" => BlockType::Dispenser { facing: facing(), triggered: state_json.contains("\"triggered\":\"true\"") },
+        "minecraft:furnace" => BlockType::Furnace { lit: state_json.contains("\"lit\":\"true\"") },
+        "minecraft:blast_furnace" => BlockType::BlastFurnace { lit: state_json.contains("\"lit\":\"true\"") },
+        "minecraft:smoker" => BlockType::Smoker { lit: state_json.contains("\"lit\":\"true\"") },
+        "minecraft:brewing_stand" => BlockType::BrewingStand,
+        "minecraft:white_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::White) },
+        "minecraft:orange_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Orange) },
+        "minecraft:magenta_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Magenta) },
+        "minecraft:light_blue_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::LightBlue) },
+        "minecraft:yellow_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Yellow) },
+        "minecraft:lime_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Lime) },
+        "minecraft:pink_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Pink) },
+        "minecraft:gray_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Gray) },
+        "minecraft:light_gray_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::LightGray) },
+        "minecraft:cyan_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Cyan) },
+        "minecraft:purple_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Purple) },
+        "minecraft:blue_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Blue) },
+        "minecraft:brown_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Brown) },
+        "minecraft:green_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Green) },
+        "minecraft:red_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Red) },
+        "minecraft:black_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Black) },
+        "minecraft:shulker_box" => BlockType::ShulkerBox { color: None },
         "minecraft:slime_block" => BlockType::SlimeBlock,
         "minecraft:honey_block" => BlockType::HoneyBlock,
         "minecraft:tnt" => BlockType::Tnt { unstable: state_json.contains("\"unstable\":\"true\"") },
+        "minecraft:rail" => BlockType::Rail,
         "minecraft:powered_rail" => BlockType::PoweredRail { powered: state_json.contains("\"powered\":\"true\"") },
         "minecraft:detector_rail" => BlockType::DetectorRail { powered: state_json.contains("\"powered\":\"true\"") },
-        "yog-vlsi:port" => {
-            let mode = if state_json.contains("\"mode\":\"input\"") { PortMode::Input }
-            else if state_json.contains("\"mode\":\"output\"") { PortMode::Output }
-            else { PortMode::Bidirectional };
-            BlockType::Port(mode)
-        }
+        "minecraft:activator_rail" => BlockType::ActivatorRail { powered: state_json.contains("\"powered\":\"true\"") },
+        "minecraft:iron_door" => BlockType::IronDoor { open: state_json.contains("\"open\":\"true\""), facing: facing(), half: door_half(state_json) },
+        "minecraft:oak_door" => BlockType::WoodDoor { open: state_json.contains("\"open\":\"true\""), facing: facing(), half: door_half(state_json) },
+        "minecraft:iron_trapdoor" => BlockType::IronTrapdoor { open: state_json.contains("\"open\":\"true\""), facing: facing(), half: door_half(state_json) },
+        "minecraft:oak_trapdoor" => BlockType::WoodTrapdoor { open: state_json.contains("\"open\":\"true\""), facing: facing(), half: door_half(state_json) },
+        "minecraft:oak_fence_gate" => BlockType::FenceGate { open: state_json.contains("\"open\":\"true\""), facing: facing() },
+        "minecraft:oak_button" => BlockType::WoodButton { pressed: state_json.contains("\"powered\":\"true\""), facing: facing() },
+        "minecraft:stone_pressure_plate" => BlockType::StonePressurePlate { pressed: state_json.contains("\"powered\":\"true\"") },
+        "minecraft:oak_pressure_plate" => BlockType::WoodPressurePlate { pressed: state_json.contains("\"powered\":\"true\"") },
+        "minecraft:light_weighted_pressure_plate" => BlockType::LightWeightedPressurePlate { power: 0 },
+        "minecraft:heavy_weighted_pressure_plate" => BlockType::HeavyWeightedPressurePlate { power: 0 },
+        "minecraft:glass" => BlockType::Glass,
+        port::PORT_INPUT => BlockType::Port(PortMode::Input),
+        port::PORT_OUTPUT => BlockType::Port(PortMode::Output),
+        port::PORT_BIDI => BlockType::Port(PortMode::Bidirectional),
         _ => BlockType::Solid,
     }
+}
+
+fn door_half(state_json: &str) -> crate::vm::DoorHalf {
+    if state_json.contains("\"half\":\"upper\"") { crate::vm::DoorHalf::Upper } else { crate::vm::DoorHalf::Lower }
 }

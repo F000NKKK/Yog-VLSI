@@ -9,7 +9,7 @@
 //! Payload format is a plain `\x1f`-separated string (consistent with the
 //! rest of this mod's preference for simple text over a binary codec).
 
-use yog_api::Registry;
+use yog_api::{Registry, Server};
 
 pub const WORKBENCH_CHANNEL: &str = "yog-vlsi:wb_action";
 pub const ALU_CHANNEL: &str = "yog-vlsi:alu_action";
