@@ -504,9 +504,11 @@ fn block_cost(block: &CircuitBlock) -> Vec<(String, u64)> {
         "minecraft:glowstone" => { c.push(("minecraft:glowstone_dust".into(), 4)); }
         "minecraft:sea_lantern" => { c.push(("minecraft:prismarine_shard".into(), 4)); c.push(("minecraft:prismarine_crystals".into(), 5)); }
         // VLSI blocks
-        "yog-vlsi:port" => { c.push(("minecraft:redstone".into(), 2)); c.push(("minecraft:stone".into(), 4)); }
+        "yog-vlsi:port_input" | "yog-vlsi:port_output" | "yog-vlsi:port_bidi" =>
+            { c.push(("minecraft:redstone".into(), 2)); c.push(("minecraft:stone".into(), 4)); }
         "yog-vlsi:vlsi_workbench" => { c.push(("minecraft:iron_ingot".into(), 4)); c.push(("minecraft:smooth_stone".into(), 3)); c.push(("minecraft:redstone_block".into(), 1)); }
-        "yog-vlsi:alu" => { c.push(("minecraft:gold_ingot".into(), 4)); c.push(("minecraft:copper_ingot".into(), 2)); c.push(("minecraft:repeater".into(), 1)); c.push(("minecraft:diamond".into(), 1)); }
+        id if id.starts_with("yog-vlsi:alu_") =>
+            { c.push(("minecraft:gold_ingot".into(), 4)); c.push(("minecraft:copper_ingot".into(), 2)); c.push(("minecraft:repeater".into(), 1)); c.push(("minecraft:diamond".into(), 1)); }
         "yog-vlsi:analog_cable" => { c.push(("minecraft:redstone".into(), 1)); }
         "yog-vlsi:digital_cable" => { c.push(("minecraft:gold_nugget".into(), 4)); c.push(("minecraft:redstone".into(), 4)); c.push(("minecraft:iron_ingot".into(), 1)); }
         "yog-vlsi:redstone_port" => { c.push(("minecraft:smooth_stone".into(), 8)); c.push(("minecraft:redstone".into(), 1)); }

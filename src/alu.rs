@@ -12,38 +12,54 @@ use crate::commands::{ALU_STATE, CHIP_PORTS, EXT_VALUES, LINKS, VM_CACHE};
 /// faster than Wood (5/s → 1 step every 4 ticks), per DESIGN.md §4.7.
 static STEP_ACCUM: LazyLock<Mutex<HashMap<String, f32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub const ALU_ID: &str = "yog-vlsi:alu";
 pub const EXT_SIDES: [&str; 6] = ["N", "S", "E", "W", "U", "D"];
 
+/// Block/item id for a given ALU tier (each tier is its own real, placeable
+/// block — there is no separate generic "yog-vlsi:alu" block).
+pub fn alu_id(tier: crate::vm::Tier) -> String {
+    format!("yog-vlsi:alu_{}", tier.id())
+}
+
+pub fn is_alu_block(block_id: &str) -> bool {
+    crate::vm::Tier::ALL.iter().any(|t| alu_id(*t) == block_id)
+}
+
 pub fn register(registry: &mut Registry) {
-    registry.register_block(BlockDef::new(ALU_ID).strength(5.0,12.0).sound("metal").requires_tool().light_level(7));
-    registry.register_item(ItemDef::new(ALU_ID).name("Arithmetic Logic Unit").tooltip("Insert programmed microchips. Right-click to open node editor."));
-
-    registry.add_shaped_recipe(
-        yog_api::ShapedRecipe::new("yog-vlsi:alu_craft", ALU_ID, 1)
-            .row("GCG").row("CRC").row("GDG")
-            .key('G',"minecraft:gold_ingot").key('C',"minecraft:copper_ingot")
-            .key('R',"minecraft:repeater").key('D',"minecraft:diamond")
-    );
-
-    // ALU tier items (6 tiers, same block, different NBT)
     for tier in crate::vm::Tier::ALL {
-        let tier_id = format!("yog-vlsi:alu_{}", tier.id());
+        let id = alu_id(*tier);
         let (max_chips, channels) = match tier {
             crate::vm::Tier::Wood => (2, 8), crate::vm::Tier::Stone => (3, 16),
             crate::vm::Tier::Gold => (4, 24), crate::vm::Tier::Iron => (5, 32),
             crate::vm::Tier::Diamond => (6, 48), crate::vm::Tier::Netherite => (8, 64),
         };
-        registry.register_item(ItemDef::new(&tier_id)
-            .name(&format!("{} ALU", tier.name()))
-            .tooltip(&format!("Max chips: {} | Digital channels/side: {}", max_chips, channels))
-            .max_stack(1));
+
+        registry.register_block(BlockDef::new(&id).strength(5.0, 12.0).sound("metal").requires_tool().light_level(7));
+        registry.register_item(
+            ItemDef::new(&id)
+                .name(&format!("{} ALU", tier.name()))
+                .tooltip(&format!("§7Insert programmed microchips. Right-click to open the node editor.\n§7Max chips: {} | Digital channels/side: {}", max_chips, channels))
+        );
+
+        let (corner, center) = match tier {
+            crate::vm::Tier::Wood      => ("minecraft:oak_planks", "minecraft:redstone_block"),
+            crate::vm::Tier::Stone     => ("minecraft:cobblestone", "minecraft:redstone_block"),
+            crate::vm::Tier::Gold      => ("minecraft:gold_ingot", "minecraft:diamond"),
+            crate::vm::Tier::Iron      => ("minecraft:iron_ingot", "minecraft:diamond"),
+            crate::vm::Tier::Diamond   => ("minecraft:diamond", "minecraft:diamond_block"),
+            crate::vm::Tier::Netherite => ("minecraft:netherite_ingot", "minecraft:diamond_block"),
+        };
+        registry.add_shaped_recipe(
+            yog_api::ShapedRecipe::new(&format!("yog-vlsi:alu_{}_craft", tier.id()), &id, 1)
+                .row("GCG").row("CRC").row("GDG")
+                .key('G', corner).key('C', "minecraft:copper_ingot")
+                .key('R', "minecraft:repeater").key('D', center)
+        );
     }
 
-    // Right-click → open ALU node editor
+    // Right-click any ALU tier → open the node editor.
     registry.on_use_block(|e, phase, _srv| -> bool {
         if phase != yog_api::EventPhase::Pre { return true; }
-        if e.block_id != ALU_ID { return true; }
+        if !is_alu_block(&e.block_id) { return true; }
         crate::alu_ui::set_alu_pos((e.pos.x, e.pos.y, e.pos.z));
         yog_api::open_ui("yog-vlsi:alu", true, false);
         false
