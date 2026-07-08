@@ -12,41 +12,39 @@ serde_json = "*"
 uuid       = { version = "*", features = ["v4"] }
 
 ## `yog run <name>` — build, drop the .yog into the loader's own Gradle dev-run
-# instance, then launch it. Active target: Yog-Mod-Loader's Forge platform,
-# MC 1.21.1, client (not the dedicated server — matches how this repo's own
-# `run/` directory is actually used for manual testing).
+# instance, then launch it.
 [run.forge-1.21.1]
-export_dir = "~/Projects/Yog-Mod-Loader/forge/run/yog-mods"
+export_dir = "../Yog-Mod-Loader/forge/run/yog-mods"
 command    = "gradlew"
 args       = ["runClient", "-Pminecraft_version=1.21.1"]
-cwd        = "~/Projects/Yog-Mod-Loader/forge"
+cwd        = "../Yog-Mod-Loader/forge"
 
 [run.forge-1.20.1]
-export_dir = "~/Projects/Yog-Mod-Loader/forge/run/yog-mods"
+export_dir = "../Yog-Mod-Loader/forge/run/yog-mods"
 command    = "gradlew"
 args       = ["runClient", "-Pminecraft_version=1.20.1"]
-cwd        = "~/Projects/Yog-Mod-Loader/forge"
+cwd        = "../Yog-Mod-Loader/forge"
 
 [run.fabric-1.21.1]
-export_dir = "~/Projects/Yog-Mod-Loader/fabric/run/yog-mods"
+export_dir = "../Yog-Mod-Loader/fabric/run/yog-mods"
 command    = "gradlew"
 args       = ["runClient", "-Pminecraft_version=1.21.1"]
-cwd        = "~/Projects/Yog-Mod-Loader/fabric"
+cwd        = "../Yog-Mod-Loader/fabric"
 
 [run.fabric-1.20.1]
-export_dir = "~/Projects/Yog-Mod-Loader/fabric/run/yog-mods"
+export_dir = "../Yog-Mod-Loader/fabric/run/yog-mods"
 command    = "gradlew"
 args       = ["runClient", "-Pminecraft_version=1.20.1"]
-cwd        = "~/Projects/Yog-Mod-Loader/fabric"
+cwd        = "../Yog-Mod-Loader/fabric"
 
 [run.neoforge-1.21.1]
-export_dir = "~/Projects/Yog-Mod-Loader/neoforge/run/yog-mods"
+export_dir = "../Yog-Mod-Loader/neoforge/run/yog-mods"
 command    = "gradlew"
 args       = ["runClient", "-Pminecraft_version=1.21.1"]
-cwd        = "~/Projects/Yog-Mod-Loader/neoforge"
+cwd        = "../Yog-Mod-Loader/neoforge"
 
 [run.neoforge-1.20.1]
-export_dir = "~/Projects/Yog-Mod-Loader/neoforge/run/yog-mods"
+export_dir = "../Yog-Mod-Loader/neoforge/run/yog-mods"
 command    = "gradlew"
 args       = ["runClient", "-Pminecraft_version=1.20.1"]
-cwd        = "~/Projects/Yog-Mod-Loader/neoforge"
+cwd        = "../Yog-Mod-Loader/neoforge"
