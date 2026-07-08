@@ -1,0 +1,9 @@
+{
+  "parent": "item/generated",
+  "textures": {
+    "layer0": "yog-vlsi:item/blueprint"
+  },
+  "overrides": [
+    { "predicate": { "written": 1 }, "model": "yog-vlsi:item/blueprint_written" }
+  ]
+}

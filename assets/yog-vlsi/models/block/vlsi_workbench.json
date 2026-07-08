@@ -1,0 +1,12 @@
+{
+  "parent": "block/cube",
+  "textures": {
+    "particle": "yog-vlsi:block/workbench_side",
+    "down": "yog-vlsi:block/workbench_bottom",
+    "up": "yog-vlsi:block/workbench_top",
+    "north": "yog-vlsi:block/workbench_side",
+    "south": "yog-vlsi:block/workbench_side",
+    "east": "yog-vlsi:block/workbench_side",
+    "west": "yog-vlsi:block/workbench_side"
+  }
+}
