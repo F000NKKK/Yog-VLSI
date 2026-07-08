@@ -1,4 +1,5 @@
 {
+  "parent": "block/block",
   "textures": {
     "particle": "yog-vlsi:block/digital_cable",
     "all": "yog-vlsi:block/digital_cable"
