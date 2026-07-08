@@ -274,3 +274,24 @@ fn tier_from_size(size: u32) -> Tier {
         _ => Tier::Wood,
     }
 }
+
+/// Save all workbench resources to persistent storage.
+pub fn save_resources(srv: &dyn yog_api::Server) {
+    let game_dir = srv.game_dir();
+    let resources = RESOURCES.lock().unwrap();
+    let mut store = Storage::open(&game_dir, "yog-vlsi");
+    let json = serde_json::to_string(&*resources).unwrap_or_default();
+    store.set("workbench_resources", &*json);
+    let _ = store.flush();
+}
+
+/// Load all workbench resources from persistent storage.
+pub fn load_resources(srv: &dyn yog_api::Server) {
+    let game_dir = srv.game_dir();
+    let store = Storage::open(&game_dir, "yog-vlsi");
+    if let Some(json) = store.get("workbench_resources").and_then(|v| v.as_str()) {
+        if let Ok(loaded) = serde_json::from_str::<HashMap<(i32,i32,i32), HashMap<String, u64>>>(json) {
+            *RESOURCES.lock().unwrap() = loaded;
+        }
+    }
+}
