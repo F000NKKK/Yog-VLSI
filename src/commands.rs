@@ -13,7 +13,7 @@ use yog_api::player::Player;
 use yog_api::{Registry, Storage};
 
 use crate::chip::{ChipMeta, CircuitBlock, CircuitData, Port, PortDir, PortSide};
-use crate::vm::{BlockType, Facing, RedstoneVM, Tier};
+use crate::vm::{BlockType, ComparatorMode, DoorHalf, Facing, PortMode, RedstoneVM, Tier};
 
 /// In-memory ALU state: (x, y, z) → list of (chip_id, tier)
 pub static ALU_STATE: LazyLock<Mutex<HashMap<(i32, i32, i32), Vec<(String, Tier)>>>> =
@@ -279,8 +279,18 @@ pub fn load_circuit_into_vm(vm: &mut RedstoneVM, circuit: &CircuitData) {
 }
 
 /// Parse a Minecraft block ID + state JSON into our VM BlockType.
-fn parse_block_type(block_id: &str, state_json: &str) -> BlockType {
+pub fn parse_block_type(block_id: &str, state_json: &str) -> BlockType {
+    let facing = || {
+        if state_json.contains("\"facing\":\"north\"") { Facing::North }
+        else if state_json.contains("\"facing\":\"south\"") { Facing::South }
+        else if state_json.contains("\"facing\":\"east\"") { Facing::East }
+        else if state_json.contains("\"facing\":\"west\"") { Facing::West }
+        else if state_json.contains("\"facing\":\"up\"") { Facing::Up }
+        else { Facing::Down }
+    };
+
     match block_id {
+        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => BlockType::Air,
         "minecraft:redstone_wire" => BlockType::RedstoneWire,
         "minecraft:redstone_torch" => {
             let lit = !state_json.contains("\"lit\":\"false\"");
@@ -288,23 +298,20 @@ fn parse_block_type(block_id: &str, state_json: &str) -> BlockType {
         }
         "minecraft:redstone_wall_torch" => {
             let lit = !state_json.contains("\"lit\":\"false\"");
-            let facing = if state_json.contains("\"facing\":\"north\"") { Facing::North }
-            else if state_json.contains("\"facing\":\"south\"") { Facing::South }
-            else if state_json.contains("\"facing\":\"east\"") { Facing::East }
-            else { Facing::West };
-            BlockType::RedstoneWallTorch { lit, facing }
+            BlockType::RedstoneWallTorch { lit, facing: facing() }
         }
         "minecraft:repeater" => {
             let delay: u8 = if state_json.contains("\"delay\":\"2\"") { 2 }
             else if state_json.contains("\"delay\":\"3\"") { 3 }
             else if state_json.contains("\"delay\":\"4\"") { 4 }
             else { 1 };
-            let facing = if state_json.contains("\"facing\":\"north\"") { Facing::North }
-            else if state_json.contains("\"facing\":\"south\"") { Facing::South }
-            else if state_json.contains("\"facing\":\"east\"") { Facing::East }
-            else { Facing::West };
             let locked = state_json.contains("\"locked\":\"true\"");
-            BlockType::Repeater { delay_ticks: delay, facing, locked }
+            BlockType::Repeater { delay_ticks: delay, facing: facing(), locked }
+        }
+        "minecraft:comparator" => {
+            let mode = if state_json.contains("\"mode\":\"subtract\"") { ComparatorMode::Subtract }
+            else { ComparatorMode::Compare };
+            BlockType::Comparator { mode, facing: facing() }
         }
         "minecraft:redstone_lamp" => BlockType::RedstoneLamp,
         "minecraft:redstone_block" => BlockType::RedstoneBlock,
@@ -312,13 +319,150 @@ fn parse_block_type(block_id: &str, state_json: &str) -> BlockType {
             let on = state_json.contains("\"powered\":\"true\"");
             BlockType::Lever { on }
         }
+        "minecraft:stone_button" => {
+            let pressed = state_json.contains("\"powered\":\"true\"");
+            BlockType::StoneButton { pressed, facing: facing() }
+        }
+        "minecraft:oak_button" | "minecraft:spruce_button" | "minecraft:birch_button"
+        | "minecraft:jungle_button" | "minecraft:acacia_button" | "minecraft:dark_oak_button"
+        | "minecraft:mangrove_button" | "minecraft:cherry_button" | "minecraft:bamboo_button"
+        | "minecraft:crimson_button" | "minecraft:warped_button" => {
+            let pressed = state_json.contains("\"powered\":\"true\"");
+            BlockType::WoodButton { pressed, facing: facing() }
+        }
+        "minecraft:stone_pressure_plate" => {
+            let pressed = state_json.contains("\"powered\":\"true\"");
+            BlockType::StonePressurePlate { pressed }
+        }
+        "minecraft:oak_pressure_plate" | "minecraft:spruce_pressure_plate"
+        | "minecraft:birch_pressure_plate" | "minecraft:jungle_pressure_plate"
+        | "minecraft:acacia_pressure_plate" | "minecraft:dark_oak_pressure_plate"
+        | "minecraft:mangrove_pressure_plate" | "minecraft:cherry_pressure_plate"
+        | "minecraft:bamboo_pressure_plate" | "minecraft:crimson_pressure_plate"
+        | "minecraft:warped_pressure_plate" => {
+            let pressed = state_json.contains("\"powered\":\"true\"");
+            BlockType::WoodPressurePlate { pressed }
+        }
+        "minecraft:light_weighted_pressure_plate" => {
+            let power: u8 = state_json.split("\"power\":\"")
+                .nth(1).and_then(|s| s.split('\"').next())
+                .and_then(|s| s.parse().ok()).unwrap_or(0);
+            BlockType::LightWeightedPressurePlate { power }
+        }
+        "minecraft:heavy_weighted_pressure_plate" => {
+            let power: u8 = state_json.split("\"power\":\"")
+                .nth(1).and_then(|s| s.split('\"').next())
+                .and_then(|s| s.parse().ok()).unwrap_or(0);
+            BlockType::HeavyWeightedPressurePlate { power }
+        }
+        "minecraft:observer" => {
+            let powered = state_json.contains("\"powered\":\"true\"");
+            BlockType::Observer { facing: facing(), powered }
+        }
+        "minecraft:note_block" => BlockType::NoteBlock,
+        "minecraft:target" => {
+            let power: u8 = state_json.split("\"power\":\"")
+                .nth(1).and_then(|s| s.split('\"').next())
+                .and_then(|s| s.parse().ok()).unwrap_or(0);
+            BlockType::TargetBlock { power }
+        }
+        "minecraft:piston" => {
+            let extended = state_json.contains("\"extended\":\"true\"");
+            BlockType::Piston { extended, facing: facing() }
+        }
+        "minecraft:sticky_piston" => {
+            let extended = state_json.contains("\"extended\":\"true\"");
+            BlockType::StickyPiston { extended, facing: facing() }
+        }
+        "minecraft:chest" => BlockType::Chest,
+        "minecraft:trapped_chest" => BlockType::TrappedChest,
+        "minecraft:ender_chest" => BlockType::EnderChest,
+        "minecraft:barrel" => BlockType::Barrel,
+        "minecraft:hopper" => {
+            let enabled = !state_json.contains("\"enabled\":\"false\"");
+            BlockType::Hopper { facing: facing(), enabled }
+        }
+        "minecraft:dropper" => {
+            let triggered = state_json.contains("\"triggered\":\"true\"");
+            BlockType::Dropper { facing: facing(), triggered }
+        }
+        "minecraft:dispenser" => {
+            let triggered = state_json.contains("\"triggered\":\"true\"");
+            BlockType::Dispenser { facing: facing(), triggered }
+        }
+        "minecraft:furnace" => {
+            let lit = state_json.contains("\"lit\":\"true\"");
+            BlockType::Furnace { lit }
+        }
+        "minecraft:blast_furnace" => {
+            let lit = state_json.contains("\"lit\":\"true\"");
+            BlockType::BlastFurnace { lit }
+        }
+        "minecraft:smoker" => {
+            let lit = state_json.contains("\"lit\":\"true\"");
+            BlockType::Smoker { lit }
+        }
+        "minecraft:brewing_stand" => BlockType::BrewingStand,
+        "minecraft:slime_block" => BlockType::SlimeBlock,
+        "minecraft:honey_block" => BlockType::HoneyBlock,
+        "minecraft:tnt" => {
+            let unstable = state_json.contains("\"unstable\":\"true\"");
+            BlockType::Tnt { unstable }
+        }
+        "minecraft:iron_door" => {
+            let open = state_json.contains("\"open\":\"true\"");
+            let half = if state_json.contains("\"half\":\"upper\"") { DoorHalf::Upper } else { DoorHalf::Lower };
+            BlockType::IronDoor { open, facing: facing(), half }
+        }
+        s if s.ends_with("_door") && s != "minecraft:iron_door" => {
+            let open = state_json.contains("\"open\":\"true\"");
+            let half = if state_json.contains("\"half\":\"upper\"") { DoorHalf::Upper } else { DoorHalf::Lower };
+            BlockType::WoodDoor { open, facing: facing(), half }
+        }
+        "minecraft:iron_trapdoor" => {
+            let open = state_json.contains("\"open\":\"true\"");
+            let half = if state_json.contains("\"half\":\"top\"") { DoorHalf::Upper } else { DoorHalf::Lower };
+            BlockType::IronTrapdoor { open, facing: facing(), half }
+        }
+        s if s.ends_with("_trapdoor") && s != "minecraft:iron_trapdoor" => {
+            let open = state_json.contains("\"open\":\"true\"");
+            let half = if state_json.contains("\"half\":\"top\"") { DoorHalf::Upper } else { DoorHalf::Lower };
+            BlockType::WoodTrapdoor { open, facing: facing(), half }
+        }
+        s if s.ends_with("_fence_gate") => {
+            let open = state_json.contains("\"open\":\"true\"");
+            BlockType::FenceGate { open, facing: facing() }
+        }
+        "minecraft:rail" => BlockType::Rail,
+        "minecraft:powered_rail" => {
+            let powered = state_json.contains("\"powered\":\"true\"");
+            BlockType::PoweredRail { powered }
+        }
+        "minecraft:detector_rail" => {
+            let powered = state_json.contains("\"powered\":\"true\"");
+            BlockType::DetectorRail { powered }
+        }
+        "minecraft:activator_rail" => {
+            let powered = state_json.contains("\"powered\":\"true\"");
+            BlockType::ActivatorRail { powered }
+        }
+        s if s.contains("shulker_box") => BlockType::ShulkerBox { color: None },
+        "minecraft:glass" | "minecraft:white_stained_glass" | "minecraft:orange_stained_glass"
+        | "minecraft:magenta_stained_glass" | "minecraft:light_blue_stained_glass"
+        | "minecraft:yellow_stained_glass" | "minecraft:lime_stained_glass"
+        | "minecraft:pink_stained_glass" | "minecraft:gray_stained_glass"
+        | "minecraft:light_gray_stained_glass" | "minecraft:cyan_stained_glass"
+        | "minecraft:purple_stained_glass" | "minecraft:blue_stained_glass"
+        | "minecraft:brown_stained_glass" | "minecraft:green_stained_glass"
+        | "minecraft:red_stained_glass" | "minecraft:black_stained_glass"
+        | "minecraft:tinted_glass" | "minecraft:glass_pane" | "minecraft:glowstone"
+        | "minecraft:sea_lantern" => BlockType::Glass,
         "yog-vlsi:port" => {
-            use crate::vm::PortMode;
             let mode = if state_json.contains("\"mode\":\"input\"") { PortMode::Input }
             else if state_json.contains("\"mode\":\"output\"") { PortMode::Output }
             else { PortMode::Bidirectional };
             BlockType::Port(mode)
         }
-        _ => BlockType::Solid, // default: treat unknown blocks as solid
+        _ => BlockType::Solid,
     }
 }
