@@ -230,34 +230,9 @@ pub fn register(registry: &mut Registry) {
             }
         }
 
-        // No special item — show workbench status
-        let resources = RESOURCES.lock().unwrap();
-        let res = resources.get(&key);
-        let res_summary = match res {
-            Some(map) if !map.is_empty() => {
-                map.iter()
-                    .take(5)
-                    .map(|(item, qty)| format!("{}: {}", item, qty))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            }
-            _ => "§7(empty)".to_string(),
-        };
-
-        let designs = designs::list_designs(&game_dir, &player_name);
-        let design_summary = if designs.is_empty() {
-            "§7No saved designs".to_string()
-        } else {
-            designs.iter()
-                .map(|d| format!("§e{}§7 ({} ports)", d.name, d.port_count))
-                .collect::<Vec<_>>()
-                .join("\n  ")
-        };
-
-        srv.broadcast(&format!(
-            "§6=== VLSI Workbench ===\n§7Player: §f{}\n§7Designs:\n  {}\n§7Resources: {}",
-            e.player_name, design_summary, res_summary
-        ));
+        // No special item — open workbench GUI
+        crate::workbench_ui::set_player(&game_dir, &player_name);
+        yog_api::open_ui("yog-vlsi:workbench", true, false);
 
         false
     });

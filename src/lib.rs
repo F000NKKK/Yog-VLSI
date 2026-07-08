@@ -9,6 +9,7 @@ mod commands;
 mod designs;
 mod vm;
 mod workbench;
+mod workbench_ui;
 
 use yog_api::{info, Mod, Registry};
 
@@ -29,6 +30,15 @@ impl Mod for YogVlsi {
         // ALU tick handler: step all installed chip VMs.
         registry.on_tick(|srv| {
             alu::tick_all(srv);
+        });
+
+        // ── Workbench UI ────────────────────────────────────────────────────
+        let ui_id = "yog-vlsi:workbench";
+        registry.register_ui(ui_id, move |uid, event| {
+            workbench_ui::handle_click(uid, event);
+        });
+        registry.on_ui_render(ui_id, move |gfx| {
+            workbench_ui::render(gfx);
         });
 
         info!("[yog-vlsi] ready.");
