@@ -33,7 +33,12 @@ pub fn register(registry: &mut Registry) {
             crate::vm::Tier::Diamond => (6, 48), crate::vm::Tier::Netherite => (8, 64),
         };
 
-        registry.register_block(BlockDef::new(&id).strength(5.0, 12.0).sound("metal").requires_tool().light_level(7));
+        registry.register_block(
+            BlockDef::new(&id).strength(5.0, 12.0).sound("metal").requires_tool().light_level(7)
+                // Accepts both cable kinds — analog via a Redstone Port on
+                // one of its faces, digital cable straight into the face.
+                .connect_groups(&["analog", "digital"])
+        );
         registry.register_item(
             ItemDef::new(&id)
                 .name(&format!("{} ALU", tier.name()))
