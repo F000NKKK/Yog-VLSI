@@ -69,7 +69,7 @@ pub fn register(registry: &mut Registry) {
         (PORT_OUTPUT, "VLSI Port (Output)"),
         (PORT_BIDI, "VLSI Port (Bidirectional)"),
     ] {
-        registry.register_block(BlockDef::new(id).strength(1.0, 3.0).sound("stone"));
+        registry.register_block(BlockDef::new(id).strength(1.0, 3.0).sound("stone").shape(4.0, 0.0, 4.0, 12.0, 8.0, 12.0));
         registry.register_item(
             ItemDef::new(id)
                 .name(name)

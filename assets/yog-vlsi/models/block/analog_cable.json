@@ -1,6 +1,19 @@
 {
-  "parent": "block/cube_all",
   "textures": {
     "all": "yog-vlsi:block/analog_cable"
-  }
+  },
+  "elements": [
+    {
+      "from": [5, 0, 5],
+      "to": [11, 6, 11],
+      "faces": {
+        "down":  {"uv": [5, 5, 11, 11], "texture": "#all"},
+        "up":    {"uv": [5, 5, 11, 11], "texture": "#all"},
+        "north": {"uv": [5, 10, 11, 16], "texture": "#all"},
+        "south": {"uv": [5, 10, 11, 16], "texture": "#all"},
+        "west":  {"uv": [5, 10, 11, 16], "texture": "#all"},
+        "east":  {"uv": [5, 10, 11, 16], "texture": "#all"}
+      }
+    }
+  ]
 }

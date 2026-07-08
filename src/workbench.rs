@@ -75,7 +75,7 @@ pub fn register(registry: &mut Registry) {
         BlockDef::new("yog-vlsi:analog_cable")
             .strength(0.5, 0.5)
             .sound("stone")
-            .no_collision()
+            .shape(5.0, 0.0, 5.0, 11.0, 6.0, 11.0)
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:analog_cable")
@@ -94,7 +94,7 @@ pub fn register(registry: &mut Registry) {
         BlockDef::new("yog-vlsi:digital_cable")
             .strength(0.5, 0.5)
             .sound("stone")
-            .no_collision()
+            .shape(5.0, 0.0, 5.0, 11.0, 6.0, 11.0)
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:digital_cable")
@@ -117,6 +117,7 @@ pub fn register(registry: &mut Registry) {
         BlockDef::new("yog-vlsi:redstone_port")
             .strength(2.0, 6.0)
             .sound("stone")
+            .shape(4.0, 0.0, 4.0, 12.0, 8.0, 12.0)
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:redstone_port")
