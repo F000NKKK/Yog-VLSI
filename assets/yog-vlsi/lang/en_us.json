@@ -1,0 +1,20 @@
+{
+  "block.yog-vlsi.vlsi_workbench": "VLSI Workbench",
+  "block.yog-vlsi.alu": "Arithmetic Logic Unit",
+  "block.yog-vlsi.analog_cable": "Analog Cable",
+  "block.yog-vlsi.digital_cable": "Digital Cable",
+  "block.yog-vlsi.redstone_port": "Redstone Port",
+  "item.yog-vlsi.vlsi_workbench": "VLSI Workbench",
+  "item.yog-vlsi.alu": "Arithmetic Logic Unit",
+  "item.yog-vlsi.analog_cable": "Analog Cable",
+  "item.yog-vlsi.digital_cable": "Digital Cable",
+  "item.yog-vlsi.redstone_port": "Redstone Port",
+  "item.yog-vlsi.chip_wood": "Wooden Microchip",
+  "item.yog-vlsi.chip_stone": "Stone Microchip",
+  "item.yog-vlsi.chip_gold": "Golden Microchip",
+  "item.yog-vlsi.chip_iron": "Iron Microchip",
+  "item.yog-vlsi.chip_diamond": "Diamond Microchip",
+  "item.yog-vlsi.chip_netherite": "Netherite Microchip",
+  "item.yog-vlsi.blueprint": "VLSI Blueprint",
+  "itemGroup.yog-vlsi": "Yog VLSI"
+}
