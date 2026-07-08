@@ -79,6 +79,7 @@ pub fn register(registry: &mut Registry) {
 
         let key = (e.pos.x, e.pos.y, e.pos.z);
         let game_dir = srv.game_dir();
+        let player_name = e.player_name.clone();
 
         // Check held item
         let held_nbt = srv.get_held_item_nbt(&e.player_name);
@@ -97,7 +98,7 @@ pub fn register(registry: &mut Registry) {
                     if let Some(circuit) = extract_blueprint_circuit(nbt) {
                         let tier = tier_from_size(circuit.width);
                         let design_id = designs::import_design(
-                            &game_dir, &e.uuid.to_string(),
+                            &game_dir, &player_name,
                             "Imported Design", tier,
                             circuit.ports.clone(), circuit,
                         );
@@ -162,7 +163,7 @@ pub fn register(registry: &mut Registry) {
             _ => "§7(empty)".to_string(),
         };
 
-        let designs = designs::list_designs(&game_dir, &e.uuid.to_string());
+        let designs = designs::list_designs(&game_dir, &player_name);
         let design_summary = if designs.is_empty() {
             "§7No saved designs".to_string()
         } else {

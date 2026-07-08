@@ -38,6 +38,10 @@ pub struct DesignEntry {
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 
+
+fn storage_for_player(game_dir: &str, player_name: &str) -> Storage {
+    Storage::open(game_dir, &format!("yog-vlsi/player/{}", player_name))
+}
 fn designs_index_key() -> String {
     "designs_index".into()
 }
@@ -49,8 +53,8 @@ fn design_circuit_key(design_id: &str) -> String {
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /// List all designs for a player.
-pub fn list_designs(game_dir: &str, player_uuid: &str) -> Vec<DesignMeta> {
-    let store = Storage::open_player(game_dir, "yog-vlsi", player_uuid);
+pub fn list_designs(game_dir: &str, player_name: &str) -> Vec<DesignMeta> {
+    let store = storage_for_player(game_dir, player_name);
     let json = store.get(&designs_index_key())
         .and_then(|v| v.as_str())
         .map(String::from);
@@ -58,35 +62,35 @@ pub fn list_designs(game_dir: &str, player_uuid: &str) -> Vec<DesignMeta> {
 }
 
 /// Save the design index.
-fn save_index(game_dir: &str, player_uuid: &str, designs: &[DesignMeta]) {
-    let mut store = Storage::open_player(game_dir, "yog-vlsi", player_uuid);
+fn save_index(game_dir: &str, player_name: &str, designs: &[DesignMeta]) {
+    let mut store = storage_for_player(game_dir, player_name);
     let json = serde_json::to_string(designs).unwrap_or_default();
-    store.set(&designs_index_key(), &json);
+    store.set(&designs_index_key(), &*json);
     let _ = store.flush();
 }
 
 /// Save a full design (meta + circuit) for a player.
-pub fn save_design(game_dir: &str, player_uuid: &str, entry: &DesignEntry) {
+pub fn save_design(game_dir: &str, player_name: &str, entry: &DesignEntry) {
     // Save circuit data
     {
-        let mut store = Storage::open_player(game_dir, "yog-vlsi", player_uuid);
+        let mut store = storage_for_player(game_dir, player_name);
         store.set(&design_circuit_key(&entry.meta.id), entry.circuit.to_json());
         let _ = store.flush();
     }
 
     // Update index
-    let mut designs = list_designs(game_dir, player_uuid);
+    let mut designs = list_designs(game_dir, player_name);
     designs.retain(|d| d.id != entry.meta.id);
     designs.push(entry.meta.clone());
-    save_index(game_dir, player_uuid, &designs);
+    save_index(game_dir, player_name, &designs);
 }
 
 /// Load a full design by ID.
-pub fn load_design(game_dir: &str, player_uuid: &str, design_id: &str) -> Option<DesignEntry> {
-    let designs = list_designs(game_dir, player_uuid);
+pub fn load_design(game_dir: &str, player_name: &str, design_id: &str) -> Option<DesignEntry> {
+    let designs = list_designs(game_dir, player_name);
     let meta = designs.into_iter().find(|d| d.id == design_id)?;
 
-    let store = Storage::open_player(game_dir, "yog-vlsi", player_uuid);
+    let store = storage_for_player(game_dir, player_name);
     let json = store.get(&design_circuit_key(design_id))
         .and_then(|v| v.as_str())
         .map(String::from);
@@ -96,20 +100,20 @@ pub fn load_design(game_dir: &str, player_uuid: &str, design_id: &str) -> Option
 }
 
 /// Delete a design.
-pub fn delete_design(game_dir: &str, player_uuid: &str, design_id: &str) {
-    let mut designs = list_designs(game_dir, player_uuid);
+pub fn delete_design(game_dir: &str, player_name: &str, design_id: &str) {
+    let mut designs = list_designs(game_dir, player_name);
     designs.retain(|d| d.id != design_id);
-    save_index(game_dir, player_uuid, &designs);
+    save_index(game_dir, player_name, &designs);
 }
 
 /// Import a design from a CircuitData (e.g., from a Blueprint).
 /// Creates a new design ID and saves it to the player's library.
 pub fn import_design(
     game_dir: &str,
-    player_uuid: &str,
+    player_name: &str,
     name: &str,
     tier: Tier,
-    ports: Vec<Port>,
+    _ports: Vec<Port>,
     circuit: CircuitData,
 ) -> String {
     let design_id = crate::chip::new_chip_id();
@@ -127,14 +131,14 @@ pub fn import_design(
         },
         circuit,
     };
-    save_design(game_dir, player_uuid, &entry);
+    save_design(game_dir, player_name, &entry);
     design_id
 }
 
 /// Create a new blank design with the given parameters.
 pub fn create_design(
     game_dir: &str,
-    player_uuid: &str,
+    player_name: &str,
     name: &str,
     tier: Tier,
 ) -> String {
@@ -154,6 +158,6 @@ pub fn create_design(
         },
         circuit: CircuitData::new(design_id.clone(), size, size, Vec::new()),
     };
-    save_design(game_dir, player_uuid, &entry);
+    save_design(game_dir, player_name, &entry);
     design_id
 }
