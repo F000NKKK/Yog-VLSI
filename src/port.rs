@@ -7,9 +7,7 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use yog_api::{BlockDef, ItemDef, Registry};
-use yog_core::BlockPos;
-use yog_world::World;
+use yog_api::{BlockDef, BlockPos, ItemDef, Registry, World};
 
 use crate::chip::PortDir;
 
@@ -92,7 +90,7 @@ pub fn register(registry: &mut Registry) {
         if phase != yog_api::EventPhase::Pre { return true; }
         if !is_port_block(&e.block_id) { return true; }
 
-        let dimension = yog_world::dimension::OVERWORLD;
+        let dimension = yog_api::world::dimension::OVERWORLD;
         LAST_TOUCHED.lock().unwrap().insert(e.player_name.clone(), (dimension.to_string(), e.pos));
 
         let current = dir_for_block(&e.block_id).unwrap_or(PortDir::Input);
