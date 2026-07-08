@@ -31,7 +31,7 @@ cwd        = "~/Projects/Yog-Mod-Loader/forge"
 export_dir = "~/Projects/Yog-Mod-Loader/fabric/run/yog-mods"
 command    = "gradlew"
 args       = ["runClient", "-Pminecraft_version=1.21.1"]
-cwd        = "~/Projects/Yog-Mod-Loader/fabric.bat"
+cwd        = "~/Projects/Yog-Mod-Loader/fabric"
 
 [run.fabric-1.20.1]
 export_dir = "~/Projects/Yog-Mod-Loader/fabric/run/yog-mods"
