@@ -76,6 +76,7 @@ pub fn register(registry: &mut Registry) {
             .strength(0.5, 0.5)
             .sound("stone")
             .shape(5.0, 5.0, 5.0, 11.0, 11.0, 11.0)
+            .connects_to_neighbors()
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:analog_cable")
@@ -95,6 +96,7 @@ pub fn register(registry: &mut Registry) {
             .strength(0.5, 0.5)
             .sound("stone")
             .shape(5.0, 5.0, 5.0, 11.0, 11.0, 11.0)
+            .connects_to_neighbors()
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:digital_cable")
