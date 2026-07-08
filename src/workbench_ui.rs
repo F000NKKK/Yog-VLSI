@@ -6,7 +6,13 @@ use std::sync::Mutex;
 use yog_api::GfxContext;
 
 use crate::designs::{list_designs, load_design, DesignMeta};
+use crate::network;
 use crate::workbench::RESOURCES;
+
+/// Last known player position, refreshed every frame — used so button
+/// actions that round-trip to the server (e.g. entering the circuit editor)
+/// can tell it where to teleport the player back to afterwards.
+static LAST_PLAYER_POS: Mutex<(f32, f32, f32)> = Mutex::new((0.0, 64.0, 0.0));
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -67,6 +73,14 @@ pub fn clear() {
     *ACTIVE.lock().unwrap() = false;
 }
 
+/// Show a local-only actionbar hint (no server round-trip needed).
+fn hint(message: &str) {
+    if let Some(srv) = yog_api::server() {
+        let (_, player_name) = PLAYER.lock().unwrap().clone();
+        srv.send_actionbar(&player_name, message);
+    }
+}
+
 /// Render the workbench GUI.
 pub fn render(gfx: &GfxContext) {
     let d2d = gfx.draw2d();
@@ -76,6 +90,7 @@ pub fn render(gfx: &GfxContext) {
 
     let (game_dir, player_name) = PLAYER.lock().unwrap().clone();
     if player_name.is_empty() { return; }
+    *LAST_PLAYER_POS.lock().unwrap() = (gfx.player_pos()[0], gfx.player_pos()[1], gfx.player_pos()[2]);
 
     let designs: Vec<DesignMeta> = list_designs(&game_dir, &player_name);
     let selected = SELECTED.lock().unwrap().clone();
@@ -226,20 +241,41 @@ pub fn handle_click(ui_id: &str, event: &str) {
 
         // Check buttons first
         let buttons = BUTTONS.lock().unwrap();
+        let mut hit = None;
         for (name, bx0, by0, bx1, by1) in buttons.iter() {
             if mx >= *bx0 && mx <= *bx1 && my >= *by0 && my <= *by1 {
-                match *name {
-                    "close" => { clear(); /* close via ESC handled by MC */ }
-                    "Design" => { /* TODO: open virtual world editor */ }
-                    "Fabricate" => { /* TODO: consume resources + create chip */ }
-                    "Export BP" => { /* TODO: export design to blueprint */ }
-                    "Import BP" => { /* TODO: import blueprint from hand */ }
-                    _ => {}
-                }
-                return;
+                hit = Some(*name);
+                break;
             }
         }
         drop(buttons);
+        if let Some(name) = hit {
+            let selected = SELECTED.lock().unwrap().clone();
+            let (px, py, pz) = *LAST_PLAYER_POS.lock().unwrap();
+            match name {
+                "close" => clear(),
+                "Design" => match selected {
+                    Some(sel) => network::send_workbench_action(&["edit", &sel, &px.to_string(), &py.to_string(), &pz.to_string()]),
+                    None => hint("§eSelect a design first, or run /vlsi design <name> <tier>."),
+                },
+                "Fabricate" => {
+                    if let Some(sel) = selected {
+                        let (game_dir, player_name) = PLAYER.lock().unwrap().clone();
+                        if let Some(meta) = list_designs(&game_dir, &player_name).into_iter().find(|d| d.name == sel) {
+                            network::send_workbench_action(&["fabricate", &sel, meta.tier.id()]);
+                        }
+                    }
+                }
+                "Export BP" => {
+                    if let Some(sel) = selected {
+                        network::send_workbench_action(&["export_bp", &sel]);
+                    }
+                }
+                "Import BP" => hint("§eHold a filled Blueprint and right-click any VLSI Workbench to import it."),
+                _ => {}
+            }
+            return;
+        }
 
         // Check design list rows
         let rows = ROWS.lock().unwrap();

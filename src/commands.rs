@@ -56,6 +56,9 @@ pub static IO_MODES: LazyLock<Mutex<HashMap<String, String>>> =
 pub static EXT_VALUES: LazyLock<Mutex<HashMap<(i32, i32, i32), HashMap<String, u8>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Display name per installed chip (for the ALU node editor): chip_id → name.
+pub static CHIP_NAMES: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
 pub fn ext_chip_id(alu_pos: (i32, i32, i32)) -> String {
     format!("__ext_{}_{}_{}", alu_pos.0, alu_pos.1, alu_pos.2)
 }
@@ -65,12 +68,32 @@ pub fn ext_chip_id(alu_pos: (i32, i32, i32)) -> String {
 /// network-driven chip installer.
 pub fn install_chip(srv: &dyn yog_api::Server, meta: &ChipMeta, alu_pos: (i32, i32, i32)) {
     ALU_STATE.lock().unwrap().entry(alu_pos).or_default().push((meta.id.clone(), meta.tier));
+    CHIP_NAMES.lock().unwrap().insert(meta.id.clone(), meta.name.clone());
     if let Some(circuit) = load_circuit(srv, &meta.id) {
         let mut vm = RedstoneVM::new(meta.tier);
         load_circuit_into_vm(&mut vm, &circuit);
         VM_CACHE.lock().unwrap().insert(meta.id.clone(), vm);
         CHIP_PORTS.lock().unwrap().insert(meta.id.clone(), circuit.ports);
     }
+}
+
+/// Install the chip sitting in the player's inventory `slot` into the ALU at
+/// `alu_pos`, clearing that slot. Used by the ALU GUI's chip selector, which
+/// has to round-trip through a packet since inventory access is a
+/// server-authoritative call unavailable from client-side UI code.
+pub fn install_chip_from_slot(srv: &dyn yog_api::Server, player_name: &str, slot: u32, alu_pos: (i32, i32, i32)) -> String {
+    let Some((item_id, _count, nbt)) = srv.get_slot_item(player_name, slot) else {
+        return "§cInvalid slot.".into();
+    };
+    if !item_id.starts_with("yog-vlsi:chip_") {
+        return "§cThat slot isn't a microchip.".into();
+    }
+    let Some(meta) = ChipMeta::from_nbt(&nbt) else {
+        return "§cThat chip hasn't been programmed with a design yet.".into();
+    };
+    install_chip(srv, &meta, alu_pos);
+    Player::new(srv, player_name).set_slot(slot, "minecraft:air", 0);
+    format!("§aInstalled '{}' into the ALU.", meta.name)
 }
 
 // ── Tier helper ──────────────────────────────────────────────────────────────

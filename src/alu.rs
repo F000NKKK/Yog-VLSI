@@ -121,3 +121,62 @@ fn parse_ext_chip_id(id: &str) -> Option<(i32, i32, i32)> {
     let z: i32 = it.next()?.parse().ok()?;
     Some((x, y, z))
 }
+
+/// Persist installed-chip placement, names, and the link/IO-mode graph so
+/// ALUs survive a server restart. VM working state itself isn't persisted —
+/// each chip's circuit is replayed from its saved design instead, which is
+/// cheap next to storing a full grid snapshot per tier.
+pub fn save_state(srv: &dyn yog_api::Server) {
+    use crate::commands::CHIP_NAMES;
+    let game_dir = srv.game_dir();
+    let mut store = yog_api::Storage::open(&game_dir, "yog-vlsi");
+
+    // HashMaps with tuple/non-string keys don't round-trip through
+    // serde_json (object keys must be strings), so persist as Vec<(K, V)>.
+    let state: Vec<((i32, i32, i32), Vec<(String, crate::vm::Tier)>)> =
+        ALU_STATE.lock().unwrap().iter().map(|(k, v)| (*k, v.clone())).collect();
+    let links: Vec<((String, String), (String, String))> =
+        LINKS.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let modes: Vec<(String, String)> =
+        crate::commands::IO_MODES.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let names: Vec<(String, String)> =
+        CHIP_NAMES.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+
+    store.set("alu_state", serde_json::to_string(&state).unwrap_or_default());
+    store.set("alu_links", serde_json::to_string(&links).unwrap_or_default());
+    store.set("alu_io_modes", serde_json::to_string(&modes).unwrap_or_default());
+    store.set("alu_chip_names", serde_json::to_string(&names).unwrap_or_default());
+    let _ = store.flush();
+}
+
+pub fn load_state(srv: &dyn yog_api::Server) {
+    use crate::commands::install_chip;
+    use crate::chip::ChipMeta;
+    let game_dir = srv.game_dir();
+    let store = yog_api::Storage::open(&game_dir, "yog-vlsi");
+
+    let state: Vec<((i32, i32, i32), Vec<(String, crate::vm::Tier)>)> =
+        store.get("alu_state").and_then(|v| v.as_str()).and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
+    let names: std::collections::HashMap<String, String> =
+        store.get("alu_chip_names").and_then(|v| v.as_str())
+            .and_then(|j| serde_json::from_str::<Vec<(String, String)>>(j).ok())
+            .map(|v| v.into_iter().collect())
+            .unwrap_or_default();
+    if let Some(links) = store.get("alu_links").and_then(|v| v.as_str())
+        .and_then(|j| serde_json::from_str::<Vec<((String, String), (String, String))>>(j).ok())
+    {
+        *LINKS.lock().unwrap() = links.into_iter().collect();
+    }
+    if let Some(modes) = store.get("alu_io_modes").and_then(|v| v.as_str())
+        .and_then(|j| serde_json::from_str::<Vec<(String, String)>>(j).ok())
+    {
+        *crate::commands::IO_MODES.lock().unwrap() = modes.into_iter().collect();
+    }
+
+    for (alu_pos, chips) in state {
+        for (chip_id, tier) in chips {
+            let name = names.get(&chip_id).cloned().unwrap_or_else(|| chip_id.clone());
+            install_chip(srv, &ChipMeta { id: chip_id, tier, name, ports: Vec::new() }, alu_pos);
+        }
+    }
+}

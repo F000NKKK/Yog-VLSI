@@ -276,12 +276,18 @@ fn tier_from_size(size: u32) -> Tier {
 }
 
 /// Save all workbench resources to persistent storage.
+///
+/// `HashMap<(i32,i32,i32), _>` doesn't round-trip through `serde_json`
+/// directly — JSON object keys must be strings, so a tuple key silently
+/// fails to serialize (and `unwrap_or_default()` swallowed that error here
+/// previously, meaning resources never actually survived a restart). Persist
+/// as a `Vec` of pairs instead.
 pub fn save_resources(srv: &dyn yog_api::Server) {
     let game_dir = srv.game_dir();
-    let resources = RESOURCES.lock().unwrap();
+    let entries: Vec<((i32, i32, i32), HashMap<String, u64>)> =
+        RESOURCES.lock().unwrap().iter().map(|(k, v)| (*k, v.clone())).collect();
     let mut store = Storage::open(&game_dir, "yog-vlsi");
-    let json = serde_json::to_string(&*resources).unwrap_or_default();
-    store.set("workbench_resources", &*json);
+    store.set("workbench_resources", serde_json::to_string(&entries).unwrap_or_default());
     let _ = store.flush();
 }
 
@@ -290,8 +296,8 @@ pub fn load_resources(srv: &dyn yog_api::Server) {
     let game_dir = srv.game_dir();
     let store = Storage::open(&game_dir, "yog-vlsi");
     if let Some(json) = store.get("workbench_resources").and_then(|v| v.as_str()) {
-        if let Ok(loaded) = serde_json::from_str::<HashMap<(i32,i32,i32), HashMap<String, u64>>>(json) {
-            *RESOURCES.lock().unwrap() = loaded;
+        if let Ok(entries) = serde_json::from_str::<Vec<((i32, i32, i32), HashMap<String, u64>)>>(json) {
+            *RESOURCES.lock().unwrap() = entries.into_iter().collect();
         }
     }
 }

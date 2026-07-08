@@ -33,6 +33,12 @@ pub fn send_alu_action(parts: &[&str]) {
     }
 }
 
+/// Ask the server for the requesting player's programmed chips, so the ALU
+/// GUI's "+ Add Chip" selector has something to list.
+pub fn request_chip_list() {
+    send_alu_action(&["list_chips"]);
+}
+
 fn split(payload: &[u8]) -> Vec<String> {
     String::from_utf8_lossy(payload).split(SEP).map(str::to_owned).collect()
 }
@@ -89,7 +95,19 @@ pub fn register(registry: &mut Registry) {
                     parts[3].parse().unwrap_or(0),
                     parts[4].parse().unwrap_or(0),
                 );
-                crate::alu_ui::install_chip_from_slot(srv, &player, slot, alu_pos);
+                let reply = crate::commands::install_chip_from_slot(srv, &player, slot, alu_pos);
+                srv.send_actionbar(&player, &reply);
+            }
+            Some("list_chips") => {
+                let inv = yog_api::player::Player::new(srv, &player).inventory();
+                let mut lines = Vec::new();
+                for (slot, item_id, _count) in inv {
+                    if !item_id.starts_with("yog-vlsi:chip_") { continue; }
+                    let Some((_, _, nbt)) = srv.get_slot_item(&player, slot) else { continue };
+                    let Some(meta) = crate::chip::ChipMeta::from_nbt(&nbt) else { continue };
+                    lines.push(format!("{}\t{}\t{}", slot, meta.tier.name(), meta.name));
+                }
+                srv.send_to_player(&player, crate::alu_ui::CHIP_LIST_CHANNEL, lines.join("\n").as_bytes());
             }
             Some("save_links") => {
                 srv.send_actionbar(&player, "§aLink graph saved.");
