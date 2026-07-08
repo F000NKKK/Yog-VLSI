@@ -1,20 +1,6 @@
 {
+  "parent": "block/cube_all",
   "textures": {
-    "particle": "yog-vlsi:block/redstone_port",
     "all": "yog-vlsi:block/redstone_port"
-  },
-  "elements": [
-    {
-      "from": [4, 0, 4],
-      "to": [12, 8, 12],
-      "faces": {
-        "down":  {"uv": [4, 4, 12, 12], "texture": "#all"},
-        "up":    {"uv": [4, 4, 12, 12], "texture": "#all"},
-        "north": {"uv": [4, 8, 12, 16], "texture": "#all"},
-        "south": {"uv": [4, 8, 12, 16], "texture": "#all"},
-        "west":  {"uv": [4, 8, 12, 16], "texture": "#all"},
-        "east":  {"uv": [4, 8, 12, 16], "texture": "#all"}
-      }
-    }
-  ]
+  }
 }

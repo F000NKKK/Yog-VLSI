@@ -117,7 +117,6 @@ pub fn register(registry: &mut Registry) {
         BlockDef::new("yog-vlsi:redstone_port")
             .strength(2.0, 6.0)
             .sound("stone")
-            .shape(4.0, 0.0, 4.0, 12.0, 8.0, 12.0)
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:redstone_port")
