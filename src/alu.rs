@@ -1,7 +1,16 @@
 //! ALU block: accepts microchips, routes signals, links chips into node graphs.
 
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+
 use yog_api::{BlockDef, ItemDef, Registry};
 use crate::commands::{ALU_STATE, CHIP_PORTS, EXT_VALUES, LINKS, VM_CACHE};
+
+/// Fractional VM-steps owed to each chip, accumulated every server tick
+/// (20/s) at the chip tier's `tick_rate()` and drained in whole-step
+/// increments — this is what makes Netherite (40/s → 2 steps/tick) run
+/// faster than Wood (5/s → 1 step every 4 ticks), per DESIGN.md §4.7.
+static STEP_ACCUM: LazyLock<Mutex<HashMap<String, f32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub const ALU_ID: &str = "yog-vlsi:alu";
 pub const EXT_SIDES: [&str; 6] = ["N", "S", "E", "W", "U", "D"];
@@ -54,16 +63,22 @@ pub fn register(registry: &mut Registry) {
 /// to the physical world. Digital Cable channel routing has no such
 /// dependency: it's purely link-graph bit routing between ALUs, so it's
 /// fully wired below.
-pub fn tick_all(srv: &dyn yog_api::Server) {
+pub fn tick_all(_srv: &dyn yog_api::Server) {
     let state = ALU_STATE.lock().unwrap().clone();
 
-    // 1. Step every chip's VM once (rate limiting by tier is left at 1:1 for
-    //    now — the per-tier tick_rate multiplier is a follow-up).
+    // 1. Step every chip's VM at its tier's own rate.
     {
         let mut cache = VM_CACHE.lock().unwrap();
+        let mut accum = STEP_ACCUM.lock().unwrap();
         for chips in state.values() {
             for (chip_id, _) in chips {
-                if let Some(vm) = cache.get_mut(chip_id) { vm.step(); }
+                let Some(vm) = cache.get_mut(chip_id) else { continue };
+                let owed = accum.entry(chip_id.clone()).or_insert(0.0);
+                *owed += vm.tier.tick_rate() as f32 / 20.0;
+                while *owed >= 1.0 {
+                    vm.step();
+                    *owed -= 1.0;
+                }
             }
         }
     }

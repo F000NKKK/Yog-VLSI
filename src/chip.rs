@@ -30,10 +30,6 @@ pub enum PortSide {
 }
 
 impl PortSide {
-    pub fn all() -> [PortSide; 4] {
-        [PortSide::North, PortSide::South, PortSide::East, PortSide::West]
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             PortSide::North => "North",
@@ -91,16 +87,6 @@ pub struct ChipMeta {
 }
 
 impl ChipMeta {
-    /// Create a new blank chip of the given tier.
-    pub fn new(tier: Tier, name: &str) -> Self {
-        ChipMeta {
-            id: new_chip_id(),
-            tier,
-            name: name.to_string(),
-            ports: Vec::new(),
-        }
-    }
-
     /// Serialize to a JSON string (for storage in item NBT).
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_default()
@@ -144,18 +130,6 @@ impl ChipMeta {
             Self::from_json(json)
         } else {
             None
-        }
-    }
-
-    /// Format a compact tooltip line describing the ports.
-    pub fn port_summary(&self) -> String {
-        if self.ports.is_empty() {
-            "No ports".to_string()
-        } else {
-            self.ports.iter()
-                .map(|p| format!("{}({}/{})", p.label, p.side.name(), p.dir.name()))
-                .collect::<Vec<_>>()
-                .join(", ")
         }
     }
 }

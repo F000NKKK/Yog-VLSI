@@ -172,10 +172,6 @@ pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
     format!("§aSaved '{}' — {} ports, {} blocks.", entry.meta.name, entry.meta.port_count, entry.circuit.blocks.len())
 }
 
-pub fn is_editing(player_name: &str) -> bool {
-    SESSIONS.lock().unwrap().contains_key(player_name)
-}
-
 pub fn register(registry: &mut Registry) {
     // `/vlsi design <name> <tier>` — create a blank design and jump straight into the editor.
     registry.on_typed_command("vlsi", "word word word", |ctx, srv| {

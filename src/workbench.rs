@@ -24,10 +24,6 @@ pub const BLUEPRINT_ID: &str = "yog-vlsi:blueprint";
 pub static RESOURCES: LazyLock<Mutex<HashMap<(i32, i32, i32), HashMap<String, u64>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// In-memory chip slot per workbench position: (x, y, z) → Option<(ChipMeta, CircuitData)>
-pub static CHIP_SLOTS: LazyLock<Mutex<HashMap<(i32, i32, i32), Option<(ChipMeta, CircuitData)>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
 pub fn register(registry: &mut Registry) {
     // ── Workbench block ────────────────────────────────────────────────────
     registry.register_block(

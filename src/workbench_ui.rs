@@ -224,7 +224,7 @@ pub fn render(gfx: &GfxContext) {
 }
 
 /// Handle click events forwarded from the Java side.
-pub fn handle_click(ui_id: &str, event: &str) {
+pub fn handle_click(_ui_id: &str, event: &str) {
     if event == "close" {
         clear();
         return;

@@ -739,10 +739,4 @@ impl RedstoneVM {
         }
         result
     }
-
-    pub fn write_inputs(&mut self, y: u32, inputs: &[(u32, u32, u8)]) {
-        for &(x, z, power) in inputs {
-            self.set_port_input(x, y, z, power);
-        }
-    }
 }
