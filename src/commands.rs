@@ -7,7 +7,7 @@
 //! /vlsi vm step          — run one VM tick on the held chip
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 use yog_api::player::Player;
 use yog_api::{Registry, Storage};
@@ -15,16 +15,17 @@ use yog_api::{Registry, Storage};
 use crate::chip::{ChipMeta, CircuitBlock, CircuitData, Port, PortDir, PortSide};
 use crate::vm::{BlockType, Facing, RedstoneVM, Tier};
 
-/// In-memory ALU state: (dim, x, y, z) → list of (chip_id, tier)
-pub static ALU_STATE: Mutex<HashMap<(String, i32, i32, i32), Vec<(String, Tier)>>> =
-    Mutex::new(HashMap::new());
+/// In-memory ALU state: (x, y, z) → list of (chip_id, tier)
+pub static ALU_STATE: LazyLock<Mutex<HashMap<(i32, i32, i32), Vec<(String, Tier)>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// In-memory chip-VM cache: chip_id → RedstoneVM
-pub static VM_CACHE: Mutex<HashMap<String, RedstoneVM>> = Mutex::new(HashMap::new());
+pub static VM_CACHE: LazyLock<Mutex<HashMap<String, RedstoneVM>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub fn register(registry: &mut Registry) {
     // ── /vlsi ──────────────────────────────────────────────────────────────
-    registry.on_command("vlsi", |ctx, _srv| {
+    registry.on_command("vlsi", |_ctx, _srv| {
         Some(format!(
             "§6Yog VLSI §7— Very Large Scale Integration\n\
              §7/vlsi chip <tier>   §f— give blank chip\n\
@@ -36,7 +37,7 @@ pub fn register(registry: &mut Registry) {
     });
 
     // ── /vlsi chip <tier> ──────────────────────────────────────────────────
-    registry.on_typed_command("vlsi", "word", |ctx, srv| {
+    registry.on_typed_command("vlsi", "word", |ctx, _srv| {
         let sub = ctx.arg_str(0).unwrap_or("");
         if sub == "chip" {
             Some("§cUsage: /vlsi chip <tier>".into())
@@ -260,15 +261,17 @@ fn save_circuit(srv: &dyn yog_api::Server, circuit: &CircuitData) {
     let _ = store.flush();
 }
 
-fn load_circuit(srv: &dyn yog_api::Server, chip_id: &str) -> Option<CircuitData> {
+pub fn load_circuit(srv: &dyn yog_api::Server, chip_id: &str) -> Option<CircuitData> {
     let game_dir = srv.game_dir();
     let store = Storage::open(&game_dir, "yog-vlsi");
-    let json: Option<String> = store.get(&circuit_key(chip_id));
+    let json = store.get(&circuit_key(chip_id))
+        .and_then(|v| v.as_str())
+        .map(String::from);
     json.and_then(|j| CircuitData::from_json(&j))
 }
 
 /// Load a CircuitData into a RedstoneVM, placing all blocks.
-fn load_circuit_into_vm(vm: &mut RedstoneVM, circuit: &CircuitData) {
+pub fn load_circuit_into_vm(vm: &mut RedstoneVM, circuit: &CircuitData) {
     for block in &circuit.blocks {
         let bt = parse_block_type(&block.block_id, &block.state_json);
         vm.set_block(block.x, block.y, block.z, bt);
