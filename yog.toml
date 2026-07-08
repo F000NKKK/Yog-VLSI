@@ -1,0 +1,11 @@
+[mod]
+id          = "yog-vlsi"
+name        = "Yog VLSI"
+version     = "0.1.0"
+description = "Very Large Scale Integration — design and fabricate redstone microchips with a Rust-accelerated simulation VM. Multi-tier workbench, ALU block, and chip-to-chip linking."
+authors     = ["F000NK", "Yog Team"]
+license     = "AGPL-3.0-only"
+
+[dependencies]
+serde      = "*"
+serde_json = "*"
