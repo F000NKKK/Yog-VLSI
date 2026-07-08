@@ -1,1 +1,3 @@
-{"parent": "yog-vlsi:block/alu"}
+{
+  "parent": "yog-vlsi:block/alu_diamond"
+}

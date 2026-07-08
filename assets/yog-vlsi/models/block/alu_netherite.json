@@ -1,0 +1,12 @@
+{
+  "parent": "block/cube",
+  "textures": {
+    "particle": "yog-vlsi:block/alu_side_netherite",
+    "down": "yog-vlsi:block/alu_top_netherite",
+    "up": "yog-vlsi:block/alu_top_netherite",
+    "north": "yog-vlsi:block/alu_side_netherite",
+    "south": "yog-vlsi:block/alu_side_netherite",
+    "east": "yog-vlsi:block/alu_side_netherite",
+    "west": "yog-vlsi:block/alu_side_netherite"
+  }
+}

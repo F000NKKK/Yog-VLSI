@@ -1,0 +1,12 @@
+{
+  "parent": "block/cube",
+  "textures": {
+    "particle": "yog-vlsi:block/alu_side_gold",
+    "down": "yog-vlsi:block/alu_top_gold",
+    "up": "yog-vlsi:block/alu_top_gold",
+    "north": "yog-vlsi:block/alu_side_gold",
+    "south": "yog-vlsi:block/alu_side_gold",
+    "east": "yog-vlsi:block/alu_side_gold",
+    "west": "yog-vlsi:block/alu_side_gold"
+  }
+}

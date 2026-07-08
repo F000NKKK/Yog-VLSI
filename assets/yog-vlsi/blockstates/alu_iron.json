@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "yog-vlsi:block/alu_iron" }
+  }
+}
