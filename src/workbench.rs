@@ -137,11 +137,13 @@ pub fn register(registry: &mut Registry) {
     );
 
     // ── Workbench UI (yog-ui overlay on inventory screen) ──────────────────
-    // The inventory screen opens automatically on right-click.
-    // Custom widgets (design library, fabricate button) are rendered via
-    // `registry.on_ui_render("yog:inv/yog-vlsi:workbench", ...)` and
-    // `registry.register_ui("yog:inv/yog-vlsi:workbench", ...)`.
-    // See rust/crates/yog-inventory/DESIGN.md phase 7.
+    // Capture player context so the UI render callback knows whose designs to show.
+    registry.on_use_block(move |e, phase, srv| -> bool {
+        if phase != yog_api::EventPhase::Pre { return true; }
+        if e.block_id != WORKBENCH_ID { return true; }
+        crate::workbench_inv_ui::set_player_context(&srv.game_dir(), &e.player_name);
+        true // don't cancel — let the inventory open
+    });
 }
 
 /// Extract CircuitData from a Blueprint item's NBT.
@@ -181,7 +183,7 @@ fn tier_from_size(size: usize) -> Tier {
 }
 
 pub fn load_resources(srv: &dyn yog_api::Server) {
-    let mut store = Storage::open(&srv.game_dir(), "yog-vlsi/workbench_resources");
+    let store = Storage::open(&srv.game_dir(), "yog-vlsi/workbench_resources");
     if let Some(data) = store.get("resources").and_then(|v| v.as_str()) {
         if let Ok(parsed) = serde_json::from_str(data) {
             *RESOURCES.lock().unwrap() = parsed;

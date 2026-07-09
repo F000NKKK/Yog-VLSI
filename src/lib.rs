@@ -10,6 +10,7 @@ mod network;
 mod port;
 mod vm;
 mod workbench;
+mod workbench_inv_ui;
 mod workbench_ui;
 
 use yog_api::{info, Mod, Registry};
@@ -31,10 +32,10 @@ impl Mod for YogVlsi {
 
         registry.on_tick(|srv| { alu::tick_all(srv); });
 
-        // Workbench UI
-        let wb_id = "yog-vlsi:workbench";
-        registry.register_ui(wb_id, |uid, ev| workbench_ui::handle_click(uid, ev));
-        registry.on_ui_render(wb_id, |gfx| workbench_ui::render(gfx));
+        // Workbench UI (inventory screen)
+        let wb_inv_id = "yog:inv/yog-vlsi:workbench";
+        registry.register_ui(wb_inv_id, |uid, ev| workbench_inv_ui::handle_click(uid, ev));
+        registry.on_ui_render(wb_inv_id, |gfx| workbench_inv_ui::render(gfx));
 
         // ALU UI
         let alu_id = "yog-vlsi:alu";
