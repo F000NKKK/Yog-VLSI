@@ -1,36 +1,42 @@
 //! VLSI Workbench: block for designing and fabricating microchips.
 //!
-//! Interaction:
-//! - Right-click empty → show design library + resource status
-//! - Right-click with blank chip → insert into workbench slot
-//! - Right-click with Blueprint → import into library
-//! - Right-click with resource items → add to resource ammo
+//! Now backed by the yog-inventory framework — right-click opens a real
+//! Container/Menu screen with slots (chip + resources) + player inventory.
+//! Custom UI (design library, fabricate button) rendered via yog-ui callbacks.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 
-use yog_api::player::Player;
-use yog_api::{BlockDef, ItemDef, Registry, Storage};
+use yog_api::{BlockDef, InventoryDef, ItemDef, Registry, Storage};
 
-use crate::chip::{ChipMeta, CircuitData};
-use crate::designs;
+use crate::chip::CircuitData;
 use crate::vm::Tier;
 
 pub const WORKBENCH_ID: &str = "yog-vlsi:vlsi_workbench";
 pub const BLUEPRINT_ID: &str = "yog-vlsi:blueprint";
 
-/// In-memory resource storage per workbench position: (x, y, z) → (item_id → quantity)
+/// In-memory resource storage per workbench position: (x, y, z) → (item_id → quantity).
+/// TODO: migrate to block-entity inventory slots (phase 7 follow-up).
 pub static RESOURCES: LazyLock<Mutex<HashMap<(i32, i32, i32), HashMap<String, u64>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub fn register(registry: &mut Registry) {
+    // ── Workbench inventory (phase 7) ───────────────────────────────────────
+    const WORKBENCH_INV: &str = "yog-vlsi:workbench";
+    registry.register_inventory(
+        InventoryDef::new(WORKBENCH_INV, 9)
+            .title("VLSI Workbench")
+            .include_player_inventory(true)
+    );
+
     // ── Workbench block ────────────────────────────────────────────────────
     registry.register_block(
         BlockDef::new(WORKBENCH_ID)
             .strength(3.5, 6.0)
             .sound("metal")
             .requires_tool()
+            .inventory(WORKBENCH_INV)
     );
 
     registry.register_item(
@@ -79,8 +85,7 @@ pub fn register(registry: &mut Registry) {
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:analog_cable")
-            .tooltip("§7Carries a single analog redstone signal (0–15).
-§7Connects Redstone Port to external redstone.")
+            .tooltip("§7Carries a single analog redstone signal (0–15).\n§7Connects Redstone Port to external redstone.")
     );
     registry.add_shaped_recipe(
         yog_api::ShapedRecipe::new("yog-vlsi:analog_cable_craft", "yog-vlsi:analog_cable", 3)
@@ -99,8 +104,7 @@ pub fn register(registry: &mut Registry) {
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:digital_cable")
-            .tooltip("§7Carries up to 256 digital bits (64 channels × 4 colors).
-§7Connects Digital Ports between ALUs.")
+            .tooltip("§7Carries up to 256 digital bits (64 channels × 4 colors).\n§7Connects Digital Ports between ALUs.")
     );
     registry.add_shaped_recipe(
         yog_api::ShapedRecipe::new("yog-vlsi:digital_cable_craft", "yog-vlsi:digital_cable", 4)
@@ -121,8 +125,7 @@ pub fn register(registry: &mut Registry) {
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:redstone_port")
-            .tooltip("§7Adapter between ALU and external redstone.
-§7Place on any side of an ALU. Connect Analog Cable on one side, redstone on the other.")
+            .tooltip("§7Adapter between ALU and external redstone.\n§7Place on any side of an ALU. Connect Analog Cable on one side, redstone on the other.")
     );
     registry.add_shaped_recipe(
         yog_api::ShapedRecipe::new("yog-vlsi:redstone_port_craft", "yog-vlsi:redstone_port", 1)
@@ -133,105 +136,12 @@ pub fn register(registry: &mut Registry) {
             .key('R', "minecraft:redstone")
     );
 
-    // ── Workbench right-click handler ──────────────────────────────────────
-    registry.on_use_block(move |e, phase, srv| -> bool {
-        if phase != yog_api::EventPhase::Pre { return true; }
-        if e.block_id != WORKBENCH_ID { return true; }
-
-        let key = (e.pos.x, e.pos.y, e.pos.z);
-        let game_dir = srv.game_dir();
-        let player_name = e.player_name.clone();
-
-        // Check held item
-        let held_nbt = srv.get_held_item_nbt(&e.player_name);
-        let held_item = {
-            let slots = Player::new(srv, &e.player_name).inventory();
-            slots.into_iter()
-                .find(|(slot, _, _)| *slot == 36) // hotbar slot 0
-                .map(|(_, id, _)| id)
-        };
-
-        // Try to detect Blueprint in hand
-        if let Some(ref item_id) = held_item {
-            if item_id == BLUEPRINT_ID {
-                if let Some(nbt) = &held_nbt {
-                    // Import Blueprint into library
-                    if let Some(circuit) = extract_blueprint_circuit(nbt) {
-                        let tier = tier_from_size(circuit.width);
-                        let design_id = designs::import_design(
-                            &game_dir, &player_name,
-                            "Imported Design", tier,
-                            circuit.ports.clone(), circuit,
-                        );
-                        srv.broadcast(&format!(
-                            "§a{} imported a Blueprint into their design library (ID: {})",
-                            e.player_name, &design_id[..8]
-                        ));
-                        // Consume the Blueprint? No — Blueprint is reusable per design
-                        return false;
-                    }
-                }
-                return false;
-            }
-        }
-
-        // Try to detect blank chip
-        if let Some(ref item_id) = held_item {
-            if item_id.starts_with("yog-vlsi:chip_") {
-                let tier = match item_id.as_str() {
-                    "yog-vlsi:chip_wood" => Tier::Wood,
-                    "yog-vlsi:chip_stone" => Tier::Stone,
-                    "yog-vlsi:chip_gold" => Tier::Gold,
-                    "yog-vlsi:chip_iron" => Tier::Iron,
-                    "yog-vlsi:chip_diamond" => Tier::Diamond,
-                    "yog-vlsi:chip_netherite" => Tier::Netherite,
-                    _ => return true,
-                };
-
-                // Is this a programmed chip? Check NBT
-                if let Some(nbt) = &held_nbt {
-                    if let Some(meta) = ChipMeta::from_nbt(nbt) {
-                        // Programmed chip — show info
-                        srv.broadcast(&format!(
-                            "§e{} placed programmed chip '{}' ({} tier, {} ports) into workbench",
-                            e.player_name, meta.name, meta.tier.name(), meta.ports.len()
-                        ));
-                        // TODO: load circuit data and store in workbench slot
-                        return false;
-                    }
-                }
-
-                // Blank chip — insert into workbench slot
-                srv.broadcast(&format!(
-                    "§a{} inserted blank {} chip into workbench. §7Use /vlsi designs to view your library.",
-                    e.player_name, tier.name()
-                ));
-                return false;
-            }
-        }
-
-        // Try to add resources from held item
-        if let Some(ref item_id) = held_item {
-            if !item_id.starts_with("yog-vlsi:") && item_id != "minecraft:air" {
-                let mut resources = RESOURCES.lock().unwrap();
-                let wb_res = resources.entry(key).or_default();
-                let count = wb_res.entry(item_id.clone()).or_default();
-                *count += 1;
-                // Consume one item from hand (simplified)
-                srv.broadcast(&format!(
-                    "§a{} added 1× {} to workbench resources. Total: {}",
-                    e.player_name, item_id, *count
-                ));
-                return false;
-            }
-        }
-
-        // No special item — open workbench GUI
-        crate::workbench_ui::set_player(&game_dir, &player_name);
-        crate::network::open_ui_for(srv, &player_name, "yog-vlsi:workbench");
-
-        false
-    });
+    // ── Workbench UI (yog-ui overlay on inventory screen) ──────────────────
+    // The inventory screen opens automatically on right-click.
+    // Custom widgets (design library, fabricate button) are rendered via
+    // `registry.on_ui_render("yog:inv/yog-vlsi:workbench", ...)` and
+    // `registry.register_ui("yog:inv/yog-vlsi:workbench", ...)`.
+    // See rust/crates/yog-inventory/DESIGN.md phase 7.
 }
 
 /// Extract CircuitData from a Blueprint item's NBT.
@@ -259,41 +169,31 @@ fn extract_blueprint_circuit(nbt: &str) -> Option<CircuitData> {
     }
 }
 
-/// Infer chip tier from world size.
-fn tier_from_size(size: u32) -> Tier {
+fn tier_from_size(size: usize) -> Tier {
     match size {
         16 => Tier::Wood,
         32 => Tier::Stone,
-        64 => Tier::Gold, // also Iron — but same size, default to Gold
+        64 => Tier::Gold,
         128 => Tier::Diamond,
         256 => Tier::Netherite,
-        _ => Tier::Wood,
+        _ => Tier::Iron, // default
     }
 }
 
-/// Save all workbench resources to persistent storage.
-///
-/// `HashMap<(i32,i32,i32), _>` doesn't round-trip through `serde_json`
-/// directly — JSON object keys must be strings, so a tuple key silently
-/// fails to serialize (and `unwrap_or_default()` swallowed that error here
-/// previously, meaning resources never actually survived a restart). Persist
-/// as a `Vec` of pairs instead.
-pub fn save_resources(srv: &dyn yog_api::Server) {
-    let game_dir = srv.game_dir();
-    let entries: Vec<((i32, i32, i32), HashMap<String, u64>)> =
-        RESOURCES.lock().unwrap().iter().map(|(k, v)| (*k, v.clone())).collect();
-    let mut store = Storage::open(&game_dir, "yog-vlsi");
-    store.set("workbench_resources", serde_json::to_string(&entries).unwrap_or_default());
-    let _ = store.flush();
+pub fn load_resources(srv: &dyn yog_api::Server) {
+    let mut store = Storage::open(&srv.game_dir(), "yog-vlsi/workbench_resources");
+    if let Some(data) = store.get("resources").and_then(|v| v.as_str()) {
+        if let Ok(parsed) = serde_json::from_str(data) {
+            *RESOURCES.lock().unwrap() = parsed;
+        }
+    }
 }
 
-/// Load all workbench resources from persistent storage.
-pub fn load_resources(srv: &dyn yog_api::Server) {
-    let game_dir = srv.game_dir();
-    let store = Storage::open(&game_dir, "yog-vlsi");
-    if let Some(json) = store.get("workbench_resources").and_then(|v| v.as_str()) {
-        if let Ok(entries) = serde_json::from_str::<Vec<((i32, i32, i32), HashMap<String, u64>)>>(json) {
-            *RESOURCES.lock().unwrap() = entries.into_iter().collect();
-        }
+pub fn save_resources(srv: &dyn yog_api::Server) {
+    let resources = RESOURCES.lock().unwrap();
+    if let Ok(json) = serde_json::to_string(&*resources) {
+        let mut store = Storage::open(&srv.game_dir(), "yog-vlsi/workbench_resources");
+        store.set("resources", &*json);
+        let _ = store.flush();
     }
 }
