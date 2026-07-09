@@ -635,3 +635,5 @@ pub fn parse_block_type(block_id: &str, state_json: &str) -> BlockType {
 fn door_half(state_json: &str) -> crate::vm::DoorHalf {
     if state_json.contains("\"half\":\"upper\"") { crate::vm::DoorHalf::Upper } else { crate::vm::DoorHalf::Lower }
 }
+
+

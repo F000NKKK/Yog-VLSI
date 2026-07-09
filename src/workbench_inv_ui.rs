@@ -1,8 +1,8 @@
 //! Workbench inventory UI — rendered as yog-ui overlay on the native inventory screen.
 //!
-//! Activated when a player opens the VLSI Workbench (right-click).
-//! Shows slot widgets (from the block entity inventory) + design library +
-//! fabricate/design buttons on the right side.
+//! Layout: left = chip slot + resource vials, right = design library + buttons.
+//! Resource slots (1–6) show vial meters with item icons and fill indicators.
+//! Slot 0 = chip, slots 1–6 = redstone/iron/gold/quartz/wood/cobblestone.
 
 use std::sync::Mutex;
 
@@ -20,13 +20,27 @@ static PLAYER: Mutex<(String, String)> = Mutex::new((String::new(), String::new(
 static LAST_PLAYER_POS: Mutex<(f32, f32, f32)> = Mutex::new((0.0, 64.0, 0.0));
 static LAST_UI: Mutex<Option<UiRoot>> = Mutex::new(None);
 
+// ── Resource definitions ──────────────────────────────────────────────────────
+
+/// (item_id, vial_color, capacity_per_slot)
+const RESOURCES: &[(&str, u32, u32)] = &[
+    ("minecraft:redstone",    0xFF_AA0000, 64),
+    ("minecraft:iron_ingot",  0xFF_D8D8D8, 64),
+    ("minecraft:gold_ingot",  0xFF_FFD700, 64),
+    ("minecraft:quartz",      0xFF_FFFAFA, 64),
+    ("minecraft:oak_log",     0xFF_8B6914, 64),
+    ("minecraft:cobblestone", 0xFF_808080, 64),
+];
+
 // ── Layout constants ──────────────────────────────────────────────────────────
 
 const PAD: f32 = 8.0;
 const ROW_H: f32 = 18.0;
 const BTN_H: f32 = 22.0;
 const SLOT_SZ: f32 = 18.0;
-const RIGHT_W: f32 = 200.0;
+const VIAL_W: f32 = 6.0;
+const RIGHT_W: f32 = 210.0;
+const RESOURCE_CAP: u32 = 64;
 
 // ── Colors ────────────────────────────────────────────────────────────────────
 
@@ -38,10 +52,10 @@ const TEXT_DIM: u32 = 0xFF_777777;
 const TEXT_BRIGHT: u32 = 0xFF_FFFFFF;
 const BTN_BG: u32   = 0xFF_333333;
 const SEL_BG: u32   = 0xFF_2A4A6E;
+const SLOT_BG: u32  = 0xFF_0D0D0D;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/// Render callback for `registry.on_ui_render("yog:inv/yog-vlsi:workbench", ...)`.
 pub fn render(gfx: &GfxContext) {
     let (sw_i, sh_i) = gfx.screen_size();
     let sw = sw_i as f32;
@@ -54,10 +68,9 @@ pub fn render(gfx: &GfxContext) {
     let designs = list_designs(&game_dir, &player_name);
     let selected = SELECTED.lock().unwrap().clone();
 
-    // Build the UI tree
     let slot_count = slot_cache::slot_count();
-    let left_w = 8.0 + 9.0 * SLOT_SZ + 8.0; // 9-slot grid + padding
-    let total_w = left_w + RIGHT_W + PAD;
+    let left_w = SLOT_SZ + VIAL_W + 30.0; // chip slot + vials + labels
+    let total_w = left_w + RIGHT_W + PAD * 2.0;
     let total_h = sh * 0.85;
 
     let root = build_tree(&game_dir, &player_name, &designs, selected.as_deref(), total_w, total_h, slot_count);
@@ -71,7 +84,6 @@ pub fn render(gfx: &GfxContext) {
     *LAST_UI.lock().unwrap() = Some(ui);
 }
 
-/// Click callback for `registry.register_ui("yog:inv/yog-vlsi:workbench", ...)`.
 pub fn handle_click(_ui_id: &str, event: &str) {
     let (game_dir, player_name) = PLAYER.lock().unwrap().clone();
     if player_name.is_empty() { return; }
@@ -122,7 +134,6 @@ pub fn handle_click(_ui_id: &str, event: &str) {
         }
     }
 
-    // Scroll
     if let Some(rest) = event.strip_prefix("scroll:") {
         let dy: f32 = rest.parse().unwrap_or(0.0);
         let mut s = SCROLL.lock().unwrap();
@@ -131,7 +142,6 @@ pub fn handle_click(_ui_id: &str, event: &str) {
     }
 }
 
-/// Call before rendering — sets player context.
 pub fn set_player_context(game_dir: &str, player_name: &str) {
     *PLAYER.lock().unwrap() = (game_dir.to_string(), player_name.to_string());
 }
@@ -150,22 +160,22 @@ fn build_tree(
     designs: &[DesignMeta], selected: Option<&str>,
     total_w: f32, total_h: f32, slot_count: usize,
 ) -> widget::Widget {
-    let btn_bar_h = BTN_H + 12.0;
-    let body_h = total_h - 28.0 - btn_bar_h; // title + buttons
+    let btn_bar_h = BTN_H + 14.0;
+    let body_h = total_h - 28.0 - btn_bar_h;
 
     let title = widget::panel(FlexDir::Row).dock(Dock::Top).h(28.0).bg(BG_LIGHT)
         .child(widget::label("VLSI Workbench").color(TEXT_BRIGHT).flex(1.0)
             .padding(6.0, 0.0, 0.0, 8.0).no_wrap());
 
-    // Left: slot grid
-    let slot_panel = build_slot_grid(slot_count);
+    // Left: chip slot + resource vials
+    let left_panel = build_resource_panel(slot_count);
 
     // Right: design list
     let right_panel = build_design_list(game_dir, player_name, designs, selected, body_h);
 
     let body = widget::panel(FlexDir::Row).dock(Dock::Top).h(body_h).gap(PAD)
         .padding(6.0, PAD, 0.0, PAD)
-        .child(slot_panel)
+        .child(left_panel)
         .child(right_panel);
 
     let btn_bar = widget::panel(FlexDir::Row).dock(Dock::Bottom).h(btn_bar_h).gap(6.0)
@@ -184,23 +194,62 @@ fn bar_btn(label: &str) -> widget::Widget {
         .padding(4.0, 8.0, 4.0, 8.0)
 }
 
-fn build_slot_grid(slot_count: usize) -> widget::Widget {
-    let columns = 9usize;
-    let mut grid = widget::panel(FlexDir::Column).gap(0.0);
-    for row_start in (0..slot_count).step_by(columns) {
-        let mut row = widget::panel(FlexDir::Row).gap(0.0);
-        for col in 0..columns {
-            let idx = row_start + col;
-            if idx < slot_count {
-                row = row.child(widget::inv_slot(idx));
-            }
-        }
-        grid = grid.child(row);
+// ── Resource panel ────────────────────────────────────────────────────────────
+
+fn build_resource_panel(slot_count: usize) -> widget::Widget {
+    let mut col = widget::panel(FlexDir::Column).gap(4.0);
+
+    // Chip slot (index 0)
+    col = col.child(widget::label("Chip:").color(ACCENT).no_wrap());
+    if slot_count > 0 {
+        col = col.child(widget::inv_slot(0));
     }
-    widget::panel(FlexDir::Column)
-        .child(widget::label("Slots:").color(ACCENT).no_wrap())
-        .child(grid.padding(2.0, 0.0, 0.0, 0.0))
+
+    // Resource vials (slots 1–6)
+    col = col.child(widget::label("Resources:").color(ACCENT).no_wrap());
+    for i in 0..RESOURCES.len() {
+        let slot_idx = 1 + i;
+        let (item_id, color, cap) = RESOURCES[i];
+        if slot_idx < slot_count {
+            col = col.child(build_vial_row(slot_idx, item_id, color, cap));
+        }
+    }
+    col
 }
+
+fn build_vial_row(slot_idx: usize, item_id: &str, color: u32, cap: u32) -> widget::Widget {
+    // Query slot data from the pre-fetched cache
+    let sd = slot_cache::get_slot(slot_idx);
+    let count = sd.as_ref().map(|s| s.count).unwrap_or(0);
+    let frac = (count as f32 / cap as f32).clamp(0.0, 1.0);
+
+    // Item icon (from vanilla textures, like creative inventory)
+    let icon = widget::item_slot(item_id).w(SLOT_SZ).h(SLOT_SZ);
+
+    // Vial fill bar
+    let fill_h = (SLOT_SZ - 2.0) * frac;
+    let fill = widget::panel(FlexDir::Column)
+        .dock(Dock::Bottom).h(fill_h.max(1.0)).bg(color);
+
+    let vial = widget::panel(FlexDir::Column)
+        .w(VIAL_W).h(SLOT_SZ).bg(SLOT_BG)
+        .padding(1.0, 1.0, 1.0, 1.0)
+        .child(fill);
+
+    // Count label
+    let count_label = if count > 0 {
+        widget::label(format!("{}", count)).color(TEXT_BRIGHT).shadow(false).font_scale(0.7)
+    } else {
+        widget::label("0").color(TEXT_DIM).shadow(false).font_scale(0.7)
+    };
+
+    widget::panel(FlexDir::Row).gap(4.0).align(Align::Center)
+        .child(icon)
+        .child(vial)
+        .child(count_label)
+}
+
+// ── Design list ───────────────────────────────────────────────────────────────
 
 fn build_design_list(
     game_dir: &str, player_name: &str,
@@ -221,7 +270,7 @@ fn build_design_list(
 
     let mut list = widget::panel(FlexDir::Column).gap(2.0).flex(1.0);
     if designs.is_empty() {
-        list = list.child(widget::label("(no designs)").color(TEXT_DIM).shadow(false));
+        list = list.child(widget::label("(no designs — use /vlsi design)").color(TEXT_DIM).shadow(false));
     }
     for (i, d) in designs.iter().enumerate().skip(scroll).take(rows_visible) {
         let is_sel = selected == Some(d.name.as_str());
