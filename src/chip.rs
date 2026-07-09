@@ -198,7 +198,6 @@ pub fn register(registry: &mut Registry) {
 
         registry.register_item(
             ItemDef::new(&item_id)
-                .name(&format!("{} Microchip", tier.name()))
                 .tooltip(&tooltip)
                 .max_stack(1)
         );

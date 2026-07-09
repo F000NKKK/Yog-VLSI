@@ -35,7 +35,6 @@ pub fn register(registry: &mut Registry) {
 
     registry.register_item(
         ItemDef::new(WORKBENCH_ID)
-            .name("VLSI Workbench")
             .tooltip("§7Design and fabricate redstone microchips.\n§7Right-click to open the design interface.\n§7Insert blank chips, Blueprints, or resources.")
     );
 
@@ -53,7 +52,6 @@ pub fn register(registry: &mut Registry) {
     // ── Blueprint item ─────────────────────────────────────────────────────
     registry.register_item(
         ItemDef::new(BLUEPRINT_ID)
-            .name("VLSI Blueprint")
             .tooltip("§7Stores a chip design for sharing.\n§7Use in a VLSI Workbench to import.\n§7Craft an empty Blueprint, then Export from the workbench.")
             .max_stack(1)
     );
@@ -81,7 +79,6 @@ pub fn register(registry: &mut Registry) {
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:analog_cable")
-            .name("Analog Cable")
             .tooltip("§7Carries a single analog redstone signal (0–15).
 §7Connects Redstone Port to external redstone.")
     );
@@ -102,7 +99,6 @@ pub fn register(registry: &mut Registry) {
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:digital_cable")
-            .name("Digital Cable")
             .tooltip("§7Carries up to 256 digital bits (64 channels × 4 colors).
 §7Connects Digital Ports between ALUs.")
     );
@@ -125,7 +121,6 @@ pub fn register(registry: &mut Registry) {
     );
     registry.register_item(
         ItemDef::new("yog-vlsi:redstone_port")
-            .name("Redstone Port")
             .tooltip("§7Adapter between ALU and external redstone.
 §7Place on any side of an ALU. Connect Analog Cable on one side, redstone on the other.")
     );

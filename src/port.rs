@@ -64,15 +64,10 @@ fn write_label(srv: &dyn yog_api::Server, dimension: &str, pos: BlockPos, label:
 }
 
 pub fn register(registry: &mut Registry) {
-    for (id, name) in [
-        (PORT_INPUT, "VLSI Port (Input)"),
-        (PORT_OUTPUT, "VLSI Port (Output)"),
-        (PORT_BIDI, "VLSI Port (Bidirectional)"),
-    ] {
+    for id in [PORT_INPUT, PORT_OUTPUT, PORT_BIDI] {
         registry.register_block(BlockDef::new(id).strength(1.0, 3.0).sound("stone"));
         registry.register_item(
             ItemDef::new(id)
-                .name(name)
                 .tooltip("§7Place inside a chip's virtual circuit.\n§7Right-click to cycle Input/Output/Bidirectional.\n§7Sneak + right-click, then type a name in chat to rename."),
         );
     }

@@ -41,7 +41,6 @@ pub fn register(registry: &mut Registry) {
         );
         registry.register_item(
             ItemDef::new(&id)
-                .name(&format!("{} ALU", tier.name()))
                 .tooltip(&format!("§7Insert programmed microchips. Right-click to open the node editor.\n§7Max chips: {} | Digital channels/side: {}", max_chips, channels))
         );
 
