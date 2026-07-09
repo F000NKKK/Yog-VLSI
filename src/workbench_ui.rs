@@ -114,16 +114,16 @@ fn build_tree(game_dir: &str, player_name: &str, designs: &[DesignMeta], selecte
     let title_bar = widget::panel(FlexDir::Row)
         .dock(Dock::Top).h(TITLE_H).bg(BG_LIGHT)
         .child(widget::label("VLSI Workbench").color(TEXT_BRIGHT).flex(1.0)
-            .padding(7.0, 0.0, 0.0, 8.0).no_wrap())
-        .child(widget::button("X").on_click("close")
-            .color(0xFF_FF4444).bg(0xFF_553333)
-            .padding(4.0, 6.0, 4.0, 6.0).margin(2.0, 4.0, 2.0, 0.0));
+            .padding(7.0, 0.0, 0.0, 8.0).no_wrap());
+
+    // Half of the body's inner width goes to each side (minus the gap between them).
+    let side_w = ((pw - PAD * 2.0 - PAD) / 2.0).max(1.0);
 
     let body = widget::panel(FlexDir::Row)
         .dock(Dock::Top).h(body_h).gap(PAD)
         .padding(6.0, PAD, 0.0, PAD)
         .child(build_design_list(designs, selected, body_h))
-        .child(build_resources_panel(body_h));
+        .child(build_resources_panel(side_w));
 
     let mut info_bar = widget::panel(FlexDir::Row)
         .dock(Dock::Top).h(INFO_H).padding(2.0, PAD, 0.0, PAD);
@@ -165,7 +165,11 @@ fn build_design_list(designs: &[DesignMeta], selected: Option<&str>, body_h: f32
     }
     let scroll = *SCROLL.lock().unwrap();
 
-    let mut list = widget::panel(FlexDir::Column).h(list_h).bg(SLOT_BG).gap(2.0).padding(2.0, 2.0, 2.0, 2.0);
+    // No explicit height here: `rows_visible` already limits how many rows are
+    // added, so the panel naturally sizes to ~list_h. An explicit `.h()` cap
+    // would clip real content below the boundary while still *drawing* it —
+    // hit-testing bails out at the parent rect, making those rows unclickable.
+    let mut list = widget::panel(FlexDir::Column).bg(SLOT_BG).gap(2.0).padding(2.0, 2.0, 2.0, 2.0);
     if designs.is_empty() {
         list = list.child(widget::label("(no designs — use /vlsi design)").color(TEXT_DIM).shadow(false));
     }
@@ -196,12 +200,16 @@ fn selected_info(game_dir: &str, player_name: &str, designs: &[DesignMeta], sele
         .color(TEXT_BRIGHT).shadow(false).no_wrap())
 }
 
-fn build_resources_panel(body_h: f32) -> widget::Widget {
-    let label_h = 16.0;
-    let list_h = (body_h - label_h).max(0.0);
+/// Resources render as vertical "vial" meters (shell + color-filled bar,
+/// filled proportionally to `qty / RESOURCE_CAP`) instead of a scrolling
+/// text list, wrapping into as many columns as fit `avail_w`.
+const RESOURCE_CAP: u64 = 1_000_000;
+const VIAL_W: f32 = 22.0;
+const VIAL_H: f32 = 48.0;
 
+fn build_resources_panel(avail_w: f32) -> widget::Widget {
     let res = RESOURCES.lock().unwrap();
-    let all_res: Vec<(String, u64)> = res.values()
+    let mut all_res: Vec<(String, u64)> = res.values()
         .flat_map(|m| m.iter())
         .fold(HashMap::new(), |mut acc, (k, v)| {
             *acc.entry(k.clone()).or_default() += *v;
@@ -210,20 +218,64 @@ fn build_resources_panel(body_h: f32) -> widget::Widget {
         .into_iter()
         .collect();
     drop(res);
+    all_res.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let mut list = widget::panel(FlexDir::Column).h(list_h).bg(SLOT_BG).gap(1.0).padding(4.0, 4.0, 4.0, 4.0);
+    let col = widget::panel(FlexDir::Column).flex(1.0)
+        .child(widget::label("Resources:").color(ACCENT).no_wrap());
+
     if all_res.is_empty() {
-        list = list.child(widget::label("(empty — right-click workbench with items to add resources)")
+        return col.child(widget::label("(empty — right-click workbench with items)")
             .color(TEXT_DIM).shadow(false));
-    } else {
-        for (item, qty) in all_res.iter().take(24) {
-            list = list.child(widget::label(format!("{item}: {qty}")).color(TEXT_DIM).shadow(false).no_wrap());
-        }
     }
 
-    widget::panel(FlexDir::Column).flex(1.0)
-        .child(widget::label("Resources:").color(ACCENT).no_wrap())
-        .child(list)
+    let cols_per_row = (((avail_w + 8.0) / (VIAL_W + 8.0)).floor() as usize).max(1);
+    let mut rows = widget::panel(FlexDir::Column).gap(8.0);
+    for chunk in all_res.chunks(cols_per_row) {
+        let mut row = widget::panel(FlexDir::Row).gap(8.0);
+        for (item, qty) in chunk {
+            row = row.child(build_vial(item, *qty));
+        }
+        rows = rows.child(row);
+    }
+    col.child(rows)
+}
+
+/// Deterministic pseudo-color derived from the item id, so each resource
+/// keeps a stable, distinguishable fill color across sessions.
+fn color_for(name: &str) -> u32 {
+    let mut h: u32 = 2166136261;
+    for b in name.bytes() { h ^= b as u32; h = h.wrapping_mul(16777619); }
+    let r = 90 + (h & 0x7F);
+    let g = 90 + ((h >> 8) & 0x7F);
+    let b = 90 + ((h >> 16) & 0x7F);
+    0xFF_000000 | (r << 16) | (g << 8) | b
+}
+
+fn short_name(item: &str) -> &str {
+    item.split(':').next_back().unwrap_or(item)
+}
+
+fn fmt_qty(qty: u64) -> String {
+    if qty >= 1_000_000 { format!("{:.1}M", qty as f64 / 1_000_000.0) }
+    else if qty >= 1_000 { format!("{:.1}k", qty as f64 / 1_000.0) }
+    else { qty.to_string() }
+}
+
+fn build_vial(item: &str, qty: u64) -> widget::Widget {
+    let frac = (qty as f32 / RESOURCE_CAP as f32).clamp(0.0, 1.0);
+    let content_h = VIAL_H - 4.0;
+    let fill = widget::panel(FlexDir::Column)
+        .dock(Dock::Bottom).h(content_h * frac).bg(color_for(item));
+
+    let shell = widget::panel(FlexDir::Column)
+        .w(VIAL_W).h(VIAL_H).bg(SLOT_BG)
+        .padding(2.0, 2.0, 2.0, 2.0)
+        .child(fill);
+
+    widget::panel(FlexDir::Column).w(VIAL_W).gap(1.0)
+        .child(shell)
+        .child(widget::label(short_name(item)).color(TEXT_DIM).shadow(false).no_wrap().font_scale(0.6))
+        .child(widget::label(fmt_qty(qty)).color(TEXT_BRIGHT).shadow(false).no_wrap().font_scale(0.6))
 }
 
 /// Handle click events forwarded from the Java side.

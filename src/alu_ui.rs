@@ -135,9 +135,6 @@ fn title_bar() -> widget::Widget {
         .dock(Dock::Top).h(TITLE_H).bg(BG_LIGHT)
         .child(widget::label(format!("ALU  Chips: {}  |  Links: {}", chips.len(), LINKS.lock().unwrap().len()))
             .color(TEXT_BRIGHT).flex(1.0).padding(7.0, 0.0, 0.0, 8.0).no_wrap())
-        .child(widget::button("X").on_click("close")
-            .color(0xFF_FF4444).bg(0xFF_553333)
-            .padding(4.0, 6.0, 4.0, 6.0).margin(2.0, 4.0, 2.0, 0.0))
 }
 
 fn build_selector_tree(pw: f32, ph: f32) -> widget::Widget {
@@ -181,8 +178,8 @@ fn build_editor_tree(pw: f32, ph: f32) -> widget::Widget {
     let body = widget::panel(FlexDir::Row)
         .dock(Dock::Top).h(body_h).gap(PAD)
         .padding(6.0, PAD, 0.0, PAD)
-        .child(build_ports_panel(body_h))
-        .child(build_chips_panel(center_w, body_h));
+        .child(build_ports_panel())
+        .child(build_chips_panel(center_w));
 
     let button_bar = widget::panel(FlexDir::Row)
         .dock(Dock::Bottom).h(BTN_BAR_H).gap(6.0)
@@ -201,15 +198,16 @@ fn build_editor_tree(pw: f32, ph: f32) -> widget::Widget {
         .child(button_bar)
 }
 
-fn build_ports_panel(body_h: f32) -> widget::Widget {
+fn build_ports_panel() -> widget::Widget {
     let alu_pos = ALU_POS.lock().unwrap().unwrap_or((0, 0, 0));
     let ext_chip = ext_id(alu_pos);
     let selected = SELECTED_SRC.lock().unwrap().clone();
 
-    let label_h = 14.0;
-    let list_h = (body_h - label_h).max(0.0);
-
-    let mut list = widget::panel(FlexDir::Column).w(LEFT_W).h(list_h).bg(SLOT_BG).gap(4.0).padding(4.0, 4.0, 4.0, 4.0);
+    // No explicit height: 6 fixed rows always fit comfortably, and capping
+    // this would clip real content below the boundary while still drawing
+    // it — hit-testing bails out at the parent rect for anything past that
+    // edge, making rows unclickable whenever the window gets small.
+    let mut list = widget::panel(FlexDir::Column).w(LEFT_W).bg(SLOT_BG).gap(4.0).padding(4.0, 4.0, 4.0, 4.0);
     for side in &crate::alu::EXT_SIDES {
         let mode_key = format!("{}:{}", ext_chip, side);
         let mode = IO_MODES.lock().unwrap().get(&mode_key).cloned().unwrap_or_else(|| "Input".to_string());
@@ -234,7 +232,7 @@ fn build_ports_panel(body_h: f32) -> widget::Widget {
         .child(list)
 }
 
-fn build_chips_panel(center_w: f32, body_h: f32) -> widget::Widget {
+fn build_chips_panel(center_w: f32) -> widget::Widget {
     let chips = refresh_chips();
     let selected = SELECTED_SRC.lock().unwrap().clone();
     let names = CHIP_NAMES.lock().unwrap();
@@ -295,8 +293,12 @@ fn build_chips_panel(center_w: f32, body_h: f32) -> widget::Widget {
     }
     drop(links);
 
-    let list_h = (body_h - 14.0).max(0.0);
-    let scroll_area = widget::panel(FlexDir::Column).h(list_h).gap(8.0)
+    // No explicit height on the scroll area: capping it here would clip real
+    // content below the boundary while still drawing it — hit-testing bails
+    // out at the parent rect for anything past that edge, so a chip with
+    // several ports (or many chips) would render fine but stop being
+    // clickable near the bottom whenever the window gets small.
+    let scroll_area = widget::panel(FlexDir::Column).gap(8.0)
         .child(grid)
         .child(links_col);
 
