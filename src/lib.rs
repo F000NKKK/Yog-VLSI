@@ -11,7 +11,6 @@ mod port;
 mod vm;
 mod workbench;
 mod workbench_inv_ui;
-mod workbench_ui;
 
 use yog_api::{info, Mod, Registry};
 
