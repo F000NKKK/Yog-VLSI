@@ -42,7 +42,8 @@ static LAST_UI: Mutex<Option<UiRoot>> = Mutex::new(None);
 
 const PAD: f32 = 8.0;
 const TITLE_H: f32 = 24.0;
-const LEFT_W: f32 = 120.0;
+const LEFT_W: f32 = 170.0;
+const MODE_W: f32 = 92.0;
 const CHIP_W: f32 = 140.0;
 const ROW_H: f32 = 14.0;
 const BTN_H: f32 = 20.0;
@@ -207,7 +208,7 @@ fn build_ports_panel() -> widget::Widget {
     // this would clip real content below the boundary while still drawing
     // it — hit-testing bails out at the parent rect for anything past that
     // edge, making rows unclickable whenever the window gets small.
-    let mut list = widget::panel(FlexDir::Column).w(LEFT_W).bg(SLOT_BG).gap(4.0).padding(4.0, 4.0, 4.0, 4.0);
+    let mut list = widget::panel(FlexDir::Column).w(LEFT_W).bg(SLOT_BG).gap(4.0).padding(6.0, 6.0, 6.0, 6.0);
     for side in &crate::alu::EXT_SIDES {
         let mode_key = format!("{}:{}", ext_chip, side);
         let mode = IO_MODES.lock().unwrap().get(&mode_key).cloned().unwrap_or_else(|| "Input".to_string());
@@ -217,12 +218,14 @@ fn build_ports_panel() -> widget::Widget {
         let is_selected = selected.as_ref().map_or(false, |(cid, pl)| cid == &ext_chip && pl == side);
         let marker = if is_selected { "▶" } else { "◉" };
 
-        let row = widget::panel(FlexDir::Row).h(ROW_H).gap(2.0)
+        let row = widget::panel(FlexDir::Row).h(ROW_H).gap(6.0)
             .child(widget::button(format!("{marker} {side}"))
                 .on_click(format!("alu_pin:{side}")).flex(1.0)
+                .padding(0.0, 4.0, 0.0, 4.0)
                 .color(if is_selected { SEL_HIGHLIGHT } else { color }).shadow(false).no_wrap())
             .child(widget::button(mode)
-                .on_click(format!("alu_mode:{side}")).w(56.0)
+                .on_click(format!("alu_mode:{side}")).w(MODE_W)
+                .padding(0.0, 4.0, 0.0, 4.0)
                 .color(TEXT_DIM).shadow(false).no_wrap());
         list = list.child(row);
     }
