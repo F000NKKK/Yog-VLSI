@@ -1,9 +1,13 @@
 //! Workbench GUI — Ender IO-style interface with design library, resources, fabrication.
+//!
+//! Built on `yog_ui`'s flexbox/dock layout engine (the same one `yog-book`
+//! uses) instead of hand-rolled pixel math, so it reflows correctly at any
+//! screen size / GUI scale instead of drifting.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use yog_api::{GfxContext, Server};
+use yog_api::{widget, Dock, FlexDir, GfxContext, Server, UiRoot};
 
 use crate::designs::{list_designs, load_design, DesignMeta};
 use crate::network;
@@ -16,18 +20,11 @@ static LAST_PLAYER_POS: Mutex<(f32, f32, f32)> = Mutex::new((0.0, 64.0, 0.0));
 
 // ── State ────────────────────────────────────────────────────────────────────
 
-/// Scroll offset for the design list.
-static SCROLL: Mutex<f32> = Mutex::new(0.0);
+/// Scroll offset for the design list, in whole rows.
+static SCROLL: Mutex<usize> = Mutex::new(0);
 
 /// Currently selected design name.
 static SELECTED: Mutex<Option<String>> = Mutex::new(None);
-
-/// Row rectangles from last frame: (design_index, y0, y1).
-static ROWS: Mutex<Vec<(usize, f32, f32)>> = Mutex::new(Vec::new());
-
-/// Button rectangles from last frame:
-/// (name, x0, y0, x1, y1)
-static BUTTONS: Mutex<Vec<(&'static str, f32, f32, f32, f32)>> = Mutex::new(Vec::new());
 
 /// Current player name and game dir for data access (set before each render).
 static PLAYER: Mutex<(String, String)> = Mutex::new((String::new(), String::new()));
@@ -35,29 +32,28 @@ static PLAYER: Mutex<(String, String)> = Mutex::new((String::new(), String::new(
 /// True when the UI is active (tracked to allow refresh from commands).
 pub static ACTIVE: Mutex<bool> = Mutex::new(false);
 
+/// Layout tree from the last rendered frame, hit-tested on click.
+static LAST_UI: Mutex<Option<UiRoot>> = Mutex::new(None);
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const PAD: f32 = 8.0;
 const TITLE_H: f32 = 24.0;
 const ROW_H: f32 = 18.0;
-const BTN_W: f32 = 90.0;
 const BTN_H: f32 = 20.0;
-const CHAR_W: f32 = 6.0;
-const LINE_H: f32 = 11.0;
+const BTN_BAR_H: f32 = BTN_H + 12.0;
 
 // ── Colors (Ender IO palette) ────────────────────────────────────────────────
 
 const BG: u32       = 0xFF_1A1A1A;
 const BG_LIGHT: u32 = 0xFF_252525;
-const BORDER: u32   = 0xFF_404040;
 const ACCENT: u32   = 0xFF_1E5A99; // Ender IO blue
 const TEXT: u32     = 0xFF_CCCCCC;
 const TEXT_DIM: u32 = 0xFF_777777;
 const TEXT_BRIGHT: u32 = 0xFF_FFFFFF;
 const SLOT_BG: u32  = 0xFF_0D0D0D;
 const BTN_BG: u32   = 0xFF_333333;
-// const BTN_HOVER: u32 = 0xFF_444444;
-const SEL_BG: u32   = 0x44_1E5A99;
+const SEL_BG: u32   = 0xFF_2A4A6E;
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -83,7 +79,6 @@ fn hint(message: &str) {
 
 /// Render the workbench GUI.
 pub fn render(gfx: &GfxContext) {
-    let d2d = gfx.draw2d();
     let (sw_i, sh_i) = gfx.screen_size();
     let sw = sw_i as f32;
     let sh = sh_i as f32;
@@ -95,80 +90,117 @@ pub fn render(gfx: &GfxContext) {
     let designs: Vec<DesignMeta> = list_designs(&game_dir, &player_name);
     let selected = SELECTED.lock().unwrap().clone();
 
-    // ── Layout ──────────────────────────────────────────────────────────────
-    // Panel: 80% of screen, centered
+    // Window: 80% of screen, centered.
     let pw = sw * 0.8;
     let ph = sh * 0.8;
     let px = (sw - pw) / 2.0;
     let py = (sh - ph) / 2.0;
 
-    // Panel background
-    d2d.rect(px, py, px + pw, py + ph, BG);
-    d2d.rect(px - 1.0, py - 1.0, px + pw + 1.0, py, BORDER); // top border
-    d2d.rect(px, py + ph, px + pw, py + ph + 1.0, BORDER);    // bottom border
-    d2d.rect(px - 1.0, py, px, py + ph, BORDER);              // left
-    d2d.rect(px + pw, py, px + pw + 1.0, py + ph, BORDER);    // right
+    let root = build_tree(&game_dir, &player_name, &designs, selected.as_deref(), pw, ph);
+    let screen_root = widget::panel(FlexDir::Row)
+        .padding(py, 0.0, 0.0, px)
+        .child(root);
 
-    // Title bar
-    let title_y = py + 4.0;
-    d2d.rect(px, py, px + pw, py + TITLE_H, BG_LIGHT);
-    d2d.text("VLSI Workbench", px + 8.0, title_y, TEXT_BRIGHT, true);
+    let mut ui = UiRoot::new("yog-vlsi:workbench", screen_root);
+    ui.layout(sw, sh);
+    ui.render(gfx);
+    *LAST_UI.lock().unwrap() = Some(ui);
+}
 
-    // Close button (top-right)
-    let close_x = px + pw - 16.0;
-    d2d.rect(close_x - 2.0, py + 2.0, close_x + 10.0, py + TITLE_H - 2.0, 0xFF_553333);
-    d2d.text("X", close_x, title_y, 0xFF_FF4444, true);
+fn build_tree(game_dir: &str, player_name: &str, designs: &[DesignMeta], selected: Option<&str>, pw: f32, ph: f32) -> widget::Widget {
+    const INFO_H: f32 = 14.0;
+    let body_h = ph - TITLE_H - INFO_H - BTN_BAR_H;
 
-    // ── Left panel: Design library ──────────────────────────────────────────
-    let left_x = px + PAD;
-    let left_w = pw * 0.45;
-    let list_y = py + TITLE_H + 4.0;
-    let list_h = ph - TITLE_H - 50.0;
+    let title_bar = widget::panel(FlexDir::Row)
+        .dock(Dock::Top).h(TITLE_H).bg(BG_LIGHT)
+        .child(widget::label("VLSI Workbench").color(TEXT_BRIGHT).flex(1.0)
+            .padding(7.0, 0.0, 0.0, 8.0).no_wrap())
+        .child(widget::button("X").on_click("close")
+            .color(0xFF_FF4444).bg(0xFF_553333)
+            .padding(4.0, 6.0, 4.0, 6.0).margin(2.0, 4.0, 2.0, 0.0));
 
-    d2d.text("Designs:", left_x, list_y - LINE_H, ACCENT, true);
-    d2d.rect(left_x, list_y, left_x + left_w, list_y + list_h, SLOT_BG);
+    let body = widget::panel(FlexDir::Row)
+        .dock(Dock::Top).h(body_h).gap(PAD)
+        .padding(6.0, PAD, 0.0, PAD)
+        .child(build_design_list(designs, selected, body_h))
+        .child(build_resources_panel(body_h));
 
-    // Scrollable design rows
-    let content_h = designs.len() as f32 * (ROW_H + 2.0);
-    let max_scroll = (content_h - list_h).max(0.0);
+    let mut info_bar = widget::panel(FlexDir::Row)
+        .dock(Dock::Top).h(INFO_H).padding(2.0, PAD, 0.0, PAD);
+    if let Some(info) = selected_info(game_dir, player_name, designs, selected) {
+        info_bar = info_bar.child(info);
+    }
+
+    let button_bar = widget::panel(FlexDir::Row)
+        .dock(Dock::Bottom).h(BTN_BAR_H).gap(6.0)
+        .padding(0.0, PAD, 0.0, PAD).align(yog_api::Align::Center)
+        .child(bar_button("Design"))
+        .child(bar_button("Fabricate"))
+        .child(bar_button("Export BP"))
+        .child(bar_button("Import BP"));
+
+    widget::panel(FlexDir::Column)
+        .w(pw).h(ph).bg(BG)
+        .child(title_bar)
+        .child(body)
+        .child(info_bar)
+        .child(button_bar)
+}
+
+fn bar_button(label: &str) -> widget::Widget {
+    widget::button(label).on_click(format!("btn:{label}"))
+        .h(BTN_H).bg(BTN_BG).color(TEXT_BRIGHT)
+        .padding(4.0, 8.0, 4.0, 8.0)
+}
+
+fn build_design_list(designs: &[DesignMeta], selected: Option<&str>, body_h: f32) -> widget::Widget {
+    let label_h = 16.0;
+    let list_h = (body_h - label_h).max(0.0);
+    let rows_visible = ((list_h / (ROW_H + 2.0)).floor() as usize).max(1);
+
+    let max_scroll = designs.len().saturating_sub(rows_visible);
     {
         let mut s = SCROLL.lock().unwrap();
-        *s = s.clamp(0.0, max_scroll);
+        *s = (*s).min(max_scroll);
     }
     let scroll = *SCROLL.lock().unwrap();
 
-    let mut rows = Vec::new();
-    let mut row_y = list_y + 2.0 - scroll;
-    for (i, d) in designs.iter().enumerate() {
-        let ry = row_y;
-        row_y += ROW_H + 2.0;
-        rows.push((i, ry, ry + ROW_H));
-
-        if ry + ROW_H < list_y || ry > list_y + list_h { continue; }
-
-        let is_sel = selected.as_deref() == Some(&d.name);
-        let row_bg = if is_sel { SEL_BG } else { BG_LIGHT };
-        d2d.rect(left_x + 1.0, ry.max(list_y), left_x + left_w - 1.0, (ry + ROW_H).min(list_y + list_h), row_bg);
-
-        if ry + 8.0 >= list_y && ry + 8.0 <= list_y + list_h {
-            let label = format!("{} [{}]", d.name, d.tier.name());
-            let lbl = if label.len() as f32 * CHAR_W > left_w - 10.0 {
-                format!("{}...", &label[..((left_w - 20.0) / CHAR_W) as usize])
-            } else { label };
-            d2d.text(&lbl, left_x + 4.0, ry + 4.0, if is_sel { TEXT_BRIGHT } else { TEXT }, false);
-        }
+    let mut list = widget::panel(FlexDir::Column).h(list_h).bg(SLOT_BG).gap(2.0).padding(2.0, 2.0, 2.0, 2.0);
+    if designs.is_empty() {
+        list = list.child(widget::label("(no designs — use /vlsi design)").color(TEXT_DIM).shadow(false));
     }
-    *ROWS.lock().unwrap() = rows;
+    for (i, d) in designs.iter().enumerate().skip(scroll).take(rows_visible) {
+        let is_sel = selected == Some(d.name.as_str());
+        list = list.child(
+            widget::button(format!("{} [{}]", d.name, d.tier.name()))
+                .on_click(format!("design_row:{i}"))
+                .h(ROW_H)
+                .bg(if is_sel { SEL_BG } else { BG_LIGHT })
+                .color(if is_sel { TEXT_BRIGHT } else { TEXT })
+                .shadow(false).no_wrap()
+        );
+    }
 
-    // ── Right panel: Resources ──────────────────────────────────────────────
-    let right_x = px + pw * 0.5;
-    let right_w = pw * 0.5 - PAD;
+    widget::panel(FlexDir::Column).flex(1.0)
+        .child(widget::label("Designs:").color(ACCENT).no_wrap())
+        .child(list)
+}
 
-    d2d.text("Resources:", right_x, list_y - LINE_H, ACCENT, true);
-    d2d.rect(right_x, list_y, right_x + right_w, list_y + list_h, SLOT_BG);
+/// Info line describing the currently selected design, shown under the resources panel.
+fn selected_info(game_dir: &str, player_name: &str, designs: &[DesignMeta], selected: Option<&str>) -> Option<widget::Widget> {
+    let sel_name = selected?;
+    let id = designs.iter().find(|d| d.name == sel_name)?.id.clone();
+    let entry = load_design(game_dir, player_name, &id)?;
+    Some(widget::label(format!("Selected: {} ({} ports, {} blocks)",
+        sel_name, entry.circuit.ports.len(), entry.circuit.blocks.len()))
+        .color(TEXT_BRIGHT).shadow(false).no_wrap())
+}
+
+fn build_resources_panel(body_h: f32) -> widget::Widget {
+    let label_h = 16.0;
+    let list_h = (body_h - label_h).max(0.0);
 
     let res = RESOURCES.lock().unwrap();
-    // Find resources for nearby workbench (simplified: show all)
     let all_res: Vec<(String, u64)> = res.values()
         .flat_map(|m| m.iter())
         .fold(HashMap::new(), |mut acc, (k, v)| {
@@ -177,50 +209,21 @@ pub fn render(gfx: &GfxContext) {
         })
         .into_iter()
         .collect();
-
-    let mut res_y = list_y + 4.0;
-    for (item, qty) in all_res.iter().take(12) {
-        if res_y + LINE_H > list_y + list_h { break; }
-        d2d.text(&format!("{}: {}", item, qty), right_x + 4.0, res_y, TEXT_DIM, false);
-        res_y += LINE_H;
-    }
     drop(res);
 
+    let mut list = widget::panel(FlexDir::Column).h(list_h).bg(SLOT_BG).gap(1.0).padding(4.0, 4.0, 4.0, 4.0);
     if all_res.is_empty() {
-        d2d.text("(empty — right-click workbench", right_x + 4.0, list_y + 4.0, TEXT_DIM, false);
-        d2d.text(" with items to add resources)", right_x + 4.0, list_y + 16.0, TEXT_DIM, false);
-    }
-
-    // ── Selected design info ────────────────────────────────────────────────
-    if let Some(ref sel_name) = selected {
-        if let Some(entry) = load_design(&game_dir, &player_name,
-            &designs.iter().find(|d| d.name == *sel_name).map(|d| d.id.clone()).unwrap_or_default())
-        {
-            let info_y = list_y + list_h + 4.0;
-            d2d.text(&format!("Selected: {} ({} ports, {} blocks)",
-                sel_name, entry.circuit.ports.len(), entry.circuit.blocks.len()),
-                left_x, info_y, TEXT_BRIGHT, false);
+        list = list.child(widget::label("(empty — right-click workbench with items to add resources)")
+            .color(TEXT_DIM).shadow(false));
+    } else {
+        for (item, qty) in all_res.iter().take(24) {
+            list = list.child(widget::label(format!("{item}: {qty}")).color(TEXT_DIM).shadow(false).no_wrap());
         }
     }
 
-    // ── Buttons ─────────────────────────────────────────────────────────────
-    let btn_y = py + ph - BTN_H - 8.0;
-    let mut buttons = Vec::new();
-    let btn_labels = ["Design", "Fabricate", "Export BP", "Import BP"];
-    let mut bx = left_x;
-    for label in &btn_labels {
-        buttons.push((*label, bx, btn_y, bx + BTN_W, btn_y + BTN_H));
-        d2d.rect(bx, btn_y, bx + BTN_W, btn_y + BTN_H, BTN_BG);
-        d2d.rect(bx, btn_y, bx + BTN_W, btn_y + 1.0, BORDER);
-        d2d.rect(bx, btn_y + BTN_H - 1.0, bx + BTN_W, btn_y + BTN_H, BORDER);
-        let tx = bx + (BTN_W - label.len() as f32 * CHAR_W) / 2.0;
-        d2d.text(label, tx, btn_y + 4.0, TEXT_BRIGHT, false);
-        bx += BTN_W + 6.0;
-    }
-    *BUTTONS.lock().unwrap() = buttons;
-
-    // Close button rect
-    BUTTONS.lock().unwrap().push(("close", close_x - 2.0, py + 2.0, close_x + 10.0, py + TITLE_H - 2.0));
+    widget::panel(FlexDir::Column).flex(1.0)
+        .child(widget::label("Resources:").color(ACCENT).no_wrap())
+        .child(list)
 }
 
 /// Handle click events forwarded from the Java side.
@@ -233,34 +236,44 @@ pub fn handle_click(_ui_id: &str, event: &str) {
     let (game_dir, player_name) = PLAYER.lock().unwrap().clone();
     if player_name.is_empty() { return; }
 
-    // Parse "click:X:Y"
     if let Some(rest) = event.strip_prefix("click:") {
         let mut parts = rest.splitn(2, ':');
         let mx: f32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0.0);
         let my: f32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0.0);
 
-        // Check buttons first
-        let buttons = BUTTONS.lock().unwrap();
-        let mut hit = None;
-        for (name, bx0, by0, bx1, by1) in buttons.iter() {
-            if mx >= *bx0 && mx <= *bx1 && my >= *by0 && my <= *by1 {
-                hit = Some(*name);
-                break;
+        let hit = LAST_UI.lock().unwrap().as_ref()
+            .and_then(|ui| ui.hit_test(mx, my))
+            .and_then(|n| n.on_click.clone());
+
+        let Some(action) = hit else { return; };
+
+        if action == "close" { clear(); return; }
+
+        if let Some(idx) = action.strip_prefix("design_row:") {
+            if let Ok(idx) = idx.parse::<usize>() {
+                let designs = list_designs(&game_dir, &player_name);
+                if let Some(d) = designs.get(idx) {
+                    let mut sel = SELECTED.lock().unwrap();
+                    if sel.as_deref() == Some(&d.name) {
+                        *sel = None; // deselect
+                    } else {
+                        *sel = Some(d.name.clone());
+                    }
+                }
             }
+            return;
         }
-        drop(buttons);
-        if let Some(name) = hit {
+
+        if let Some(label) = action.strip_prefix("btn:") {
             let selected = SELECTED.lock().unwrap().clone();
             let (px, py, pz) = *LAST_PLAYER_POS.lock().unwrap();
-            match name {
-                "close" => clear(),
+            match label {
                 "Design" => match selected {
                     Some(sel) => network::send_workbench_action(&["edit", &sel, &px.to_string(), &py.to_string(), &pz.to_string()]),
                     None => hint("§eSelect a design first, or run /vlsi design <name> <tier>."),
                 },
                 "Fabricate" => {
                     if let Some(sel) = selected {
-                        let (game_dir, player_name) = PLAYER.lock().unwrap().clone();
                         if let Some(meta) = list_designs(&game_dir, &player_name).into_iter().find(|d| d.name == sel) {
                             network::send_workbench_action(&["fabricate", &sel, meta.tier.id()]);
                         }
@@ -274,28 +287,14 @@ pub fn handle_click(_ui_id: &str, event: &str) {
                 "Import BP" => hint("§eHold a filled Blueprint and right-click any VLSI Workbench to import it."),
                 _ => {}
             }
-            return;
-        }
-
-        // Check design list rows
-        let rows = ROWS.lock().unwrap();
-        if let Some(&(idx, _, _)) = rows.iter().find(|&&(_, ry0, ry1)| my >= ry0 && my <= ry1) {
-            let designs = list_designs(&game_dir, &player_name);
-            if let Some(d) = designs.get(idx) {
-                let mut sel = SELECTED.lock().unwrap();
-                if sel.as_deref() == Some(&d.name) {
-                    *sel = None; // deselect
-                } else {
-                    *sel = Some(d.name.clone());
-                }
-            }
         }
     }
 
-    // Scroll events
+    // Scroll events — one row per notch.
     if let Some(rest) = event.strip_prefix("scroll:") {
         let dy: f32 = rest.parse().unwrap_or(0.0);
         let mut s = SCROLL.lock().unwrap();
-        *s = (*s - dy * 20.0).max(0.0);
+        if dy > 0.0 { *s = s.saturating_sub(1); }
+        else if dy < 0.0 { *s += 1; }
     }
 }
