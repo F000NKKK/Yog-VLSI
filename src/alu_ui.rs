@@ -1,16 +1,8 @@
 //! ALU UI — node editor flow-graph for chip linking and I/O configuration.
 //!
-//! Layout:
-//! ┌──────────────────────────────────────────────┐
-//! │ ALU (Netherite)  Chips: 2/8  Channels: 64  │
-//! ├────────┬──────────────────────┬─────────────┤
-//! │ Inputs │    Installed Chips   │   Outputs   │
-//! │  ◉ N   │  [Adder] A0→SUM    │   ● N       │
-//! │  ◉ S   │  [Clock] CLK→Q     │   ● S       │
-//! │  ...   │                    │   ...       │
-//! ├────────┴──────────────────────┴─────────────┤
-//! │ [+Chip]  [Auto-link]  [Save]               │
-//! └──────────────────────────────────────────────┘
+//! Built on `yog_ui`'s flexbox/dock layout engine (the same one `yog-book`
+//! uses) instead of hand-rolled pixel math, so it reflows correctly at any
+//! screen size / GUI scale instead of drifting.
 //!
 //! Reads (`ALU_STATE`, `CHIP_PORTS`, `LINKS`, `IO_MODES` — all in
 //! `commands`) hit the mod's own shared statics directly: this UI and the
@@ -23,7 +15,7 @@
 
 use std::sync::{LazyLock, Mutex};
 
-use yog_api::{GfxContext, Registry};
+use yog_api::{widget, Align, Dock, FlexDir, GfxContext, Registry, UiRoot};
 
 use crate::commands::{ALU_STATE, CHIP_NAMES, CHIP_PORTS, IO_MODES, LINKS};
 use crate::network;
@@ -40,26 +32,25 @@ static SHOW_SELECTOR: Mutex<bool> = Mutex::new(false);
 /// ALU position for this UI session.
 static ALU_POS: Mutex<Option<(i32, i32, i32)>> = Mutex::new(None);
 
-/// Row rectangles for port/chip hit-testing: (label, x0, y0, x1, y1)
-static HIT_RECTS: Mutex<Vec<(String, f32, f32, f32, f32)>> = Mutex::new(Vec::new());
-
 /// Selected source port (for link creation): (chip_id, port_label)
 static SELECTED_SRC: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+/// Layout tree from the last rendered frame, hit-tested on click.
+static LAST_UI: Mutex<Option<UiRoot>> = Mutex::new(None);
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const PAD: f32 = 8.0;
 const TITLE_H: f32 = 24.0;
-const CHAR_W: f32 = 6.0;
-const LINE_H: f32 = 11.0;
+const LEFT_W: f32 = 120.0;
 const CHIP_W: f32 = 140.0;
-const CHIP_HEADER_H: f32 = 18.0;
-const PIN_H: f32 = 14.0;
+const ROW_H: f32 = 14.0;
+const BTN_H: f32 = 20.0;
+const BTN_BAR_H: f32 = BTN_H + 12.0;
 
 // Colors
 const BG: u32 = 0xFF_1A1A1A;
 const BG_LIGHT: u32 = 0xFF_252525;
-const BORDER: u32 = 0xFF_404040;
 const ACCENT: u32 = 0xFF_1E5A99;
 const TEXT_BRIGHT: u32 = 0xFF_FFFFFF;
 const TEXT_DIM: u32 = 0xFF_777777;
@@ -113,58 +104,113 @@ fn ext_id(pos: (i32, i32, i32)) -> String {
 
 /// Render the ALU node editor.
 pub fn render(gfx: &GfxContext) {
-    let d2d = gfx.draw2d();
     let (sw_i, sh_i) = gfx.screen_size();
     let sw = sw_i as f32;
     let sh = sh_i as f32;
 
-    let chips = refresh_chips();
-    let selected = SELECTED_SRC.lock().unwrap().clone();
-    let alu_pos = ALU_POS.lock().unwrap().unwrap_or((0, 0, 0));
-
-    // Panel: 90% of screen, centered
     let pw = sw * 0.9;
     let ph = sh * 0.85;
     let px = (sw - pw) / 2.0;
     let py = (sh - ph) / 2.0;
 
-    // Background
-    d2d.rect(px, py, px + pw, py + ph, BG);
-    d2d.rect(px - 1.0, py, px + pw + 1.0, py, BORDER);
-    d2d.rect(px, py + ph, px + pw, py + ph + 1.0, BORDER);
+    let root = if *SHOW_SELECTOR.lock().unwrap() {
+        build_selector_tree(pw, ph)
+    } else {
+        build_editor_tree(pw, ph)
+    };
 
-    // Title bar
-    d2d.rect(px, py, px + pw, py + TITLE_H, BG_LIGHT);
-    d2d.text(&format!("ALU  Chips: {}  |  Links: {}",
-        chips.len(), LINKS.lock().unwrap().len()),
-        px + 8.0, py + 4.0, TEXT_BRIGHT, true);
+    let screen_root = widget::panel(FlexDir::Row)
+        .padding(py, 0.0, 0.0, px)
+        .child(root);
 
-    // Close
-    let close_x = px + pw - 16.0;
-    d2d.rect(close_x - 2.0, py + 2.0, close_x + 10.0, py + TITLE_H - 2.0, 0xFF_553333);
-    d2d.text("X", close_x, py + 4.0, 0xFF_FF4444, true);
+    let mut ui = UiRoot::new("yog-vlsi:alu", screen_root);
+    ui.layout(sw, sh);
+    ui.render(gfx);
+    *LAST_UI.lock().unwrap() = Some(ui);
+}
 
-    let mut hit_rects = Vec::new();
+fn title_bar() -> widget::Widget {
+    let chips = refresh_chips();
+    widget::panel(FlexDir::Row)
+        .dock(Dock::Top).h(TITLE_H).bg(BG_LIGHT)
+        .child(widget::label(format!("ALU  Chips: {}  |  Links: {}", chips.len(), LINKS.lock().unwrap().len()))
+            .color(TEXT_BRIGHT).flex(1.0).padding(7.0, 0.0, 0.0, 8.0).no_wrap())
+        .child(widget::button("X").on_click("close")
+            .color(0xFF_FF4444).bg(0xFF_553333)
+            .padding(4.0, 6.0, 4.0, 6.0).margin(2.0, 4.0, 2.0, 0.0))
+}
 
-    if *SHOW_SELECTOR.lock().unwrap() {
-        render_chip_selector(&d2d, px, py, pw, ph, &mut hit_rects);
-        *HIT_RECTS.lock().unwrap() = hit_rects;
-        return;
+fn build_selector_tree(pw: f32, ph: f32) -> widget::Widget {
+    let body_h = ph - TITLE_H - BTN_BAR_H;
+    let list = CHIP_LIST.lock().unwrap();
+
+    let mut body = widget::panel(FlexDir::Column)
+        .dock(Dock::Top).h(body_h).gap(4.0)
+        .padding(6.0, PAD, 0.0, PAD)
+        .child(widget::label("Select a chip to install:").color(ACCENT).no_wrap());
+
+    if list.is_empty() {
+        body = body.child(widget::label("(no programmed chips in your inventory)").color(TEXT_DIM).shadow(false));
+    } else {
+        for (slot, tier, name) in list.iter() {
+            body = body.child(
+                widget::button(format!("[{tier}] {name}"))
+                    .on_click(format!("select_chip:{slot}"))
+                    .h(ROW_H + 4.0).bg(BG_LIGHT).color(TEXT_BRIGHT).shadow(false).no_wrap()
+            );
+        }
     }
+    drop(list);
 
-    // ── Left: External ALU ports (N/S/E/W/U/D) ─────────────────────────────
-    let left_x = px + PAD;
-    let left_w = 110.0;
-    let list_y = py + TITLE_H + 8.0;
-    let list_h = ph - TITLE_H - 50.0;
+    let button_bar = widget::panel(FlexDir::Row)
+        .dock(Dock::Bottom).h(BTN_BAR_H).padding(0.0, PAD, 0.0, PAD).align(Align::Center)
+        .child(widget::button("Cancel").on_click("cancel_selector")
+            .h(BTN_H).bg(BTN_BG).color(TEXT_BRIGHT).padding(4.0, 8.0, 4.0, 8.0));
 
-    d2d.rect(left_x, list_y, left_x + left_w, list_y + list_h, SLOT_BG);
-    d2d.text("External ports", left_x + 4.0, list_y - LINE_H, ACCENT, true);
+    widget::panel(FlexDir::Column)
+        .w(pw).h(ph).bg(BG)
+        .child(title_bar())
+        .child(body)
+        .child(button_bar)
+}
 
+fn build_editor_tree(pw: f32, ph: f32) -> widget::Widget {
+    let body_h = ph - TITLE_H - BTN_BAR_H;
+    let center_w = (pw - LEFT_W - PAD * 3.0).max(CHIP_W);
+
+    let body = widget::panel(FlexDir::Row)
+        .dock(Dock::Top).h(body_h).gap(PAD)
+        .padding(6.0, PAD, 0.0, PAD)
+        .child(build_ports_panel(body_h))
+        .child(build_chips_panel(center_w, body_h));
+
+    let button_bar = widget::panel(FlexDir::Row)
+        .dock(Dock::Bottom).h(BTN_BAR_H).gap(6.0)
+        .padding(0.0, PAD, 0.0, PAD).align(Align::Center)
+        .child(widget::button("+ Add Chip").on_click("add_chip")
+            .h(BTN_H).bg(BTN_BG).color(TEXT_BRIGHT).padding(4.0, 8.0, 4.0, 8.0))
+        .child(widget::button("Auto-link").on_click("auto_link")
+            .h(BTN_H).bg(BTN_BG).color(TEXT_BRIGHT).padding(4.0, 8.0, 4.0, 8.0))
+        .child(widget::button("Save").on_click("save_links")
+            .h(BTN_H).bg(BTN_BG).color(TEXT_BRIGHT).padding(4.0, 8.0, 4.0, 8.0));
+
+    widget::panel(FlexDir::Column)
+        .w(pw).h(ph).bg(BG)
+        .child(title_bar())
+        .child(body)
+        .child(button_bar)
+}
+
+fn build_ports_panel(body_h: f32) -> widget::Widget {
+    let alu_pos = ALU_POS.lock().unwrap().unwrap_or((0, 0, 0));
     let ext_chip = ext_id(alu_pos);
-    let sides = crate::alu::EXT_SIDES;
-    let mut py_port = list_y + 4.0;
-    for side in &sides {
+    let selected = SELECTED_SRC.lock().unwrap().clone();
+
+    let label_h = 14.0;
+    let list_h = (body_h - label_h).max(0.0);
+
+    let mut list = widget::panel(FlexDir::Column).w(LEFT_W).h(list_h).bg(SLOT_BG).gap(4.0).padding(4.0, 4.0, 4.0, 4.0);
+    for side in &crate::alu::EXT_SIDES {
         let mode_key = format!("{}:{}", ext_chip, side);
         let mode = IO_MODES.lock().unwrap().get(&mode_key).cloned().unwrap_or_else(|| "Input".to_string());
         let color = match mode.as_str() {
@@ -172,111 +218,91 @@ pub fn render(gfx: &GfxContext) {
         };
         let is_selected = selected.as_ref().map_or(false, |(cid, pl)| cid == &ext_chip && pl == side);
         let marker = if is_selected { "▶" } else { "◉" };
-        d2d.text(&format!("{} {}", marker, side), left_x + 4.0, py_port, if is_selected { SEL_HIGHLIGHT } else { color }, false);
-        d2d.text(&mode, left_x + left_w - 56.0, py_port, TEXT_DIM, false);
-        hit_rects.push((format!("alu_pin_{}", side), left_x, py_port, left_x + left_w - 58.0, py_port + LINE_H));
-        hit_rects.push((format!("alu_mode_{}", side), left_x + left_w - 58.0, py_port, left_x + left_w, py_port + LINE_H));
-        py_port += LINE_H + 6.0;
+
+        let row = widget::panel(FlexDir::Row).h(ROW_H).gap(2.0)
+            .child(widget::button(format!("{marker} {side}"))
+                .on_click(format!("alu_pin:{side}")).flex(1.0)
+                .color(if is_selected { SEL_HIGHLIGHT } else { color }).shadow(false).no_wrap())
+            .child(widget::button(mode)
+                .on_click(format!("alu_mode:{side}")).w(56.0)
+                .color(TEXT_DIM).shadow(false).no_wrap());
+        list = list.child(row);
     }
 
-    // ── Center: Installed chips ────────────────────────────────────────────
-    let center_x = left_x + left_w + 12.0;
-    let center_w = pw - left_w - 120.0;
+    widget::panel(FlexDir::Column)
+        .child(widget::label("External ports").color(ACCENT).no_wrap())
+        .child(list)
+}
 
-    d2d.text("Chips", center_x, list_y - LINE_H, ACCENT, true);
+fn build_chips_panel(center_w: f32, body_h: f32) -> widget::Widget {
+    let chips = refresh_chips();
+    let selected = SELECTED_SRC.lock().unwrap().clone();
+    let names = CHIP_NAMES.lock().unwrap();
+    let ports_map = CHIP_PORTS.lock().unwrap();
 
-    let mut cx = center_x;
-    let mut cy = list_y;
-    for (chip_id, tier) in chips.iter() {
-        if cx + CHIP_W > center_x + center_w {
-            cx = center_x;
-            cy += 120.0;
+    let cols_per_row = (((center_w + PAD) / (CHIP_W + PAD)).floor() as usize).max(1);
+
+    let mut grid = widget::panel(FlexDir::Column).gap(8.0);
+    for row_chips in chips.chunks(cols_per_row) {
+        let mut row = widget::panel(FlexDir::Row).gap(12.0);
+        for (chip_id, tier) in row_chips {
+            let name = names.get(chip_id).cloned()
+                .unwrap_or_else(|| format!("Chip {}", &chip_id[..6.min(chip_id.len())]));
+            let ports = ports_map.get(chip_id).cloned().unwrap_or_default();
+
+            let mut card = widget::panel(FlexDir::Column).w(CHIP_W)
+                .child(widget::label(format!("[{}] {}", tier.name(), name))
+                    .color(TEXT_BRIGHT).bg(BG_LIGHT).shadow(false).no_wrap());
+
+            for port in &ports {
+                let is_selected = selected.as_ref().map_or(false, |(cid, pl)| cid == chip_id && pl == &port.label);
+                let pin_color = match port.dir {
+                    crate::chip::PortDir::Input => PIN_IN,
+                    crate::chip::PortDir::Output => PIN_OUT,
+                    crate::chip::PortDir::Bidirectional => PIN_BIDI,
+                };
+                let marker = if is_selected { "▶" } else { " " };
+                card = card.child(
+                    widget::button(format!("{marker} {} {}", port.dir.name(), port.label))
+                        .on_click(format!("pin:{chip_id}:{}", port.label))
+                        .h(ROW_H)
+                        .color(if is_selected { SEL_HIGHLIGHT } else { pin_color })
+                        .shadow(false).no_wrap()
+                );
+            }
+            row = row.child(card);
         }
-
-        let name = CHIP_NAMES.lock().unwrap().get(chip_id).cloned()
-            .unwrap_or_else(|| format!("Chip {}", &chip_id[..6.min(chip_id.len())]));
-
-        d2d.rect(cx, cy, cx + CHIP_W, cy + CHIP_HEADER_H, BG_LIGHT);
-        d2d.rect(cx, cy, cx + CHIP_W, cy + 1.0, BORDER);
-        d2d.text(&format!("[{}] {}", tier.name(), name), cx + 4.0, cy + 3.0, TEXT_BRIGHT, false);
-
-        let ports = CHIP_PORTS.lock().unwrap().get(chip_id).cloned().unwrap_or_default();
-
-        let mut pin_y = cy + CHIP_HEADER_H + 2.0;
-        for port in &ports {
-            let is_selected = selected.as_ref().map_or(false, |(cid, pl)| cid == chip_id && pl == &port.label);
-            let pin_color = match port.dir {
-                crate::chip::PortDir::Input => PIN_IN,
-                crate::chip::PortDir::Output => PIN_OUT,
-                crate::chip::PortDir::Bidirectional => PIN_BIDI,
-            };
-            let marker = if is_selected { "▶" } else { " " };
-            let label = format!("{} {} {}", marker, port.dir.name(), port.label);
-            d2d.text(&label, cx + 4.0, pin_y, if is_selected { SEL_HIGHLIGHT } else { pin_color }, false);
-            hit_rects.push((format!("pin_{}_{}", chip_id, port.label), cx, pin_y, cx + CHIP_W, pin_y + PIN_H));
-            pin_y += PIN_H + 2.0;
-        }
-
-        let chip_bottom = cy + CHIP_HEADER_H + ports.len() as f32 * (PIN_H + 2.0) + 4.0;
-        d2d.rect(cx, chip_bottom, cx + CHIP_W, chip_bottom + 1.0, BORDER);
-
-        cx += CHIP_W + 12.0;
+        grid = grid.child(row);
     }
+    drop(names);
+    drop(ports_map);
 
-    // Links display
+    let mut links_col = widget::panel(FlexDir::Column).gap(1.0);
     let links = LINKS.lock().unwrap();
-    let mut link_y = cy + 130.0;
     if !links.is_empty() {
-        d2d.text("Links:", center_x, link_y, ACCENT, true);
-        link_y += LINE_H;
         let names = CHIP_NAMES.lock().unwrap();
+        links_col = links_col.child(widget::label("Links:").color(ACCENT).no_wrap());
         for ((src_id, src_port), (tgt_id, tgt_port)) in links.iter().take(10) {
             let display = |id: &str| -> String {
                 if id.starts_with("__ext_") { "ALU".to_string() }
                 else { names.get(id).cloned().unwrap_or_else(|| id[..6.min(id.len())].to_string()) }
             };
-            d2d.text(&format!("{}.{} → {}.{}", display(src_id), src_port, display(tgt_id), tgt_port),
-                center_x, link_y, TEXT_DIM, false);
-            link_y += LINE_H;
+            links_col = links_col.child(
+                widget::label(format!("{}.{} → {}.{}", display(src_id), src_port, display(tgt_id), tgt_port))
+                    .color(TEXT_DIM).shadow(false).no_wrap()
+            );
         }
     }
     drop(links);
 
-    // ── Buttons ─────────────────────────────────────────────────────────────
-    let btn_y = py + ph - 24.0;
-    let btns = ["[+ Add Chip]", "[Auto-link]", "[Save]"];
-    let mut bx = left_x;
-    for label in &btns {
-        let bw = label.len() as f32 * CHAR_W + 12.0;
-        d2d.rect(bx, btn_y, bx + bw, btn_y + 20.0, BTN_BG);
-        d2d.text(label, bx + 6.0, btn_y + 3.0, TEXT_BRIGHT, false);
-        hit_rects.push((label.to_string(), bx, btn_y, bx + bw, btn_y + 20.0));
-        bx += bw + 8.0;
-    }
+    let list_h = (body_h - 14.0).max(0.0);
+    let scroll_area = widget::panel(FlexDir::Column).h(list_h).gap(8.0)
+        .child(grid)
+        .child(links_col);
 
-    hit_rects.push(("close".into(), close_x - 2.0, py + 2.0, close_x + 10.0, py + TITLE_H - 2.0));
-
-    *HIT_RECTS.lock().unwrap() = hit_rects;
-}
-
-fn render_chip_selector(d2d: &yog_api::gfx_draw2d::Draw2D, px: f32, py: f32, pw: f32, ph: f32, hit_rects: &mut Vec<(String, f32, f32, f32, f32)>) {
-    d2d.text("Select a chip to install:", px + PAD, py + TITLE_H + 4.0, ACCENT, true);
-    let list = CHIP_LIST.lock().unwrap();
-    let mut row_y = py + TITLE_H + 20.0;
-    if list.is_empty() {
-        d2d.text("(no programmed chips in your inventory)", px + PAD, row_y, TEXT_DIM, false);
-    }
-    for (slot, tier, name) in list.iter() {
-        d2d.rect(px + PAD, row_y, px + pw - PAD, row_y + LINE_H + 4.0, BG_LIGHT);
-        d2d.text(&format!("[{}] {}", tier, name), px + PAD + 4.0, row_y + 2.0, TEXT_BRIGHT, false);
-        hit_rects.push((format!("select_chip_{}", slot), px + PAD, row_y, px + pw - PAD, row_y + LINE_H + 4.0));
-        row_y += LINE_H + 6.0;
-        if row_y > py + ph - 24.0 { break; }
-    }
-    hit_rects.push(("cancel_selector".into(), px + PAD, py + ph - 24.0, px + PAD + 80.0, py + ph - 4.0));
-    d2d.rect(px + PAD, py + ph - 24.0, px + PAD + 80.0, py + ph - 4.0, BTN_BG);
-    d2d.text("[Cancel]", px + PAD + 4.0, py + ph - 21.0, TEXT_BRIGHT, false);
-    hit_rects.push(("close".into(), px + pw - 18.0, py + 2.0, px + pw - 6.0, py + TITLE_H - 2.0));
+    widget::panel(FlexDir::Column).flex(1.0)
+        .child(widget::label("Chips").color(ACCENT).no_wrap())
+        .child(scroll_area)
 }
 
 /// Handle click events.
@@ -288,14 +314,12 @@ pub fn handle_click(_ui_id: &str, event: &str) {
         let mx: f32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0.0);
         let my: f32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0.0);
 
-        let rects = HIT_RECTS.lock().unwrap();
-        for (label, rx0, ry0, rx1, ry1) in rects.iter() {
-            if mx >= *rx0 && mx <= *rx1 && my >= *ry0 && my <= *ry1 {
-                let label = label.clone();
-                drop(rects);
-                handle_hit(&label);
-                return;
-            }
+        let hit = LAST_UI.lock().unwrap().as_ref()
+            .and_then(|ui| ui.hit_test(mx, my))
+            .and_then(|n| n.on_click.clone());
+
+        if let Some(action) = hit {
+            handle_hit(&action);
         }
     }
 }
@@ -307,7 +331,7 @@ fn handle_hit(label: &str) {
         *SHOW_SELECTOR.lock().unwrap() = false;
         return;
     }
-    if let Some(slot) = label.strip_prefix("select_chip_") {
+    if let Some(slot) = label.strip_prefix("select_chip:") {
         *SHOW_SELECTOR.lock().unwrap() = false;
         network::send_alu_action(&["install", slot, &alu_pos.0.to_string(), &alu_pos.1.to_string(), &alu_pos.2.to_string()]);
         return;
@@ -315,10 +339,10 @@ fn handle_hit(label: &str) {
 
     match label {
         "close" => clear(),
-        "[+ Add Chip]" => {
+        "add_chip" => {
             network::request_chip_list();
         }
-        "[Auto-link]" => {
+        "auto_link" => {
             let chips = refresh_chips();
             let mut links = LINKS.lock().unwrap();
             let ports = CHIP_PORTS.lock().unwrap();
@@ -340,17 +364,17 @@ fn handle_hit(label: &str) {
                 }
             }
         }
-        "[Save]" => {
+        "save_links" => {
             network::send_alu_action(&["save_links"]);
         }
         _ => {
-            if let Some(rest) = label.strip_prefix("pin_") {
-                if let Some((chip_id, port_label)) = rest.split_once('_') {
+            if let Some(rest) = label.strip_prefix("pin:") {
+                if let Some((chip_id, port_label)) = rest.split_once(':') {
                     select_pin(chip_id.to_string(), port_label.to_string());
                 }
-            } else if let Some(side) = label.strip_prefix("alu_pin_") {
+            } else if let Some(side) = label.strip_prefix("alu_pin:") {
                 select_pin(ext_id(alu_pos), side.to_string());
-            } else if let Some(side) = label.strip_prefix("alu_mode_") {
+            } else if let Some(side) = label.strip_prefix("alu_mode:") {
                 let key = format!("{}:{}", ext_id(alu_pos), side);
                 let mut modes = IO_MODES.lock().unwrap();
                 let current = modes.get(&key).cloned().unwrap_or_else(|| "Input".into());
