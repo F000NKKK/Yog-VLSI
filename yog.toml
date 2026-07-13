@@ -11,6 +11,9 @@ serde      = { version = "*", features = ["derive"] }
 serde_json = "*"
 uuid       = { version = "*", features = ["v4"] }
 
+[dependencies.exports]
+yog-pipes = "0.3"
+
 ## `yog run <name>` — build, drop the .yog into the loader's own Gradle dev-run
 # instance, then launch it.
 [run.forge-1.21.1]
