@@ -76,7 +76,12 @@ pub fn register(registry: &mut Registry) {
                 match list.iter().find(|d| &d.name == name) {
                     Some(meta) => {
                         if let Some(entry) = crate::designs::load_design(&game_dir, &player, &meta.id) {
-                            crate::editor::enter(srv, &player, &meta.name, meta.tier, Some(meta.id.clone()), Some(entry.circuit), (rx, ry, rz));
+                            // The workbench GUI button only sends back (x, y, z) — no
+                            // dimension — since the client has no API to query its own
+                            // dimension. Physical workbench blocks live in the Overworld,
+                            // so that's a safe assumption here (unlike the `/vlsi` command
+                            // path, which threads the real dimension from `CommandContext`).
+                            crate::editor::enter(srv, &player, &meta.name, meta.tier, Some(meta.id.clone()), Some(entry.circuit), yog_api::world::dimension::OVERWORLD, (rx, ry, rz));
                             format!("§aOpened editor for '{}'.", name)
                         } else {
                             "§cFailed to load design data.".into()
