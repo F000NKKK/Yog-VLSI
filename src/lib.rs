@@ -12,13 +12,37 @@ mod vm;
 mod workbench;
 mod workbench_inv_ui;
 
-use yog_api::{info, Mod, Registry};
+use yog_api::{info, Mod, Registry, YogDimensionDef, YogDimensionTypeDef};
 
 pub struct YogVlsi;
 
 impl Mod for YogVlsi {
     fn register(registry: &mut Registry) {
         info!("[yog-vlsi] initializing VLSI microchip system...");
+
+        // Dedicated pocket dimension for the circuit editor (see `editor.rs`) —
+        // replaces the old "reserved lane far out in the Overworld" hack now that
+        // the loader can declare real custom dimensions. Void terrain: the editor
+        // lays its own bedrock floor + glass walls per session, so the generator
+        // itself has nothing to do.
+        registry.register_dimension(
+            &YogDimensionDef::new(editor::DIMENSION_ID).dimension_type(
+                YogDimensionTypeDef::default()
+                    .ambient_light(1.0)
+                    .has_sky_light(false)
+                    .has_ceiling(false)
+                    .natural(false)
+                    .piglin_safe(false)
+                    .effects("minecraft:the_end")
+                    .min_y(0)
+                    .height(384)
+                    .logical_height(384),
+            )
+            .generator_type(editor::GENERATOR_ID),
+        );
+        registry.register_chunk_generator(editor::GENERATOR_ID, |_writer| {
+            // Void — the editor builds its own floor/walls per session.
+        });
 
         workbench::register(registry);
         alu::register(registry);

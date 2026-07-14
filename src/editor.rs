@@ -1,9 +1,11 @@
 //! Virtual circuit editor.
 //!
-//! The loader has no primitive for spinning up a per-player temporary
-//! dimension, so this reuses a reserved region of the Overworld far from
-//! spawn instead: one lane per player, allocated on first use and reused on
-//! every subsequent edit. Each lane holds a single flat (y = EDITOR_Y) build
+//! Runs in a dedicated pocket dimension (`DIMENSION_ID`, declared in `lib.rs`)
+//! rather than the real Overworld — players never see or affect this space,
+//! and it can't collide with anything a player builds. Multiple concurrent
+//! editors are still handled with the same per-player "lane" offset as
+//! before: one lane per player, allocated on first use and reused on every
+//! subsequent edit. Each lane holds a single flat (y = EDITOR_Y) build
 //! platform sized to the chip's tier — matching how `vm::RedstoneVM` and the
 //! existing test-chip factory already only ever populate the y = 0 layer.
 //! Multi-layer (3D) circuits are a follow-up once the loader exposes a
@@ -23,6 +25,13 @@ use std::sync::{LazyLock, Mutex};
 use yog_api::player::Player;
 use yog_api::{BlockPos, Registry, World};
 
+/// Id of the pocket dimension the editor runs in — declared via
+/// `Registry::register_dimension` in `lib.rs`.
+pub const DIMENSION_ID: &str = "yog-vlsi:editor";
+/// Id of the (void) chunk generator backing [`DIMENSION_ID`] — registered
+/// alongside it via `Registry::register_chunk_generator`.
+pub const GENERATOR_ID: &str = "yog-vlsi:editor_terrain";
+
 fn player_pos(srv: &dyn yog_api::Server, name: &str, uuid: &str) -> (f64, f64, f64) {
     Player::with_uuid(srv, name, uuid).position().unwrap_or((BASE_X as f64, 64.0, BASE_Z as f64))
 }
@@ -35,8 +44,10 @@ use crate::vm::Tier;
 /// Y level of the build platform inside every editor lane.
 const EDITOR_Y: i32 = 10;
 /// Fixed base coordinates for lane 0; each further lane is offset along X.
-const BASE_X: i32 = 2_000_000;
-const BASE_Z: i32 = 2_000_000;
+/// No need to hide these out in the boonies anymore — this is its own
+/// pocket dimension, not a reserved corner of the real Overworld.
+const BASE_X: i32 = 0;
+const BASE_Z: i32 = 0;
 /// Spacing between lanes — comfortably larger than the biggest tier (256).
 const LANE_SPACING: i32 = 320;
 
@@ -47,6 +58,7 @@ struct EditorSession {
     origin_x: i32,
     origin_z: i32,
     size: u32,
+    return_dim: String,
     return_pos: (f64, f64, f64),
 }
 
@@ -61,15 +73,17 @@ fn lane_for(player_name: &str) -> u32 {
 }
 
 fn dimension() -> &'static str {
-    yog_api::world::dimension::OVERWORLD
+    DIMENSION_ID
 }
 
 /// Enter (or re-enter) the editor for a design. `existing` is `Some` when
 /// editing a previously saved design, `None` for a brand-new blank one.
-/// `return_pos` is where the player gets teleported back to on `/vlsi save`
-/// — callers should pass the player's real, currently-known position since
-/// the loader can only resolve `Player::position()` when a UUID is on hand.
-pub fn enter(srv: &dyn yog_api::Server, player_name: &str, name: &str, tier: Tier, design_id: Option<String>, existing: Option<CircuitData>, return_pos: (f64, f64, f64)) {
+/// `return_dim`/`return_pos` are where the player gets teleported back to on
+/// `/vlsi save` — callers should pass the player's real, currently-known
+/// dimension and position since the loader can only resolve
+/// `Player::position()` when a UUID is on hand.
+#[allow(clippy::too_many_arguments)]
+pub fn enter(srv: &dyn yog_api::Server, player_name: &str, name: &str, tier: Tier, design_id: Option<String>, existing: Option<CircuitData>, return_dim: &str, return_pos: (f64, f64, f64)) {
     let lane = lane_for(player_name);
     let origin_x = BASE_X + lane as i32 * LANE_SPACING;
     let origin_z = BASE_Z;
@@ -107,10 +121,11 @@ pub fn enter(srv: &dyn yog_api::Server, player_name: &str, name: &str, tier: Tie
     }
 
     SESSIONS.lock().unwrap().insert(player_name.to_string(), EditorSession {
-        design_id, name: name.to_string(), tier, origin_x, origin_z, size, return_pos,
+        design_id, name: name.to_string(), tier, origin_x, origin_z, size,
+        return_dim: return_dim.to_string(), return_pos,
     });
 
-    srv.teleport(player_name, (origin_x + size as i32 / 2) as f64, (EDITOR_Y + 1) as f64, (origin_z + size as i32 / 2) as f64);
+    srv.teleport_to_dim(player_name, dimension(), (origin_x + size as i32 / 2) as f64, (EDITOR_Y + 1) as f64, (origin_z + size as i32 / 2) as f64);
     srv.send_actionbar(player_name, &format!("§6Editing '{}' — {} tier, {}×{}. §7/vlsi save when done.", name, tier.name(), size, size));
 }
 
@@ -167,7 +182,7 @@ pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
     designs::save_design(&game_dir, player_name, &entry);
 
     let (rx, ry, rz) = session.return_pos;
-    srv.teleport(player_name, rx, ry, rz);
+    srv.teleport_to_dim(player_name, &session.return_dim, rx, ry, rz);
 
     format!("§aSaved '{}' — {} ports, {} blocks.", entry.meta.name, entry.meta.port_count, entry.circuit.blocks.len())
 }
@@ -182,7 +197,7 @@ pub fn register(registry: &mut Registry) {
             Some(t) => t, None => return Some("§cUsage: /vlsi design <name> <tier>".into()),
         };
         let return_pos = player_pos(srv, &ctx.source, &ctx.uuid);
-        enter(srv, &ctx.source, &name, tier, None, None, return_pos);
+        enter(srv, &ctx.source, &name, tier, None, None, &ctx.dimension, return_pos);
         Some(format!("§aOpened editor for new design '{}'.", name))
     });
 
@@ -201,7 +216,7 @@ pub fn register(registry: &mut Registry) {
             None => return Some("§cFailed to load design data.".into()),
         };
         let return_pos = player_pos(srv, &ctx.source, &ctx.uuid);
-        enter(srv, &ctx.source, &meta.name, meta.tier, Some(meta.id), Some(entry.circuit), return_pos);
+        enter(srv, &ctx.source, &meta.name, meta.tier, Some(meta.id), Some(entry.circuit), &ctx.dimension, return_pos);
         Some(format!("§aOpened editor for '{}'.", name))
     });
 
