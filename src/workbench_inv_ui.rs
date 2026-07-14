@@ -7,7 +7,7 @@
 use std::sync::Mutex;
 
 use yog_api::{widget, Align, Dock, FlexDir, GfxContext, Server, UiRoot};
-use yog_api::ui::slot_cache;
+use yog_api::inventory;
 
 use crate::designs::{list_designs, load_design, DesignMeta};
 use crate::network;
@@ -68,7 +68,7 @@ pub fn render(gfx: &GfxContext) {
     let designs = list_designs(&game_dir, &player_name);
     let selected = SELECTED.lock().unwrap().clone();
 
-    let slot_count = slot_cache::slot_count();
+    let slot_count = inventory::current_slot_count();
     let left_w = SLOT_SZ + VIAL_W + 30.0; // chip slot + vials + labels
     let total_w = left_w + RIGHT_W + PAD * 2.0;
     let total_h = sh * 0.85;
@@ -202,7 +202,10 @@ fn build_resource_panel(slot_count: usize) -> widget::Widget {
     // Chip slot (index 0)
     col = col.child(widget::label("Chip:").color(ACCENT).no_wrap());
     if slot_count > 0 {
-        col = col.child(widget::inv_slot(0));
+        let sd = inventory::current_slot(0);
+        let item_id = sd.as_ref().map(|s| s.item_id.clone()).unwrap_or_default();
+        let count = sd.map(|s| s.count).unwrap_or(0);
+        col = col.child(widget::inv_slot(item_id, count));
     }
 
     // Resource vials (slots 1–6)
@@ -218,8 +221,8 @@ fn build_resource_panel(slot_count: usize) -> widget::Widget {
 }
 
 fn build_vial_row(slot_idx: usize, item_id: &str, color: u32, cap: u32) -> widget::Widget {
-    // Query slot data from the pre-fetched cache
-    let sd = slot_cache::get_slot(slot_idx);
+    // Query the currently-open menu's real slot content.
+    let sd = inventory::current_slot(slot_idx);
     let count = sd.as_ref().map(|s| s.count).unwrap_or(0);
     let frac = (count as f32 / cap as f32).clamp(0.0, 1.0);
 
