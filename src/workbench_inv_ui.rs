@@ -40,7 +40,18 @@ const BTN_H: f32 = 22.0;
 const SLOT_SZ: f32 = 18.0;
 const VIAL_W: f32 = 6.0;
 const RIGHT_W: f32 = 210.0;
-const RESOURCE_CAP: u32 = 64;
+
+/// Fixed panel footprint (not screen-size-dependent) — this lets
+/// `measure_layout` bake real vanilla `Slot` positions in at mod-init time
+/// (before any screen/window size exists) and have them still match what
+/// `render` draws later, every frame, at any window size.
+const TOTAL_H: f32 = 320.0;
+
+/// First index of the player's main inventory (3×9) among this menu's
+/// slots — right after our own `WORKBENCH_SLOT_COUNT` custom slots. Hotbar
+/// follows immediately after (indices `PLAYER_INV_SLOT_START + 27 .. +36`).
+/// Mirrors `YogInventoryMenu.addPlayerInventorySlots`'s slot order.
+pub const PLAYER_INV_SLOT_START: usize = crate::workbench::WORKBENCH_SLOT_COUNT;
 
 // ── Colors ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +67,12 @@ const SLOT_BG: u32  = 0xFF_0D0D0D;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+/// Overall panel footprint — fixed, not screen-size-dependent (see `TOTAL_H`).
+fn panel_size() -> (f32, f32) {
+    let left_w = SLOT_SZ + VIAL_W + 30.0; // chip slot + vials + labels
+    (left_w + RIGHT_W + PAD * 2.0, TOTAL_H)
+}
+
 pub fn render(gfx: &GfxContext) {
     let (sw_i, sh_i) = gfx.screen_size();
     let sw = sw_i as f32;
@@ -69,9 +86,8 @@ pub fn render(gfx: &GfxContext) {
     let selected = SELECTED.lock().unwrap().clone();
 
     let slot_count = inventory::current_slot_count();
-    let left_w = SLOT_SZ + VIAL_W + 30.0; // chip slot + vials + labels
-    let total_w = left_w + RIGHT_W + PAD * 2.0;
-    let total_h = sh * 0.85;
+    let (total_w, total_h) = panel_size();
+    let left_w = SLOT_SZ + VIAL_W + 30.0;
 
     let root = build_tree(&game_dir, &player_name, &designs, selected.as_deref(), total_w, total_h, left_w, slot_count);
     let screen_root = widget::panel(FlexDir::Row)
@@ -82,6 +98,39 @@ pub fn render(gfx: &GfxContext) {
     ui.layout(sw, sh);
     ui.render(gfx);
     *LAST_UI.lock().unwrap() = Some(ui);
+}
+
+/// Bake this UI's real vanilla-`Slot` positions at mod-init time (before any
+/// screen exists) by laying the SAME tree out at the fixed panel footprint
+/// and reading back where each tagged slot landed — a "measure pass", like
+/// WinForms `PerformLayout`, instead of hand-computed pixel offsets that
+/// silently drift out of sync with the tree that actually gets drawn.
+///
+/// Returns `(background_size, custom_slot_layout, player_inv_offset)`.
+pub fn measure_layout() -> ((f32, f32), Vec<(f32, f32)>, (f32, f32)) {
+    let (total_w, total_h) = panel_size();
+    let left_w = SLOT_SZ + VIAL_W + 30.0;
+    // No live designs/selection at mod-init — doesn't affect slot positions,
+    // since the design-list panel has a fixed width regardless of content.
+    let root = build_tree("", "", &[], None, total_w, total_h, left_w, crate::workbench::WORKBENCH_SLOT_COUNT);
+    let screen_root = widget::panel(FlexDir::Row).child(root);
+
+    let mut ui = UiRoot::new("yog-vlsi:workbench_inv#measure", screen_root);
+    ui.layout(total_w, total_h);
+
+    // Only slots this UI actually decorates (chip + resource vials) are
+    // tagged — untagged trailing slots fall back to the host's own default
+    // grid (see `YogInventoryMenu`'s `i < layout.size()` check).
+    let mut custom_slots = Vec::new();
+    for i in 0..crate::workbench::WORKBENCH_SLOT_COUNT {
+        match ui.find_rect(&format!("slot_{i}")) {
+            Some(r) => custom_slots.push((r.x, r.y)),
+            None => break,
+        }
+    }
+    let player_inv_origin = ui.find_rect("player_inv_origin").unwrap_or_default();
+
+    ((total_w, total_h), custom_slots, (player_inv_origin.x, player_inv_origin.y))
 }
 
 pub fn handle_click(_ui_id: &str, event: &str) {
@@ -155,13 +204,16 @@ fn hint(msg: &str) {
 
 // ── Tree builder ──────────────────────────────────────────────────────────────
 
+/// Height of the player-inventory section (3 main rows + gap + hotbar row).
+const PLAYER_INV_SECTION_H: f32 = SLOT_SZ * 3.0 + 8.0 + SLOT_SZ;
+
 fn build_tree(
     game_dir: &str, player_name: &str,
     designs: &[DesignMeta], selected: Option<&str>,
     total_w: f32, total_h: f32, left_w: f32, slot_count: usize,
 ) -> widget::Widget {
     let btn_bar_h = BTN_H + 14.0;
-    let body_h = total_h - 28.0 - btn_bar_h;
+    let body_h = total_h - 28.0 - PLAYER_INV_SECTION_H - PAD - btn_bar_h;
 
     let title = widget::panel(FlexDir::Row).dock(Dock::Top).h(28.0).bg(BG_LIGHT)
         .child(widget::label("VLSI Workbench").color(TEXT_BRIGHT).flex(1.0)
@@ -178,6 +230,10 @@ fn build_tree(
         .child(left_panel)
         .child(right_panel);
 
+    let player_inv = widget::panel(FlexDir::Row).dock(Dock::Top).h(PLAYER_INV_SECTION_H)
+        .padding(PAD, 0.0, 0.0, PAD)
+        .child(build_player_inventory_grid(slot_count));
+
     let btn_bar = widget::panel(FlexDir::Row).dock(Dock::Bottom).h(btn_bar_h).gap(6.0)
         .padding(4.0, PAD, 4.0, PAD).align(Align::Center)
         .child(bar_btn("Design"))
@@ -185,7 +241,41 @@ fn build_tree(
         .child(bar_btn("Export BP"));
 
     widget::panel(FlexDir::Column).w(total_w).h(total_h).bg(BG)
-        .child(title).child(body).child(btn_bar)
+        .child(title).child(body).child(player_inv).child(btn_bar)
+}
+
+/// Real vanilla player-inventory slots (main 3×9 + hotbar), tagged as one
+/// block (`player_inv_origin`) so `measure_layout` can read back where this
+/// grid's top-left corner landed — Java's `addPlayerInventorySlots` only
+/// needs a single origin, not per-slot positions, since it lays the grid out
+/// itself at a fixed 18px stride matching this one.
+fn build_player_inventory_grid(slot_count: usize) -> widget::Widget {
+    let mut grid = widget::panel(FlexDir::Column).id("player_inv_origin").gap(0.0);
+    if slot_count > 0 {
+        for row in 0..3 {
+            let mut row_panel = widget::panel(FlexDir::Row).gap(0.0).h(SLOT_SZ);
+            for col in 0..9 {
+                let idx = PLAYER_INV_SLOT_START + row * 9 + col;
+                row_panel = row_panel.child(inv_slot_for(idx));
+            }
+            grid = grid.child(row_panel);
+        }
+        let mut hotbar = widget::panel(FlexDir::Row).gap(0.0).h(SLOT_SZ).margin(8.0, 0.0, 0.0, 0.0);
+        for col in 0..9 {
+            let idx = PLAYER_INV_SLOT_START + 27 + col;
+            hotbar = hotbar.child(inv_slot_for(idx));
+        }
+        grid = grid.child(hotbar);
+    }
+    grid
+}
+
+/// An `inv_slot` widget showing this menu's real slot `idx` right now.
+fn inv_slot_for(idx: usize) -> widget::Widget {
+    let sd = inventory::current_slot(idx);
+    let item_id = sd.as_ref().map(|s| s.item_id.clone()).unwrap_or_default();
+    let count = sd.map(|s| s.count).unwrap_or(0);
+    widget::inv_slot(item_id, count)
 }
 
 fn bar_btn(label: &str) -> widget::Widget {
@@ -202,10 +292,7 @@ fn build_resource_panel(slot_count: usize) -> widget::Widget {
     // Chip slot (index 0)
     col = col.child(widget::label("Chip:").color(ACCENT).no_wrap());
     if slot_count > 0 {
-        let sd = inventory::current_slot(0);
-        let item_id = sd.as_ref().map(|s| s.item_id.clone()).unwrap_or_default();
-        let count = sd.map(|s| s.count).unwrap_or(0);
-        col = col.child(widget::inv_slot(item_id, count));
+        col = col.child(inv_slot_for(0).id("slot_0"));
     }
 
     // Resource vials (slots 1–6)
@@ -226,8 +313,9 @@ fn build_vial_row(slot_idx: usize, item_id: &str, color: u32, cap: u32) -> widge
     let count = sd.as_ref().map(|s| s.count).unwrap_or(0);
     let frac = (count as f32 / cap as f32).clamp(0.0, 1.0);
 
-    // Item icon (from vanilla textures, like creative inventory)
-    let icon = widget::item_slot(item_id).w(SLOT_SZ).h(SLOT_SZ);
+    // Item icon (from vanilla textures, like creative inventory) — tagged so
+    // `measure_layout` can read back its position for the real vanilla `Slot`.
+    let icon = widget::item_slot(item_id).w(SLOT_SZ).h(SLOT_SZ).id(format!("slot_{slot_idx}"));
 
     // Vial fill bar
     let fill_h = (SLOT_SZ - 2.0) * frac;

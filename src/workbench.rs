@@ -15,6 +15,10 @@ use crate::vm::Tier;
 
 pub const WORKBENCH_ID: &str = "yog-vlsi:vlsi_workbench";
 pub const BLUEPRINT_ID: &str = "yog-vlsi:blueprint";
+/// Custom slot count for the workbench's own inventory (chip + 6 resource
+/// vials + 2 spares) — the real vanilla `Slot`s at indices `0..WORKBENCH_SLOT_COUNT`,
+/// before the player's own inventory starts at `WORKBENCH_SLOT_COUNT`.
+pub const WORKBENCH_SLOT_COUNT: usize = 9;
 
 /// In-memory resource storage per workbench position: (x, y, z) → (item_id → quantity).
 /// TODO: migrate to block-entity inventory slots (phase 7 follow-up).
@@ -23,11 +27,19 @@ pub static RESOURCES: LazyLock<Mutex<HashMap<(i32, i32, i32), HashMap<String, u6
 
 pub fn register(registry: &mut Registry) {
     // ── Workbench inventory (phase 7) ───────────────────────────────────────
+    // Real vanilla `Slot` positions are baked in from the exact same widget
+    // tree `workbench_inv_ui` draws (see `measure_layout`), so the decorative
+    // overlay and the real, draggable slots underneath always agree on where
+    // things are — no hand-picked pixel offsets to keep in sync by hand.
     const WORKBENCH_INV: &str = "yog-vlsi:workbench";
+    let ((bg_w, bg_h), slot_positions, player_inv_origin) = crate::workbench_inv_ui::measure_layout();
     registry.register_inventory(
-        InventoryDef::new(WORKBENCH_INV, 9)
+        InventoryDef::new(WORKBENCH_INV, WORKBENCH_SLOT_COUNT)
             .title("VLSI Workbench")
             .include_player_inventory(true)
+            .layout(slot_positions.into_iter().map(|(x, y)| yog_api::SlotLayout { x, y }).collect())
+            .player_inv_offset(player_inv_origin.0, player_inv_origin.1)
+            .background_size(bg_w, bg_h)
     );
 
     // ── Workbench block ────────────────────────────────────────────────────
