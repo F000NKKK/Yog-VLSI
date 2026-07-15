@@ -73,7 +73,7 @@ pub fn render(gfx: &GfxContext) {
     let total_w = left_w + RIGHT_W + PAD * 2.0;
     let total_h = sh * 0.85;
 
-    let root = build_tree(&game_dir, &player_name, &designs, selected.as_deref(), total_w, total_h, slot_count);
+    let root = build_tree(&game_dir, &player_name, &designs, selected.as_deref(), total_w, total_h, left_w, slot_count);
     let screen_root = widget::panel(FlexDir::Row)
         .padding((sh - total_h) / 2.0, 0.0, 0.0, (sw - total_w) / 2.0)
         .child(root);
@@ -158,7 +158,7 @@ fn hint(msg: &str) {
 fn build_tree(
     game_dir: &str, player_name: &str,
     designs: &[DesignMeta], selected: Option<&str>,
-    total_w: f32, total_h: f32, slot_count: usize,
+    total_w: f32, total_h: f32, left_w: f32, slot_count: usize,
 ) -> widget::Widget {
     let btn_bar_h = BTN_H + 14.0;
     let body_h = total_h - 28.0 - btn_bar_h;
@@ -168,7 +168,7 @@ fn build_tree(
             .padding(6.0, 0.0, 0.0, 8.0).no_wrap());
 
     // Left: chip slot + resource vials
-    let left_panel = build_resource_panel(slot_count);
+    let left_panel = build_resource_panel(slot_count).w(left_w);
 
     // Right: design list
     let right_panel = build_design_list(game_dir, player_name, designs, selected, body_h);
