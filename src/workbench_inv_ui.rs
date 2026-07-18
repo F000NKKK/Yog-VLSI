@@ -45,7 +45,14 @@ const RIGHT_W: f32 = 210.0;
 /// `measure_layout` bake real vanilla `Slot` positions in at mod-init time
 /// (before any screen/window size exists) and have them still match what
 /// `render` draws later, every frame, at any window size.
-const TOTAL_H: f32 = 320.0;
+///
+/// Kept small on purpose: real vanilla `Slot`s can't be repositioned once
+/// the container is open (their coordinates are baked in at mod-init,
+/// before any window even exists), so this can't track the actual window
+/// size the way a CSS `%` height would — it has to be one fixed number that
+/// fits comfortably even on small GUI viewports (high GUI Scale / small
+/// windows), not just the developer's own screen.
+const TOTAL_H: f32 = 200.0;
 
 /// First index of the player's main inventory (3×9) among this menu's
 /// slots — right after our own `WORKBENCH_SLOT_COUNT` custom slots. Hotbar
