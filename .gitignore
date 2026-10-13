@@ -1,7 +1,6 @@
 .yog-build/
 target/
 artifacts/
-*.designer.rs
 .yog-idle/
 benches/Cargo.lock
 benches/target/
