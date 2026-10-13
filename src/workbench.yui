@@ -4,24 +4,25 @@
         width="276"
         height="214"
         anchor="center"
-        bg="@Colors.panel"
+        bg="sprite:panel"
         x:ViewModel="WorkbenchVm">
     <Screen.Resources>
-        <Style x:Key="Header" target="Label" color="@Colors.accent" no_wrap="true" />
-        <Style x:Key="Count" target="Label" w="14" color="@Colors.text" shadow="false" font_scale="0.7" no_wrap="true" />
-        <Style x:Key="Vial" target="Column" w="6" h="18" padding="1" gap="0" bg="@Colors.pane" />
+        <Style x:Key="Header" target="Label" color="#FF404040" shadow="false" no_wrap="true" />
+        <Style x:Key="Count" target="Label" w="14" color="#FF404040" shadow="false" font_scale="0.7" no_wrap="true" />
+        <Style x:Key="Vial" target="Column" w="6" h="18" padding="1" gap="0" bg="sprite:slot" />
         <Style x:Key="Action"
                target="Button"
                w="100%"
-               h="16"
-               bg="@Colors.button"
+               h="20"
+               bg="sprite:button"
                color="#FFFFFF"
-               hover:bg="@Colors.button_hover"
-               disabled:color="@Colors.text_dim" />
+               hover:bg="sprite:button_hover"
+               disabled:bg="sprite:button_disabled"
+               disabled:color="#FFA0A0A0" />
     </Screen.Resources>
     <Grid w="100%" h="100%" rows="18,*,Auto">
-        <Row padding="0 8" align="center" bg="@Colors.bar">
-            <Label text="@Strings.screen.workbench.title" color="#FFFFFF" no_wrap="true" />
+        <Row padding="0 8" align="center">
+            <Label style="@Header" text="@Strings.screen.workbench.title" />
         </Row>
         <Row Grid.Row="1" padding="4 8" gap="8">
             <Column w="96" gap="2">
@@ -90,7 +91,7 @@
                           w="100%"
                           gap="1"
                           padding="1"
-                          bg="@Colors.pane"
+                          bg="sprite:slot"
                           items="{x:Bind designs}"
                           key="{x:Bind id}"
                           selected="{x:Bind selected_id(), BindBack=select}"
@@ -101,24 +102,23 @@
                                  h="12"
                                  padding="0 3"
                                  align="center"
-                                 hover:bg="#22FFFFFF"
-                                 selected:bg="@Colors.selected">
+                                 hover:bg="#40FFFFFF"
+                                 selected:bg="#FF555555">
                                 <Label w="100%"
                                        text="{x:Bind Strings::screen_workbench_design_row(name, tier.name())}"
-                                       color="@Colors.text"
-                                       selected:color="#FFFFFF"
-                                       shadow="false"
+                                       color="#FFFFFF"
+                                       selected:color="#FFFFFFA0"
                                        ellipsis="true" />
                             </Row>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                     <ListView.Empty>
-                        <Label w="100%" text="@Strings.screen.workbench.no_designs" color="@Colors.text_dim" shadow="false" />
+                        <Label w="100%" text="@Strings.screen.workbench.no_designs" color="#FF373737" shadow="false" />
                     </ListView.Empty>
                 </ListView>
                 <Label x:Name="design_info"
                        text="{x:Bind design_info()}"
-                       color="@Colors.text_dim"
+                       color="#FF404040"
                        shadow="false"
                        font_scale="0.7"
                        no_wrap="true" />
