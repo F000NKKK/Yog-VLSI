@@ -11,7 +11,7 @@ use yog_api::{BlockPos, Registry, World};
 
 use crate::content::Blocks;
 
-use crate::chip::PortDir;
+use crate::vm::PortMode;
 
 pub const PORT_INPUT: &str = Blocks::PORT_INPUT;
 pub const PORT_OUTPUT: &str = Blocks::PORT_OUTPUT;
@@ -26,28 +26,20 @@ pub fn is_port_block(block_id: &str) -> bool {
     matches!(block_id, PORT_INPUT | PORT_OUTPUT | PORT_BIDI)
 }
 
-pub fn dir_for_block(block_id: &str) -> Option<PortDir> {
+pub fn dir_for_block(block_id: &str) -> Option<PortMode> {
     match block_id {
-        PORT_INPUT => Some(PortDir::Input),
-        PORT_OUTPUT => Some(PortDir::Output),
-        PORT_BIDI => Some(PortDir::Bidirectional),
+        PORT_INPUT => Some(PortMode::Input),
+        PORT_OUTPUT => Some(PortMode::Output),
+        PORT_BIDI => Some(PortMode::Bidirectional),
         _ => None,
     }
 }
 
-pub fn block_for_dir(dir: PortDir) -> &'static str {
+pub fn block_for_dir(dir: PortMode) -> &'static str {
     match dir {
-        PortDir::Input => PORT_INPUT,
-        PortDir::Output => PORT_OUTPUT,
-        PortDir::Bidirectional => PORT_BIDI,
-    }
-}
-
-fn next_dir(dir: PortDir) -> PortDir {
-    match dir {
-        PortDir::Input => PortDir::Output,
-        PortDir::Output => PortDir::Bidirectional,
-        PortDir::Bidirectional => PortDir::Input,
+        PortMode::Input => PORT_INPUT,
+        PortMode::Output => PORT_OUTPUT,
+        PortMode::Bidirectional => PORT_BIDI,
     }
 }
 
@@ -82,15 +74,15 @@ pub fn register(registry: &mut Registry) {
         let dimension = yog_api::world::dimension::OVERWORLD;
         LAST_TOUCHED.lock().unwrap().insert(e.player_name.clone(), (dimension.to_string(), e.pos));
 
-        let current = dir_for_block(&e.block_id).unwrap_or(PortDir::Input);
-        let next = next_dir(current);
+        let current = dir_for_block(&e.block_id).unwrap_or(PortMode::Input);
+        let next = current.next();
         let world = World::new(srv, dimension);
         let label = read_label(srv, dimension, e.pos);
         world.set_block(e.pos, block_for_dir(next));
         if let Some(label) = label {
             write_label(srv, dimension, e.pos, &label);
         }
-        srv.send_actionbar(&e.player_name, &format!("§ePort mode: {}", next.name()));
+        srv.send_actionbar(&e.player_name, &format!("§ePort mode: {}", next.label()));
         false
     });
 

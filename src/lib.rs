@@ -6,8 +6,10 @@ mod chip;
 mod commands;
 mod designs;
 mod editor;
+mod nbt;
 mod network;
 mod port;
+mod tier;
 mod vm;
 mod workbench;
 mod workbench_inv_ui;
@@ -18,6 +20,9 @@ yog_api::resources!();
 yog_api::content!();
 
 use yog_api::{info, Mod, Registry, YogDimensionDef, YogDimensionTypeDef};
+
+/// The mod id — its `Storage` namespace.
+pub const MOD_ID: &str = "yog-vlsi";
 
 pub struct YogVlsi;
 
