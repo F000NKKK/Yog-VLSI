@@ -26,12 +26,12 @@
         <Row Grid.Row="1" padding="4 8" gap="8">
             <Column w="96" gap="2">
                 <Label style="@Header" text="@Strings.screen.workbench.chip" />
-                <Slot index="0" />
+                <Slot index="0" accepts="yog-vlsi:chip_wood yog-vlsi:chip_stone yog-vlsi:chip_iron yog-vlsi:chip_gold yog-vlsi:chip_diamond yog-vlsi:chip_netherite" />
                 <Label style="@Header" text="@Strings.screen.workbench.resources" />
                 <Row gap="4">
                     <Column gap="2">
                         <Row gap="2" align="center">
-                            <Slot index="1" />
+                            <Slot index="1" accepts="minecraft:redstone" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column w="100%" h="{x:Bind vial(1)}" bg="@Colors.vial.redstone" />
@@ -39,7 +39,7 @@
                             <Label style="@Count" text="{x:Bind count(1)}" />
                         </Row>
                         <Row gap="2" align="center">
-                            <Slot index="2" />
+                            <Slot index="2" accepts="minecraft:iron_ingot" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column w="100%" h="{x:Bind vial(2)}" bg="@Colors.vial.iron" />
@@ -47,7 +47,7 @@
                             <Label style="@Count" text="{x:Bind count(2)}" />
                         </Row>
                         <Row gap="2" align="center">
-                            <Slot index="3" />
+                            <Slot index="3" accepts="minecraft:gold_ingot" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column w="100%" h="{x:Bind vial(3)}" bg="@Colors.vial.gold" />
@@ -57,7 +57,7 @@
                     </Column>
                     <Column gap="2">
                         <Row gap="2" align="center">
-                            <Slot index="4" />
+                            <Slot index="4" accepts="minecraft:quartz" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column w="100%" h="{x:Bind vial(4)}" bg="@Colors.vial.quartz" />
@@ -65,7 +65,7 @@
                             <Label style="@Count" text="{x:Bind count(4)}" />
                         </Row>
                         <Row gap="2" align="center">
-                            <Slot index="5" />
+                            <Slot index="5" accepts="minecraft:oak_log" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column w="100%" h="{x:Bind vial(5)}" bg="@Colors.vial.wood" />
@@ -73,7 +73,7 @@
                             <Label style="@Count" text="{x:Bind count(5)}" />
                         </Row>
                         <Row gap="2" align="center">
-                            <Slot index="6" />
+                            <Slot index="6" accepts="minecraft:cobblestone" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column w="100%" h="{x:Bind vial(6)}" bg="@Colors.vial.cobblestone" />

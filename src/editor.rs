@@ -125,7 +125,12 @@ pub fn enter(srv: &dyn yog_api::Server, player_name: &str, name: &str, tier: Tie
         return_dim: return_dim.to_string(), return_pos,
     });
 
-    srv.teleport_to_dim(player_name, dimension(), (origin_x + size as i32 / 2) as f64, (EDITOR_Y + 1) as f64, (origin_z + size as i32 / 2) as f64);
+    let (cx, cz) = ((origin_x + size as i32 / 2) as f64, (origin_z + size as i32 / 2) as f64);
+    if !srv.teleport_to_dim(player_name, dimension(), cx, (EDITOR_Y + 1) as f64, cz) {
+        SESSIONS.lock().unwrap().remove(player_name);
+        srv.send_actionbar(player_name, "§cCouldn't enter the editor dimension — see the game log.");
+        return;
+    }
     srv.send_actionbar(player_name, &format!("§6Editing '{}' — {} tier, {}×{}. §7/vlsi save when done.", name, tier.name(), size, size));
 }
 
