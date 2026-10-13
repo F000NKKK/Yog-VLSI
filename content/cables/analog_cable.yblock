@@ -5,90 +5,25 @@
     "hardness": 0.5,
     "resistance": 0.5,
     "sound": "stone",
-    "shape": [
-      5,
-      5,
-      5,
-      11,
-      11,
-      11
-    ],
+    "shape": [5, 5, 5, 11, 11, 11],
     "connect_groups": [
       "analog"
     ]
   },
   "model": {
     "parent": "minecraft:block/block",
-    "textures": {
-      "all": "@Textures.analog_cable"
-    },
+    "textures": { "all": "@Textures.analog_cable" },
     "elements": [
       {
-        "from": [
-          5,
-          5,
-          5
-        ],
-        "to": [
-          11,
-          11,
-          11
-        ],
+        "from": [5, 5, 5],
+        "to": [11, 11, 11],
         "faces": {
-          "down": {
-            "uv": [
-              5,
-              5,
-              11,
-              11
-            ],
-            "texture": "#all"
-          },
-          "up": {
-            "uv": [
-              5,
-              5,
-              11,
-              11
-            ],
-            "texture": "#all"
-          },
-          "north": {
-            "uv": [
-              5,
-              10,
-              11,
-              16
-            ],
-            "texture": "#all"
-          },
-          "south": {
-            "uv": [
-              5,
-              10,
-              11,
-              16
-            ],
-            "texture": "#all"
-          },
-          "west": {
-            "uv": [
-              5,
-              10,
-              11,
-              16
-            ],
-            "texture": "#all"
-          },
-          "east": {
-            "uv": [
-              5,
-              10,
-              11,
-              16
-            ],
-            "texture": "#all"
-          }
+          "down": { "uv": [5, 5, 11, 11], "texture": "#all" },
+          "up": { "uv": [5, 5, 11, 11], "texture": "#all" },
+          "north": { "uv": [5, 11, 11, 16], "texture": "#all" },
+          "south": { "uv": [5, 11, 11, 16], "texture": "#all" },
+          "west": { "uv": [5, 11, 11, 16], "texture": "#all" },
+          "east": { "uv": [5, 11, 11, 16], "texture": "#all" }
         }
       }
     ]
@@ -96,76 +31,18 @@
   "states": {
     "connect": {
       "arm": {
-        "textures": {
-          "all": "@Textures.analog_cable"
-        },
+        "textures": { "all": "@Textures.analog_cable" },
         "elements": [
           {
-            "from": [
-              5,
-              5,
-              0
-            ],
-            "to": [
-              11,
-              11,
-              5
-            ],
+            "from": [5, 5, 0],
+            "to": [11, 11, 5],
             "faces": {
-              "down": {
-                "uv": [
-                  5,
-                  11,
-                  11,
-                  16
-                ],
-                "texture": "#all"
-              },
-              "up": {
-                "uv": [
-                  5,
-                  0,
-                  11,
-                  5
-                ],
-                "texture": "#all"
-              },
-              "north": {
-                "uv": [
-                  5,
-                  5,
-                  11,
-                  11
-                ],
-                "texture": "#all"
-              },
-              "south": {
-                "uv": [
-                  5,
-                  5,
-                  11,
-                  11
-                ],
-                "texture": "#all"
-              },
-              "west": {
-                "uv": [
-                  0,
-                  5,
-                  5,
-                  11
-                ],
-                "texture": "#all"
-              },
-              "east": {
-                "uv": [
-                  11,
-                  5,
-                  16,
-                  11
-                ],
-                "texture": "#all"
-              }
+              "down": { "uv": [5, 11, 11, 16], "texture": "#all" },
+              "up": { "uv": [5, 0, 11, 5], "texture": "#all" },
+              "north": { "uv": [5, 5, 11, 11], "texture": "#all" },
+              "south": { "uv": [5, 5, 11, 11], "texture": "#all" },
+              "west": { "uv": [0, 5, 5, 11], "texture": "#all" },
+              "east": { "uv": [11, 5, 16, 11], "texture": "#all" }
             }
           }
         ]
