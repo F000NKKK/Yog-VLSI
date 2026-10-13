@@ -1,24 +1,19 @@
 //! VLSI Workbench: block for designing and fabricating microchips.
 //!
-//! Now backed by the yog-inventory framework — right-click opens a real
-//! Container/Menu screen with slots (chip + resources) + player inventory.
-//! Custom UI (design library, fabricate button) rendered via yog-ui callbacks.
+//! Right-click opens its inventory screen (`workbench.yui`): the chip and
+//! resource slots, the player's inventory, and the design library.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 
-use yog_api::{InventoryDef, Registry, Storage};
+use yog_api::{Registry, Storage};
 
 use crate::content::{Blocks, Items};
 
 
 pub const WORKBENCH_ID: &str = Blocks::VLSI_WORKBENCH;
 pub const BLUEPRINT_ID: &str = Items::BLUEPRINT;
-/// Custom slot count for the workbench's own inventory (chip + 6 resource
-/// vials + 2 spares) — the real vanilla `Slot`s at indices `0..WORKBENCH_SLOT_COUNT`,
-/// before the player's own inventory starts at `WORKBENCH_SLOT_COUNT`.
-pub const WORKBENCH_SLOT_COUNT: usize = 9;
 
 /// In-memory resource storage per workbench position: (x, y, z) → (item_id → quantity).
 /// TODO: migrate to block-entity inventory slots (phase 7 follow-up).
@@ -26,25 +21,10 @@ pub static RESOURCES: LazyLock<Mutex<HashMap<(i32, i32, i32), HashMap<String, u6
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub fn register(registry: &mut Registry) {
-    // ── Workbench inventory (phase 7) ───────────────────────────────────────
-    // Real vanilla `Slot` positions are baked in from the exact same widget
-    // tree `workbench_inv_ui` draws (see `measure_layout`), so the decorative
-    // overlay and the real, draggable slots underneath always agree on where
-    // things are — no hand-picked pixel offsets to keep in sync by hand.
-    const WORKBENCH_INV: &str = "yog-vlsi:workbench";
-    let ((bg_w, bg_h), slot_positions, player_inv_origin) = crate::workbench_inv_ui::measure_layout();
-    registry.register_inventory(
-        InventoryDef::new(WORKBENCH_INV, WORKBENCH_SLOT_COUNT)
-            .title("VLSI Workbench")
-            .include_player_inventory(true)
-            .layout(slot_positions.into_iter().map(|(x, y)| yog_api::SlotLayout { x, y }).collect())
-            .player_inv_offset(player_inv_origin.0, player_inv_origin.1)
-            .background_size(bg_w, bg_h)
-    );
-
-    // ── Workbench block (content/vlsi_workbench.yblock, registered manually
-    // to attach its inventory) ─────────────────────────────────────────────
-    registry.register_block(Blocks::vlsi_workbench().inventory(WORKBENCH_INV));
+    // The screen's markup lays out the block's inventory.
+    let screen = crate::workbench_ui::register(registry);
+    // content/vlsi_workbench.yblock, registered here to attach that inventory.
+    registry.register_block(Blocks::vlsi_workbench().inventory(crate::workbench_ui::ID));
 
     registry.add_shaped_recipe(
         yog_api::ShapedRecipe::new("yog-vlsi:vlsi_workbench_craft", WORKBENCH_ID, 1)
@@ -98,13 +78,13 @@ pub fn register(registry: &mut Registry) {
             .key('R', "minecraft:redstone")
     );
 
-    // ── Workbench UI (yog-ui overlay on inventory screen) ──────────────────
-    // Capture player context so the UI render callback knows whose designs to show.
+    // Whose design library the screen shows.
     registry.on_use_block(move |e, phase, srv| -> bool {
-        if phase != yog_api::EventPhase::Pre { return true; }
-        if e.block_id != WORKBENCH_ID { return true; }
-        crate::workbench_inv_ui::set_player_context(&srv.game_dir(), &e.player_name);
-        true // don't cancel — let the inventory open
+        if phase == yog_api::EventPhase::Pre && e.block_id == WORKBENCH_ID {
+            let (game_dir, player, dim) = (srv.game_dir(), e.player_name.clone(), e.dimension.clone());
+            screen.update(move |vm| vm.opened_by(game_dir, player, dim));
+        }
+        true // the inventory opens
     });
 }
 

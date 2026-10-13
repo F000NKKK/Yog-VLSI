@@ -12,7 +12,7 @@ mod port;
 pub mod tier;
 pub mod vm;
 mod workbench;
-mod workbench_inv_ui;
+mod workbench_ui;
 
 // `crate::res` — typed accessors for resources/*.yres (Strings::...).
 yog_api::resources!();
@@ -63,11 +63,6 @@ impl Mod for YogVlsi {
         commands::register(registry);
 
         registry.on_tick(|srv| { alu::tick_all(srv); });
-
-        // Workbench UI (inventory screen)
-        let wb_inv_id = "yog:inv/yog-vlsi:workbench";
-        registry.register_ui(wb_inv_id, |uid, ev| workbench_inv_ui::handle_click(uid, ev));
-        registry.on_ui_render(wb_inv_id, |gfx| workbench_inv_ui::render(gfx));
 
         // ALU UI
         let alu_id = "yog-vlsi:alu";

@@ -64,29 +64,19 @@ pub fn register(registry: &mut Registry) {
         let parts = split(&ev.payload);
         let player = ev.player.clone();
         let reply = match parts.first().map(String::as_str) {
-            Some("edit") if parts.len() >= 5 => {
-                let name = &parts[1];
-                let (rx, ry, rz) = (
-                    parts[2].parse().unwrap_or(0.0),
-                    parts[3].parse().unwrap_or(64.0),
-                    parts[4].parse().unwrap_or(0.0),
-                );
+            Some("edit") if parts.len() >= 3 => {
+                let (name, dim) = (&parts[1], &parts[2]);
                 let game_dir = srv.game_dir();
                 let list = crate::designs::list_designs(&game_dir, &player);
+                let at = yog_api::player::Player::new(srv, &player).position().unwrap_or((0.0, 64.0, 0.0));
                 match list.iter().find(|d| &d.name == name) {
-                    Some(meta) => {
-                        if let Some(entry) = crate::designs::load_design(&game_dir, &player, &meta.id) {
-                            // The workbench GUI button only sends back (x, y, z) — no
-                            // dimension — since the client has no API to query its own
-                            // dimension. Physical workbench blocks live in the Overworld,
-                            // so that's a safe assumption here (unlike the `/vlsi` command
-                            // path, which threads the real dimension from `CommandContext`).
-                            crate::editor::enter(srv, &player, &meta.name, meta.tier, Some(meta.id.clone()), Some(entry.circuit), yog_api::world::dimension::OVERWORLD, (rx, ry, rz));
+                    Some(meta) => match crate::designs::load_design(&game_dir, &player, &meta.id) {
+                        Some(entry) => {
+                            crate::editor::enter(srv, &player, &meta.name, meta.tier, Some(meta.id.clone()), Some(entry.circuit), dim, at);
                             format!("§aOpened editor for '{}'.", name)
-                        } else {
-                            "§cFailed to load design data.".into()
                         }
-                    }
+                        None => "§cFailed to load design data.".into(),
+                    },
                     None => format!("§cDesign '{}' not found.", name),
                 }
             }
