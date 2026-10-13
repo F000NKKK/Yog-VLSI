@@ -9,8 +9,8 @@ mod editor;
 mod nbt;
 mod network;
 mod port;
-mod tier;
-mod vm;
+pub mod tier;
+pub mod vm;
 mod workbench;
 mod workbench_inv_ui;
 
