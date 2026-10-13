@@ -92,8 +92,8 @@ pub fn register(registry: &mut Registry) {
             }
             Some("fabricate") if parts.len() >= 3 => {
                 let name = &parts[1];
-                match crate::vm::Tier::ALL.iter().find(|t| t.id() == parts[2]) {
-                    Some(&tier) => crate::commands::do_fabricate(srv, &player, "", name, tier),
+                match crate::tier::Tier::parse(&parts[2]) {
+                    Some(tier) => crate::commands::do_fabricate(srv, &player, "", name, tier),
                     None => "§cUnknown tier.".into(),
                 }
             }

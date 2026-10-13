@@ -19,7 +19,8 @@ use yog_api::{widget, Align, Dock, FlexDir, GfxContext, Registry, UiRoot};
 
 use crate::commands::{ALU_STATE, CHIP_NAMES, CHIP_PORTS, IO_MODES, LINKS};
 use crate::network;
-use crate::vm::Tier;
+use crate::tier::Tier;
+use crate::vm::PortMode;
 
 /// Server → client reply channel for the chip-selector inventory listing.
 pub const CHIP_LIST_CHANNEL: &str = "yog-vlsi:alu_chiplist";
@@ -258,13 +259,13 @@ fn build_chips_panel(center_w: f32) -> widget::Widget {
             for port in &ports {
                 let is_selected = selected.as_ref().map_or(false, |(cid, pl)| cid == chip_id && pl == &port.label);
                 let pin_color = match port.dir {
-                    crate::chip::PortDir::Input => PIN_IN,
-                    crate::chip::PortDir::Output => PIN_OUT,
-                    crate::chip::PortDir::Bidirectional => PIN_BIDI,
+                    PortMode::Input => PIN_IN,
+                    PortMode::Output => PIN_OUT,
+                    PortMode::Bidirectional => PIN_BIDI,
                 };
                 let marker = if is_selected { "▶" } else { " " };
                 card = card.child(
-                    widget::button(format!("{marker} {} {}", port.dir.name(), port.label))
+                    widget::button(format!("{marker} {} {}", port.dir.short(), port.label))
                         .on_click(format!("pin:{chip_id}:{}", port.label))
                         .h(ROW_H)
                         .color(if is_selected { SEL_HIGHLIGHT } else { pin_color })

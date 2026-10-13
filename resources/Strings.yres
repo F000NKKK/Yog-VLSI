@@ -39,5 +39,17 @@
   "item.chip_netherite": "Netherite Microchip",
   "item.chip_netherite.desc": "§7Tier: §eNetherite§7 | §b40 ticks/s§7 | §a256×256 world\n§7Place in a §6VLSI Workbench§7 to design circuits.\n§7Ports: none (unprogrammed)",
   "item.blueprint": "VLSI Blueprint",
-  "item.blueprint.desc": "§7Stores a chip design for sharing.\n§7Use in a VLSI Workbench to import.\n§7Craft an empty Blueprint, then Export from the workbench."
+  "item.blueprint.desc": "§7Stores a chip design for sharing.\n§7Use in a VLSI Workbench to import.\n§7Craft an empty Blueprint, then Export from the workbench.",
+  "tier_wood": "Wood",
+  "tier_stone": "Stone",
+  "tier_gold": "Gold",
+  "tier_iron": "Iron",
+  "tier_diamond": "Diamond",
+  "tier_netherite": "Netherite",
+  "port_mode_input": "Input",
+  "port_mode_output": "Output",
+  "port_mode_bidi": "Bidirectional",
+  "port_short_input": "IN",
+  "port_short_output": "OUT",
+  "port_short_bidi": "BIDI"
 }

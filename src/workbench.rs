@@ -12,8 +12,6 @@ use yog_api::{InventoryDef, Registry, Storage};
 
 use crate::content::{Blocks, Items};
 
-use crate::chip::CircuitData;
-use crate::vm::Tier;
 
 pub const WORKBENCH_ID: &str = Blocks::VLSI_WORKBENCH;
 pub const BLUEPRINT_ID: &str = Items::BLUEPRINT;
@@ -108,42 +106,6 @@ pub fn register(registry: &mut Registry) {
         crate::workbench_inv_ui::set_player_context(&srv.game_dir(), &e.player_name);
         true // don't cancel — let the inventory open
     });
-}
-
-/// Extract CircuitData from a Blueprint item's NBT.
-fn extract_blueprint_circuit(nbt: &str) -> Option<CircuitData> {
-    let key = "YogVlsiBlueprint:\"";
-    if let Some(start) = nbt.find(key) {
-        let start = start + key.len();
-        let chars: Vec<char> = nbt[start..].chars().collect();
-        let mut i = 0;
-        let mut end = start;
-        while i < chars.len() {
-            if chars[i] == '\\' && i + 1 < chars.len() {
-                i += 2;
-            } else if chars[i] == '"' {
-                end = start + i;
-                break;
-            } else {
-                i += 1;
-            }
-        }
-        let json = &nbt[start..end].replace("\\\"", "\"").replace("\\\\", "\\");
-        CircuitData::from_json(json)
-    } else {
-        None
-    }
-}
-
-fn tier_from_size(size: usize) -> Tier {
-    match size {
-        16 => Tier::Wood,
-        32 => Tier::Stone,
-        64 => Tier::Gold,
-        128 => Tier::Diamond,
-        256 => Tier::Netherite,
-        _ => Tier::Iron, // default
-    }
 }
 
 pub fn load_resources(srv: &dyn yog_api::Server) {
