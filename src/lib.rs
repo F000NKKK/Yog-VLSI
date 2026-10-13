@@ -12,7 +12,6 @@ mod port;
 pub mod tier;
 pub mod vm;
 mod workbench;
-mod workbench_ui;
 
 // `crate::res` — typed accessors for resources/*.yres (Strings::...).
 yog_api::resources!();
@@ -54,7 +53,7 @@ impl Mod for YogVlsi {
             // Void — the editor builds its own floor/walls per session.
         });
 
-        workbench::register(registry);
+        workbench::setup(registry);
         alu::register(registry);
         alu_ui::register(registry);
         port::register(registry);

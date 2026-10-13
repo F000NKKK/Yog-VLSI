@@ -1,16 +1,23 @@
 //! VLSI Workbench: block for designing and fabricating microchips.
 //!
 //! Right-click opens its inventory screen (`workbench.yui`): the chip and
-//! resource slots, the player's inventory, and the design library.
+//! resource slots, the player's inventory, and the design library. This
+//! file is its code-behind — the view model `WorkbenchVm` — plus the
+//! block, its recipes and its resource storage.
+
+yog_api::ui_include!("workbench");
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 
-use yog_api::{Registry, Storage};
+use yog_api::{Registry, Storage, inventory};
+use yog_kit::prelude::*;
 
 use crate::content::{Blocks, Items};
-
+use crate::designs::{DesignMeta, list_designs, load_design};
+use crate::network;
+use crate::res::Strings;
 
 pub const WORKBENCH_ID: &str = Blocks::VLSI_WORKBENCH;
 pub const BLUEPRINT_ID: &str = Items::BLUEPRINT;
@@ -20,11 +27,102 @@ pub const BLUEPRINT_ID: &str = Items::BLUEPRINT;
 pub static RESOURCES: LazyLock<Mutex<HashMap<(i32, i32, i32), HashMap<String, u64>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub fn register(registry: &mut Registry) {
+/// Items that fill a vial (one stack).
+const VIAL_CAPACITY: u32 = 64;
+/// Inner height of a vial: an 18px slot minus its 1px border.
+const VIAL_HEIGHT: f32 = 16.0;
+
+#[derive(Default)]
+pub struct WorkbenchVm {
+    /// Who opened the workbench and in which dimension — set by its use
+    /// handler (the design library is per player).
+    game_dir: String,
+    player: String,
+    dimension: String,
+    designs: Vec<DesignMeta>,
+    /// Chosen design's id.
+    selected: Option<String>,
+    /// The selected design's summary, read once per selection.
+    info: String,
+}
+
+impl ViewModel for WorkbenchVm {
+    fn on_open(&mut self, _cx: &mut Cx<'_, Self>) {
+        self.designs = list_designs(&self.game_dir, &self.player);
+        if !self.designs.iter().any(|d| Some(&d.id) == self.selected.as_ref()) {
+            self.selected = None;
+        }
+        self.refresh_info();
+    }
+}
+
+impl WorkbenchVm {
+    /// The player `player` opened a workbench in `dimension`.
+    pub fn opened_by(&mut self, game_dir: String, player: String, dimension: String) {
+        self.game_dir = game_dir;
+        self.player = player;
+        self.dimension = dimension;
+    }
+
+    /// Items in container slot `slot` right now.
+    pub fn count(&self, slot: usize) -> u32 {
+        inventory::current_slot(slot).map_or(0, |s| s.count)
+    }
+    /// Fill height of the vial beside slot `slot`.
+    pub fn vial(&self, slot: usize) -> f32 {
+        VIAL_HEIGHT * (self.count(slot) as f32 / VIAL_CAPACITY as f32).min(1.0)
+    }
+
+    pub fn selected(&self) -> Option<&DesignMeta> {
+        let id = self.selected.as_ref()?;
+        self.designs.iter().find(|d| &d.id == id)
+    }
+    pub fn selected_id(&self) -> Option<&str> {
+        self.selected().map(|d| d.id.as_str())
+    }
+    pub fn has_selection(&self) -> bool {
+        self.selected().is_some()
+    }
+    pub fn design_info(&self) -> &str {
+        &self.info
+    }
+
+    pub fn select(&mut self, id: String) {
+        self.selected = Some(id);
+        self.refresh_info();
+    }
+
+    pub fn edit(&mut self) {
+        if let Some(d) = self.selected() {
+            network::send_workbench_action(&["edit", &d.name, &self.dimension]);
+        }
+    }
+    pub fn fabricate(&mut self) {
+        if let Some(d) = self.selected() {
+            network::send_workbench_action(&["fabricate", &d.name, d.tier.id()]);
+        }
+    }
+    pub fn export_blueprint(&mut self) {
+        if let Some(d) = self.selected() {
+            network::send_workbench_action(&["export_bp", &d.name]);
+        }
+    }
+
+    fn refresh_info(&mut self) {
+        self.info = self
+            .selected()
+            .and_then(|d| load_design(&self.game_dir, &self.player, &d.id))
+            .map(|e| Strings::screen_workbench_design_info(e.circuit.ports.len(), e.circuit.blocks.len()))
+            .unwrap_or_default();
+    }
+}
+
+/// The block, its screen and the recipes.
+pub fn setup(registry: &mut Registry) {
     // The screen's markup lays out the block's inventory.
-    let screen = crate::workbench_ui::register(registry);
+    let screen = register(registry);
     // content/vlsi_workbench.yblock, registered here to attach that inventory.
-    registry.register_block(Blocks::vlsi_workbench().inventory(crate::workbench_ui::ID));
+    registry.register_block(Blocks::vlsi_workbench().inventory(ID));
 
     registry.add_shaped_recipe(
         yog_api::ShapedRecipe::new("yog-vlsi:vlsi_workbench_craft", WORKBENCH_ID, 1)
@@ -103,5 +201,34 @@ pub fn save_resources(srv: &dyn yog_api::Server) {
         let mut store = Storage::open(&srv.game_dir(), "yog-vlsi/workbench_resources");
         store.set("resources", &*json);
         let _ = store.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slots_fit_the_screen_apart() {
+        let def = yog_kit::inventory_of::<View>().unwrap();
+        assert_eq!(def.slot_count, 7);
+        assert!(def.include_player_inventory);
+        let (px, py) = def.player_inv_offset;
+        // The player's inventory (9×18 by 3×18 + 4 + 18) stays on screen.
+        assert!(px + 9.0 * 18.0 <= WIDTH && py + 76.0 <= HEIGHT, "{px},{py}");
+        for (i, a) in def.layout.iter().enumerate() {
+            assert!(a.x >= 0.0 && a.y >= 0.0 && a.x + 16.0 <= WIDTH && a.y + 16.0 < py, "slot {i} at {a:?}");
+            for b in &def.layout[i + 1..] {
+                assert!((a.x - b.x).abs() >= 18.0 || (a.y - b.y).abs() >= 18.0, "{a:?} overlaps {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn empty_library() {
+        let mut h = yog_kit::testing::TestHost::<View>::new(WorkbenchVm::default());
+        h.open();
+        assert!(!h.vm().has_selection());
+        assert!(!h.widget(ids::FABRICATE).unwrap().enabled);
     }
 }
