@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The VLSI Workbench's inventory screen. View model: WorkbenchVm in workbench_ui.rs. -->
+<Screen id="yog-vlsi:workbench"
+        width="276"
+        height="214"
+        anchor="center"
+        bg="@Colors.panel"
+        x:ViewModel="WorkbenchVm">
+    <Screen.Resources>
+        <Style x:Key="Header" target="Label" color="@Colors.accent" no_wrap="true" />
+        <Style x:Key="Count" target="Label" w="14" color="@Colors.text" shadow="false" font_scale="0.7" no_wrap="true" />
+        <Style x:Key="Vial" target="Column" w="6" h="18" padding="1" gap="0" bg="@Colors.pane" />
+        <Style x:Key="Action"
+               target="Button"
+               w="100%"
+               h="16"
+               bg="@Colors.button"
+               color="#FFFFFF"
+               hover:bg="@Colors.button_hover"
+               disabled:color="@Colors.text_dim" />
+    </Screen.Resources>
+    <Grid w="100%" h="100%" rows="18,*,Auto">
+        <Row padding="0 8" align="center" bg="@Colors.bar">
+            <Label text="@Strings.screen.workbench.title" color="#FFFFFF" no_wrap="true" />
+        </Row>
+        <Row Grid.Row="1" padding="4 8" gap="8">
+            <Column w="96" gap="2">
+                <Label style="@Header" text="@Strings.screen.workbench.chip" />
+                <Slot index="0" />
+                <Label style="@Header" text="@Strings.screen.workbench.resources" />
+                <Row gap="4">
+                    <Column gap="2">
+                        <Row gap="2" align="center">
+                            <Slot index="1" />
+                            <Column style="@Vial">
+                                <Spacer flex="1" />
+                                <Column w="100%" h="{x:Bind vial(1)}" bg="@Colors.vial.redstone" />
+                            </Column>
+                            <Label style="@Count" text="{x:Bind count(1)}" />
+                        </Row>
+                        <Row gap="2" align="center">
+                            <Slot index="2" />
+                            <Column style="@Vial">
+                                <Spacer flex="1" />
+                                <Column w="100%" h="{x:Bind vial(2)}" bg="@Colors.vial.iron" />
+                            </Column>
+                            <Label style="@Count" text="{x:Bind count(2)}" />
+                        </Row>
+                        <Row gap="2" align="center">
+                            <Slot index="3" />
+                            <Column style="@Vial">
+                                <Spacer flex="1" />
+                                <Column w="100%" h="{x:Bind vial(3)}" bg="@Colors.vial.gold" />
+                            </Column>
+                            <Label style="@Count" text="{x:Bind count(3)}" />
+                        </Row>
+                    </Column>
+                    <Column gap="2">
+                        <Row gap="2" align="center">
+                            <Slot index="4" />
+                            <Column style="@Vial">
+                                <Spacer flex="1" />
+                                <Column w="100%" h="{x:Bind vial(4)}" bg="@Colors.vial.quartz" />
+                            </Column>
+                            <Label style="@Count" text="{x:Bind count(4)}" />
+                        </Row>
+                        <Row gap="2" align="center">
+                            <Slot index="5" />
+                            <Column style="@Vial">
+                                <Spacer flex="1" />
+                                <Column w="100%" h="{x:Bind vial(5)}" bg="@Colors.vial.wood" />
+                            </Column>
+                            <Label style="@Count" text="{x:Bind count(5)}" />
+                        </Row>
+                        <Row gap="2" align="center">
+                            <Slot index="6" />
+                            <Column style="@Vial">
+                                <Spacer flex="1" />
+                                <Column w="100%" h="{x:Bind vial(6)}" bg="@Colors.vial.cobblestone" />
+                            </Column>
+                            <Label style="@Count" text="{x:Bind count(6)}" />
+                        </Row>
+                    </Column>
+                </Row>
+            </Column>
+            <Column flex="1" h="100%" gap="2">
+                <Label style="@Header" text="@Strings.screen.workbench.designs" />
+                <ListView x:Name="designs"
+                          flex="1"
+                          w="100%"
+                          gap="1"
+                          padding="1"
+                          bg="@Colors.pane"
+                          items="{x:Bind designs}"
+                          key="{x:Bind id}"
+                          selected="{x:Bind selected_id(), BindBack=select}"
+                          item_height="12">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="DesignMeta">
+                            <Row w="100%"
+                                 h="12"
+                                 padding="0 3"
+                                 align="center"
+                                 hover:bg="#22FFFFFF"
+                                 selected:bg="@Colors.selected">
+                                <Label w="100%"
+                                       text="{x:Bind Strings::screen_workbench_design_row(name, tier.name())}"
+                                       color="@Colors.text"
+                                       selected:color="#FFFFFF"
+                                       shadow="false"
+                                       ellipsis="true" />
+                            </Row>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                    <ListView.Empty>
+                        <Label w="100%" text="@Strings.screen.workbench.no_designs" color="@Colors.text_dim" shadow="false" />
+                    </ListView.Empty>
+                </ListView>
+                <Label x:Name="design_info"
+                       text="{x:Bind design_info()}"
+                       color="@Colors.text_dim"
+                       shadow="false"
+                       font_scale="0.7"
+                       no_wrap="true" />
+            </Column>
+        </Row>
+        <Row Grid.Row="2" padding="0 8 8 8" gap="8">
+            <PlayerInventory />
+            <Column flex="1" gap="4">
+                <Button x:Name="edit"
+                        style="@Action"
+                        text="@Strings.screen.workbench.edit"
+                        enabled="{x:Bind has_selection()}"
+                        command="{x:Bind edit()}" />
+                <Button x:Name="fabricate"
+                        style="@Action"
+                        text="@Strings.screen.workbench.fabricate"
+                        enabled="{x:Bind has_selection()}"
+                        command="{x:Bind fabricate()}" />
+                <Button x:Name="export"
+                        style="@Action"
+                        text="@Strings.screen.workbench.export"
+                        enabled="{x:Bind has_selection()}"
+                        command="{x:Bind export_blueprint()}" />
+            </Column>
+        </Row>
+    </Grid>
+</Screen>
