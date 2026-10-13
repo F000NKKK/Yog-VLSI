@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The ALU's node editor: link chip ports and the ALU's external ports. View model: AluVm in alu.rs. -->
+<Screen id="yog-vlsi:alu"
+        width="340"
+        height="216"
+        anchor="center"
+        bg="sprite:panel"
+        live="true"
+        x:ViewModel="AluVm">
+    <Screen.Resources>
+        <Style x:Key="Header" target="Label" color="#FF404040" shadow="false" no_wrap="true" />
+        <Style x:Key="Action"
+               target="Button"
+               h="20"
+               padding="0 8"
+               bg="sprite:button"
+               color="#FFFFFF"
+               hover:bg="sprite:button_hover"
+               disabled:bg="sprite:button_disabled"
+               disabled:color="#FFA0A0A0" />
+        <Style x:Key="Pin" target="Button" w="100%" h="12" padding="0 4" shadow="false" no_wrap="true" hover:bg="#33FFFFFF" />
+    </Screen.Resources>
+    <Grid w="100%" h="100%" rows="18,*,Auto" padding="6 8">
+        <Label x:Name="title" style="@Header" text="{x:Bind title()}" />
+
+        <!-- The editor: external ports | chips with their pins, then the links. -->
+        <Row Grid.Row="1" gap="8" visible="{x:Bind editing()}">
+            <Column w="128" h="100%" gap="2">
+                <Label style="@Header" text="@Strings.screen.alu.external_ports" />
+                <ItemsControl x:Name="ext_ports" w="100%" gap="1" padding="2" bg="sprite:slot" items="{x:Bind ext_ports()}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="ExtPort">
+                            <Row w="100%" h="12" gap="2">
+                                <Button style="@Pin"
+                                        flex="1"
+                                        w="Auto"
+                                        text="{x:Bind label()}"
+                                        color="{x:Bind color()}"
+                                        command="{x:Bind vm.select_ext(side)}" />
+                                <Button style="@Pin"
+                                        w="52"
+                                        text="{x:Bind mode.label()}"
+                                        color="#FF373737"
+                                        command="{x:Bind vm.cycle_mode(side)}" />
+                            </Row>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Column>
+            <Column flex="1" h="100%" gap="2">
+                <Label style="@Header" text="@Strings.screen.alu.chips" />
+                <ScrollView x:Name="chips" flex="1" w="100%" padding="2" bg="sprite:slot">
+                    <ItemsControl w="100%" gap="1" items="{x:Bind pins()}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="PinRow">
+                                <Button style="@Pin"
+                                        text="{x:Bind text}"
+                                        color="{x:Bind color}"
+                                        bg="{x:Bind bg}"
+                                        command="{x:Bind vm.select_pin(chip, port)}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Label style="@Header" margin="4 0 0 0" text="@Strings.screen.alu.links" visible="{x:Bind has_links()}" />
+                    <ItemsControl w="100%" items="{x:Bind links()}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="LinkRow">
+                                <Label w="100%" text="{x:Bind text}" color="#FF373737" shadow="false" ellipsis="true" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollView>
+            </Column>
+        </Row>
+
+        <!-- The chip selector: programmed chips in the player's inventory. -->
+        <Column Grid.Row="1" gap="2" visible="{x:Bind choosing}">
+            <Label style="@Header" text="@Strings.screen.alu.select_chip" />
+            <ListView x:Name="choices"
+                      flex="1"
+                      w="100%"
+                      gap="1"
+                      padding="2"
+                      bg="sprite:slot"
+                      items="{x:Bind choices}"
+                      key="{x:Bind slot}"
+                      item_height="20">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="ChipChoice">
+                        <Button style="@Action" w="100%" text="{x:Bind label()}" command="{x:Bind vm.install(slot)}" />
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+                <ListView.Empty>
+                    <Label w="100%" text="@Strings.screen.alu.no_chips" color="#FF373737" shadow="false" />
+                </ListView.Empty>
+            </ListView>
+        </Column>
+
+        <Row Grid.Row="2" margin="4 0 0 0" gap="4" halign="right">
+            <Button x:Name="add_chip" style="@Action" text="@Strings.screen.alu.add_chip" visible="{x:Bind editing()}" command="{x:Bind add_chip()}" />
+            <Button x:Name="auto_link" style="@Action" text="@Strings.screen.alu.auto_link" visible="{x:Bind editing()}" command="{x:Bind auto_link()}" />
+            <Button x:Name="save" style="@Action" text="@Strings.screen.alu.save" visible="{x:Bind editing()}" command="{x:Bind save()}" />
+            <Button x:Name="cancel" style="@Action" text="@Strings.screen.alu.cancel" visible="{x:Bind choosing}" command="{x:Bind cancel()}" />
+        </Row>
+    </Grid>
+</Screen>
