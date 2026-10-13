@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use yog_api::Storage;
 
-use crate::chip::{CircuitData, Port};
+use crate::chip::CircuitData;
 use crate::tier::Tier;
 
 // ── Design metadata ──────────────────────────────────────────────────────────
@@ -130,7 +130,6 @@ pub fn import_design(
     player_name: &str,
     name: &str,
     tier: Tier,
-    _ports: Vec<Port>,
     circuit: CircuitData,
 ) -> String {
     let design_id = crate::chip::new_id();

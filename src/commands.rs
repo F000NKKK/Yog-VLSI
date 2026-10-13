@@ -10,6 +10,7 @@
 //! /vlsi designs delete <name>      — delete design
 //! /vlsi fabricate <design> <tier>  — print chip from design (at workbench)
 //! /vlsi blueprint export <design>  — export design to Blueprint item
+//! /vlsi blueprint import           — copy the held Blueprint into your designs
 //! /vlsi alu install                — install held chip into nearest ALU
 //! /vlsi alu list                   — list chips in nearest ALU
 
@@ -111,6 +112,7 @@ pub fn register(registry: &mut Registry) {
              §7/vlsi designs delete <n>   §f— delete design\n\
              §7/vlsi fabricate <name> <t> §f— print chip from design\n\
              §7/vlsi blueprint export <n> §f— export design to Blueprint\n\
+             §7/vlsi blueprint import     §f— import held Blueprint\n\
              §7/vlsi alu install          §f— install held chip into ALU\n\
              §7/vlsi alu list             §f— list ALU chips"
         ))
@@ -246,6 +248,12 @@ pub fn register(registry: &mut Registry) {
         Some(do_export_blueprint(srv, &ctx.source, design_name))
     });
 
+    // ── /vlsi blueprint import ─────────────────────────────────────────────
+    registry.on_typed_command("vlsi", "word word", |ctx, srv| {
+        if ctx.arg_str(0).unwrap_or("") != "blueprint" || ctx.arg_str(1).unwrap_or("") != "import" { return None; }
+        Some(do_import_blueprint(srv, &ctx.source))
+    });
+
     // ── /vlsi alu install ──────────────────────────────────────────────────
     registry.on_typed_command("vlsi", "word word", |ctx, srv| {
         if ctx.arg_str(0).unwrap_or("") != "alu" || ctx.arg_str(1).unwrap_or("") != "install" { return None; }
@@ -375,6 +383,21 @@ pub fn do_export_blueprint(srv: &dyn yog_api::Server, player_name: &str, design_
     let _ = srv.set_held_item_nbt(player_name, &entry.circuit.to_blueprint_nbt());
     format!("§aBlueprint exported: '{}' ({} blocks, {} ports).",
         design_name, entry.circuit.blocks.len(), entry.circuit.ports.len())
+}
+
+/// Copies the held Blueprint's circuit into the player's design library;
+/// the Blueprint is kept (DESIGN.md §2.4).
+pub fn do_import_blueprint(srv: &dyn yog_api::Server, player_name: &str) -> String {
+    let Some(circuit) = srv.get_held_item_nbt(player_name).and_then(|nbt| CircuitData::from_blueprint_nbt(&nbt)) else {
+        return "§cHold a written Blueprint.".into();
+    };
+    let Some(tier) = Tier::ALL.into_iter().find(|t| t.world_size() == circuit.size) else {
+        return "§cThat Blueprint's circuit fits no chip tier.".into();
+    };
+    let name = format!("Blueprint {}", designs::list_designs(&srv.game_dir(), player_name).len() + 1);
+    let (blocks, ports) = (circuit.blocks.len(), circuit.ports.len());
+    designs::import_design(&srv.game_dir(), player_name, &name, tier, circuit);
+    format!("§aImported '{}' ({} tier, {} blocks, {} ports).", name, tier.name(), blocks, ports)
 }
 
 // ── Test chip factory ──────────────────────────────────────────────────────
