@@ -16,9 +16,9 @@
   "model": {
     "parent": "cube_bottom_top",
     "textures": {
-      "top": "block/alu_top_netherite.png",
-      "bottom": "block/alu_top_netherite.png",
-      "side": "block/alu_side_netherite.png"
+      "top": "@Textures.alu_top_netherite",
+      "bottom": "@Textures.alu_top_netherite",
+      "side": "@Textures.alu_side_netherite"
     }
   }
 }

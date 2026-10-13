@@ -1,0 +1,114 @@
+{
+  "alu_side_diamond": {
+    "type": "image",
+    "value": "block/alu_side_diamond.png"
+  },
+  "alu_side_gold": {
+    "type": "image",
+    "value": "block/alu_side_gold.png"
+  },
+  "alu_side_iron": {
+    "type": "image",
+    "value": "block/alu_side_iron.png"
+  },
+  "alu_side_netherite": {
+    "type": "image",
+    "value": "block/alu_side_netherite.png"
+  },
+  "alu_side_stone": {
+    "type": "image",
+    "value": "block/alu_side_stone.png"
+  },
+  "alu_side_wood": {
+    "type": "image",
+    "value": "block/alu_side_wood.png"
+  },
+  "alu_top_diamond": {
+    "type": "image",
+    "value": "block/alu_top_diamond.png"
+  },
+  "alu_top_gold": {
+    "type": "image",
+    "value": "block/alu_top_gold.png"
+  },
+  "alu_top_iron": {
+    "type": "image",
+    "value": "block/alu_top_iron.png"
+  },
+  "alu_top_netherite": {
+    "type": "image",
+    "value": "block/alu_top_netherite.png"
+  },
+  "alu_top_stone": {
+    "type": "image",
+    "value": "block/alu_top_stone.png"
+  },
+  "alu_top_wood": {
+    "type": "image",
+    "value": "block/alu_top_wood.png"
+  },
+  "analog_cable": {
+    "type": "image",
+    "value": "block/analog_cable.png"
+  },
+  "digital_cable": {
+    "type": "image",
+    "value": "block/digital_cable.png"
+  },
+  "port_bidi": {
+    "type": "image",
+    "value": "block/port_bidi.png"
+  },
+  "port_input": {
+    "type": "image",
+    "value": "block/port_input.png"
+  },
+  "port_output": {
+    "type": "image",
+    "value": "block/port_output.png"
+  },
+  "redstone_port": {
+    "type": "image",
+    "value": "block/redstone_port.png"
+  },
+  "workbench_bottom": {
+    "type": "image",
+    "value": "block/workbench_bottom.png"
+  },
+  "workbench_side": {
+    "type": "image",
+    "value": "block/workbench_side.png"
+  },
+  "workbench_top": {
+    "type": "image",
+    "value": "block/workbench_top.png"
+  },
+  "blueprint": {
+    "type": "image",
+    "value": "item/blueprint.png"
+  },
+  "chip_diamond": {
+    "type": "image",
+    "value": "item/chip_diamond.png"
+  },
+  "chip_gold": {
+    "type": "image",
+    "value": "item/chip_gold.png"
+  },
+  "chip_iron": {
+    "type": "image",
+    "value": "item/chip_iron.png"
+  },
+  "chip_netherite": {
+    "type": "image",
+    "value": "item/chip_netherite.png"
+  },
+  "chip_stone": {
+    "type": "image",
+    "value": "item/chip_stone.png"
+  },
+  "chip_wood": {
+    "type": "image",
+    "value": "item/chip_wood.png"
+  }
+}

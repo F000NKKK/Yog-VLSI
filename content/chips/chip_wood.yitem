@@ -7,7 +7,7 @@
   "model": {
     "parent": "generated",
     "textures": {
-      "layer0": "item/chip_wood.png"
+      "layer0": "@Textures.chip_wood"
     }
   }
 }

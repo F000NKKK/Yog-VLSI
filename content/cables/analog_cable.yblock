@@ -20,7 +20,7 @@
   "model": {
     "parent": "minecraft:block/block",
     "textures": {
-      "all": "block/analog_cable.png"
+      "all": "@Textures.analog_cable"
     },
     "elements": [
       {
@@ -97,7 +97,7 @@
     "connect": {
       "arm": {
         "textures": {
-          "all": "block/analog_cable.png"
+          "all": "@Textures.analog_cable"
         },
         "elements": [
           {

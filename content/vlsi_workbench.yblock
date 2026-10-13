@@ -12,9 +12,9 @@
   "model": {
     "parent": "cube_bottom_top",
     "textures": {
-      "top": "block/workbench_top.png",
-      "bottom": "block/workbench_bottom.png",
-      "side": "block/workbench_side.png"
+      "top": "@Textures.workbench_top",
+      "bottom": "@Textures.workbench_bottom",
+      "side": "@Textures.workbench_side"
     }
   }
 }

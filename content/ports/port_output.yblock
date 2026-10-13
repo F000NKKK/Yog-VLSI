@@ -9,7 +9,7 @@
   "model": {
     "parent": "cube_all",
     "textures": {
-      "all": "block/port_output.png"
+      "all": "@Textures.port_output"
     }
   }
 }

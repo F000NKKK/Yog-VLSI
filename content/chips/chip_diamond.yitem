@@ -7,7 +7,7 @@
   "model": {
     "parent": "generated",
     "textures": {
-      "layer0": "item/chip_diamond.png"
+      "layer0": "@Textures.chip_diamond"
     }
   }
 }

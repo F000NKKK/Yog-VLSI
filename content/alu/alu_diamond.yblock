@@ -16,9 +16,9 @@
   "model": {
     "parent": "cube_bottom_top",
     "textures": {
-      "top": "block/alu_top_diamond.png",
-      "bottom": "block/alu_top_diamond.png",
-      "side": "block/alu_side_diamond.png"
+      "top": "@Textures.alu_top_diamond",
+      "bottom": "@Textures.alu_top_diamond",
+      "side": "@Textures.alu_side_diamond"
     }
   }
 }
