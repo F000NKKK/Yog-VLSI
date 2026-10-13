@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use yog_api::Storage;
 
 use crate::chip::{CircuitData, Port};
-use crate::vm::Tier;
+use crate::tier::Tier;
 
 // ── Design metadata ──────────────────────────────────────────────────────────
 
@@ -82,7 +82,7 @@ pub fn save_design(game_dir: &str, player_name: &str, entry: &DesignEntry) {
     // Save circuit data
     {
         let mut store = storage_for_player(game_dir, player_name);
-        store.set(&design_circuit_key(&entry.meta.id), entry.circuit.to_json());
+        store.set(&design_circuit_key(&entry.meta.id), serde_json::to_string(&entry.circuit).unwrap_or_default());
         let _ = store.flush();
     }
 
@@ -104,10 +104,10 @@ pub fn load_design(game_dir: &str, player_name: &str, design_id: &str) -> Option
         .map(String::from);
     let circuit = json
         .and_then(|j| {
-            match CircuitData::from_json(&j) {
-                Some(c) => Some(c),
-                None => {
-                    yog_api::warn!("[yog-vlsi] failed to parse circuit JSON for design {design_id}");
+            match serde_json::from_str(&j) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    yog_api::warn!("[yog-vlsi] failed to parse circuit JSON for design {design_id}: {e}");
                     None
                 }
             }
@@ -133,7 +133,7 @@ pub fn import_design(
     _ports: Vec<Port>,
     circuit: CircuitData,
 ) -> String {
-    let design_id = crate::chip::new_chip_id();
+    let design_id = crate::chip::new_id();
     let entry = DesignEntry {
         meta: DesignMeta {
             id: design_id.clone(),
@@ -159,8 +159,7 @@ pub fn create_design(
     name: &str,
     tier: Tier,
 ) -> String {
-    let design_id = crate::chip::new_chip_id();
-    let size = tier.world_size();
+    let design_id = crate::chip::new_id();
     let entry = DesignEntry {
         meta: DesignMeta {
             id: design_id.clone(),
@@ -173,7 +172,7 @@ pub fn create_design(
                 .as_secs(),
             port_count: 0,
         },
-        circuit: CircuitData::new(design_id.clone(), size, size, Vec::new()),
+        circuit: CircuitData::empty(tier),
     };
     save_design(game_dir, player_name, &entry);
     design_id

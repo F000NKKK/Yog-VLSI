@@ -17,12 +17,12 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 use yog_api::player::Player;
-use yog_api::{Registry, Storage};
+use yog_api::Registry;
 
-use crate::chip::{ChipMeta, CircuitBlock, CircuitData, Port, PortDir, PortSide};
+use crate::chip::{ChipMeta, CircuitBlock, CircuitData, Port};
 use crate::designs;
-use crate::port;
-use crate::vm::{BlockType, ComparatorMode, Facing, PortMode, RedstoneVM, ShulkerColor, Tier};
+use crate::tier::Tier;
+use crate::vm::{PortMode, RedstoneVM};
 use crate::workbench::{BLUEPRINT_ID, RESOURCES};
 
 /// In-memory ALU state: (x, y, z) → list of (chip_id, tier)
@@ -71,9 +71,7 @@ pub fn install_chip(srv: &dyn yog_api::Server, meta: &ChipMeta, alu_pos: (i32, i
     ALU_STATE.lock().unwrap().entry(alu_pos).or_default().push((meta.id.clone(), meta.tier));
     CHIP_NAMES.lock().unwrap().insert(meta.id.clone(), meta.name.clone());
     if let Some(circuit) = load_circuit(srv, &meta.id) {
-        let mut vm = RedstoneVM::new(meta.tier);
-        load_circuit_into_vm(&mut vm, &circuit);
-        VM_CACHE.lock().unwrap().insert(meta.id.clone(), vm);
+        VM_CACHE.lock().unwrap().insert(meta.id.clone(), circuit.vm());
         CHIP_PORTS.lock().unwrap().insert(meta.id.clone(), circuit.ports);
     }
 }
@@ -95,24 +93,6 @@ pub fn install_chip_from_slot(srv: &dyn yog_api::Server, player_name: &str, slot
     install_chip(srv, &meta, alu_pos);
     Player::new(srv, player_name).set_slot(slot, "minecraft:air", 0);
     format!("§aInstalled '{}' into the ALU.", meta.name)
-}
-
-// ── Tier helper ──────────────────────────────────────────────────────────────
-
-pub fn parse_tier_pub(s: &str) -> Option<Tier> {
-    parse_tier(s)
-}
-
-fn parse_tier(s: &str) -> Option<Tier> {
-    match s.to_lowercase().as_str() {
-        "wood" => Some(Tier::Wood),
-        "stone" => Some(Tier::Stone),
-        "gold" => Some(Tier::Gold),
-        "iron" => Some(Tier::Iron),
-        "diamond" => Some(Tier::Diamond),
-        "netherite" => Some(Tier::Netherite),
-        _ => None,
-    }
 }
 
 // ── Registration ────────────────────────────────────────────────────────────
@@ -145,11 +125,11 @@ pub fn register(registry: &mut Registry) {
     registry.on_typed_command("vlsi", "word word", |ctx, srv| {
         let sub = ctx.arg_str(0).unwrap_or("");
         if sub != "chip" { return None; }
-        let tier = match parse_tier(ctx.arg_str(1).unwrap_or("")) {
+        let tier = match Tier::parse(ctx.arg_str(1).unwrap_or("")) {
             Some(t) => t, None => return Some("§cUnknown tier.".into()),
         };
-        let item_id = format!("yog-vlsi:chip_{}", tier.id());
-        Player::new(srv, &ctx.source).give(&item_id, 1);
+        let item_id = tier.chip_item();
+        Player::new(srv, &ctx.source).give(item_id, 1);
         Some(format!("§aGiven 1× {} Microchip.", tier.name()))
     });
 
@@ -164,7 +144,7 @@ pub fn register(registry: &mut Registry) {
                 let ports = if meta.ports.is_empty() { "§7(none)".into() }
                 else {
                     meta.ports.iter()
-                        .map(|p| format!("  §e{}§7: {} {} idx={}", p.label, p.dir.name(), p.side.name(), p.index))
+                        .map(|p| format!("  §e{}§7: {} ({}, {}, {})", p.label, p.dir.label(), p.x, p.y, p.z))
                         .collect::<Vec<_>>().join("\n")
                 };
                 Some(format!("§6Chip: §f{}\n§7ID: §f{}\n§7Tier: §e{}\n§7Ports:\n{}", meta.name, meta.id, meta.tier.name(), ports))
@@ -177,12 +157,12 @@ pub fn register(registry: &mut Registry) {
     registry.on_typed_command("vlsi", "word word", |ctx, srv| {
         let sub = ctx.arg_str(0).unwrap_or("");
         if sub != "test" { return None; }
-        let tier = match parse_tier(ctx.arg_str(1).unwrap_or("")) {
+        let tier = match Tier::parse(ctx.arg_str(1).unwrap_or("")) {
             Some(t) => t, None => return Some("§cUnknown tier.".into()),
         };
         let meta = create_test_chip(tier, srv);
-        let item_id = format!("yog-vlsi:chip_{}", tier.id());
-        Player::new(srv, &ctx.source).give(&item_id, 1);
+        let item_id = tier.chip_item();
+        Player::new(srv, &ctx.source).give(item_id, 1);
         let _ = srv.set_held_item_nbt(&ctx.source, &meta.to_nbt());
         Some(format!("§aCreated test chip '{}'.", meta.name))
     });
@@ -198,11 +178,7 @@ pub fn register(registry: &mut Registry) {
         };
         let mut cache = VM_CACHE.lock().unwrap();
         let vm = cache.entry(meta.id.clone()).or_insert_with(|| {
-            let mut vm = RedstoneVM::new(meta.tier);
-            if let Some(circuit) = load_circuit(srv, &meta.id) {
-                load_circuit_into_vm(&mut vm, &circuit);
-            }
-            vm
+            load_circuit(srv, &meta.id).map_or_else(|| RedstoneVM::new(meta.tier.world_size()), |c| c.vm())
         });
         let before = vm.tick;
         vm.step();
@@ -229,7 +205,7 @@ pub fn register(registry: &mut Registry) {
     registry.on_typed_command("vlsi", "word word word word", |ctx, srv| {
         if ctx.arg_str(0).unwrap_or("") != "designs" || ctx.arg_str(1).unwrap_or("") != "create" { return None; }
         let name = ctx.arg_str(2).unwrap_or("Unnamed");
-        let tier = match parse_tier(ctx.arg_str(3).unwrap_or("")) {
+        let tier = match Tier::parse(ctx.arg_str(3).unwrap_or("")) {
             Some(t) => t, None => return Some("§cUsage: /vlsi designs create <name> <tier>".into()),
         };
         let game_dir = srv.game_dir();
@@ -257,7 +233,7 @@ pub fn register(registry: &mut Registry) {
         let action = ctx.arg_str(1).unwrap_or("");
         if sub != "fabricate" { return None; }
         let design_name = action;
-        let tier = match parse_tier(ctx.arg_str(2).unwrap_or("")) {
+        let tier = match Tier::parse(ctx.arg_str(2).unwrap_or("")) {
             Some(t) => t, None => return Some("§cUsage: /vlsi fabricate <design_name> <tier>".into()),
         };
         Some(do_fabricate(srv, &ctx.source, &ctx.uuid, design_name, tier))
@@ -365,15 +341,15 @@ pub fn do_fabricate(srv: &dyn yog_api::Server, player_name: &str, player_uuid: &
     let cost_str: Vec<String> = cost.iter().map(|(item, qty)| format!("{}: {}", item, qty)).collect();
 
     let meta = ChipMeta {
-        id: crate::chip::new_chip_id(),
+        id: crate::chip::new_id(),
         tier,
         name: design_name.to_string(),
         ports: entry.circuit.ports.clone(),
     };
-    save_circuit(srv, &entry.circuit);
+    entry.circuit.save_for_chip(&game_dir, &meta.id);
 
-    let item_id = format!("yog-vlsi:chip_{}", tier.id());
-    Player::new(srv, player_name).give(&item_id, 1);
+    let item_id = tier.chip_item();
+    Player::new(srv, player_name).give(item_id, 1);
     let _ = srv.set_held_item_nbt(player_name, &meta.to_nbt());
 
     format!(
@@ -395,12 +371,8 @@ pub fn do_export_blueprint(srv: &dyn yog_api::Server, player_name: &str, design_
         None => return "§cFailed to load design data.".into(),
     };
 
-    let circuit_json = entry.circuit.to_json();
-    let escaped = circuit_json.replace('\\', "\\\\").replace('"', "\\\"");
-    let nbt = format!("{{YogVlsiBlueprint: \"{}\"}}", escaped);
-
     Player::new(srv, player_name).give(BLUEPRINT_ID, 1);
-    let _ = srv.set_held_item_nbt(player_name, &nbt);
+    let _ = srv.set_held_item_nbt(player_name, &entry.circuit.to_blueprint_nbt());
     format!("§aBlueprint exported: '{}' ({} blocks, {} ports).",
         design_name, entry.circuit.blocks.len(), entry.circuit.ports.len())
 }
@@ -409,28 +381,23 @@ pub fn do_export_blueprint(srv: &dyn yog_api::Server, player_name: &str, design_
 
 fn create_test_chip(tier: Tier, srv: &dyn yog_api::Server) -> ChipMeta {
     let size = tier.world_size();
-    let chip_id = crate::chip::new_chip_id();
-    let mut blocks = Vec::new();
-
-    blocks.push(CircuitBlock { x: 0, y: 0, z: 0, block_id: "yog-vlsi:port".into(), state_json: r#"{"mode":"input"}"#.into() });
-    blocks.push(CircuitBlock { x: size-1, y: 0, z: 0, block_id: "yog-vlsi:port".into(), state_json: r#"{"mode":"output"}"#.into() });
-    blocks.push(CircuitBlock { x: 1, y: 0, z: 0, block_id: "minecraft:redstone_block".into(), state_json: "{}".into() });
+    let block = |x, state: &str| CircuitBlock { x, y: 0, z: 0, state: state.into() };
+    let mut blocks = vec![block(1, "minecraft:redstone_block")];
     for x in 2..size.saturating_sub(1) {
-        blocks.push(CircuitBlock { x, y: 0, z: 0, block_id: "minecraft:redstone_wire".into(), state_json: "{}".into() });
+        blocks.push(block(x, "minecraft:redstone_wire"));
     }
     if size > 2 {
-        blocks.push(CircuitBlock { x: size-2, y: 0, z: 0, block_id: "minecraft:redstone_lamp".into(), state_json: r#"{"lit":"false"}"#.into() });
+        blocks.push(block(size - 2, "minecraft:redstone_lamp[lit=false]"));
     }
-
-    let ports = vec![
-        Port { label: "IN".into(), side: PortSide::West, index: 0, dir: PortDir::Input },
-        Port { label: "OUT".into(), side: PortSide::East, index: 0, dir: PortDir::Output },
-    ];
-
-    let circuit = CircuitData { chip_id: chip_id.clone(), width: size, height: size, blocks, ports };
-    save_circuit(srv, &circuit);
-
-    ChipMeta { id: chip_id, tier, name: format!("Test {}", tier.name()), ports: circuit.ports }
+    let port = |label: &str, x, dir| Port { label: label.into(), x, y: 0, z: 0, dir };
+    let circuit = CircuitData {
+        size,
+        blocks,
+        ports: vec![port("IN", 0, PortMode::Input), port("OUT", size - 1, PortMode::Output)],
+    };
+    let id = crate::chip::new_id();
+    circuit.save_for_chip(&srv.game_dir(), &id);
+    ChipMeta { id, tier, name: format!("Test {}", tier.name()), ports: circuit.ports }
 }
 
 // ── Resource cost calculator ────────────────────────────────────────────────
@@ -454,7 +421,7 @@ pub fn calculate_cost(blocks: &[CircuitBlock]) -> Vec<(String, u64)> {
 /// Vanilla recipe cost for a block (in items).
 fn block_cost(block: &CircuitBlock) -> Vec<(String, u64)> {
     let mut c = Vec::new();
-    match block.block_id.as_str() {
+    match block.id() {
         // Redstone components
         "minecraft:redstone_wire" => { c.push(("minecraft:redstone".into(), 1)); }
         "minecraft:redstone_torch" | "minecraft:redstone_wall_torch" => {
@@ -520,120 +487,6 @@ fn block_cost(block: &CircuitBlock) -> Vec<(String, u64)> {
 
 // ── Storage helpers ─────────────────────────────────────────────────────────
 
-fn circuit_key(chip_id: &str) -> String { format!("circuit/{}", chip_id) }
-
-fn save_circuit(srv: &dyn yog_api::Server, circuit: &CircuitData) {
-    let game_dir = srv.game_dir();
-    let mut store = Storage::open(&game_dir, "yog-vlsi");
-    store.set(&circuit_key(&circuit.chip_id), circuit.to_json());
-    let _ = store.flush();
-}
-
 pub fn load_circuit(srv: &dyn yog_api::Server, chip_id: &str) -> Option<CircuitData> {
-    let game_dir = srv.game_dir();
-    let store = Storage::open(&game_dir, "yog-vlsi");
-    store.get(&circuit_key(chip_id))
-        .and_then(|v| v.as_str())
-        .map(String::from)
-        .and_then(|j| CircuitData::from_json(&j))
+    CircuitData::load_for_chip(&srv.game_dir(), chip_id)
 }
-
-pub fn load_circuit_into_vm(vm: &mut RedstoneVM, circuit: &CircuitData) {
-    for block in &circuit.blocks {
-        vm.set_block(block.x, block.y, block.z, parse_block_type(&block.block_id, &block.state_json));
-    }
-}
-
-/// Extract `"key":"value"` out of a compact JSON blob without pulling in a
-/// full parser — `state_json` is always a small, flat object.
-fn state_field<'a>(state_json: &'a str, key: &str) -> Option<&'a str> {
-    let needle = format!("\"{}\":\"", key);
-    let start = state_json.find(&needle)? + needle.len();
-    let end = state_json[start..].find('"')? + start;
-    Some(&state_json[start..end])
-}
-
-pub fn parse_block_type(block_id: &str, state_json: &str) -> BlockType {
-    let facing = || state_field(state_json, "facing").map(Facing::from_minecraft).unwrap_or(Facing::North);
-    match block_id {
-        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => BlockType::Air,
-        "minecraft:redstone_wire" => BlockType::RedstoneWire,
-        "minecraft:redstone_torch" => BlockType::RedstoneTorch { lit: !state_json.contains("\"lit\":\"false\"") },
-        "minecraft:redstone_wall_torch" => BlockType::RedstoneWallTorch { lit: !state_json.contains("\"lit\":\"false\""), facing: facing() },
-        "minecraft:repeater" => {
-            let delay: u8 = if state_json.contains("\"delay\":\"2\"") { 2 }
-            else if state_json.contains("\"delay\":\"3\"") { 3 }
-            else if state_json.contains("\"delay\":\"4\"") { 4 } else { 1 };
-            BlockType::Repeater { delay_ticks: delay, facing: facing(), locked: state_json.contains("\"locked\":\"true\"") }
-        }
-        "minecraft:comparator" => {
-            let mode = if state_json.contains("\"mode\":\"subtract\"") { ComparatorMode::Subtract } else { ComparatorMode::Compare };
-            BlockType::Comparator { mode, facing: facing() }
-        }
-        "minecraft:redstone_lamp" => BlockType::RedstoneLamp,
-        "minecraft:redstone_block" => BlockType::RedstoneBlock,
-        "minecraft:lever" => BlockType::Lever { on: state_json.contains("\"powered\":\"true\"") },
-        "minecraft:stone_button" => BlockType::StoneButton { pressed: state_json.contains("\"powered\":\"true\""), facing: facing() },
-        "minecraft:observer" => BlockType::Observer { facing: facing(), powered: state_json.contains("\"powered\":\"true\"") },
-        "minecraft:note_block" => BlockType::NoteBlock,
-        "minecraft:target" => BlockType::TargetBlock { power: 0 },
-        "minecraft:piston" => BlockType::Piston { extended: state_json.contains("\"extended\":\"true\""), facing: facing() },
-        "minecraft:sticky_piston" => BlockType::StickyPiston { extended: state_json.contains("\"extended\":\"true\""), facing: facing() },
-        "minecraft:chest" => BlockType::Chest,
-        "minecraft:trapped_chest" => BlockType::TrappedChest,
-        "minecraft:ender_chest" => BlockType::EnderChest,
-        "minecraft:barrel" => BlockType::Barrel,
-        "minecraft:hopper" => BlockType::Hopper { facing: facing(), enabled: !state_json.contains("\"enabled\":\"false\"") },
-        "minecraft:dropper" => BlockType::Dropper { facing: facing(), triggered: state_json.contains("\"triggered\":\"true\"") },
-        "minecraft:dispenser" => BlockType::Dispenser { facing: facing(), triggered: state_json.contains("\"triggered\":\"true\"") },
-        "minecraft:furnace" => BlockType::Furnace { lit: state_json.contains("\"lit\":\"true\"") },
-        "minecraft:blast_furnace" => BlockType::BlastFurnace { lit: state_json.contains("\"lit\":\"true\"") },
-        "minecraft:smoker" => BlockType::Smoker { lit: state_json.contains("\"lit\":\"true\"") },
-        "minecraft:brewing_stand" => BlockType::BrewingStand,
-        "minecraft:white_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::White) },
-        "minecraft:orange_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Orange) },
-        "minecraft:magenta_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Magenta) },
-        "minecraft:light_blue_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::LightBlue) },
-        "minecraft:yellow_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Yellow) },
-        "minecraft:lime_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Lime) },
-        "minecraft:pink_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Pink) },
-        "minecraft:gray_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Gray) },
-        "minecraft:light_gray_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::LightGray) },
-        "minecraft:cyan_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Cyan) },
-        "minecraft:purple_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Purple) },
-        "minecraft:blue_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Blue) },
-        "minecraft:brown_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Brown) },
-        "minecraft:green_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Green) },
-        "minecraft:red_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Red) },
-        "minecraft:black_shulker_box" => BlockType::ShulkerBox { color: Some(ShulkerColor::Black) },
-        "minecraft:shulker_box" => BlockType::ShulkerBox { color: None },
-        "minecraft:slime_block" => BlockType::SlimeBlock,
-        "minecraft:honey_block" => BlockType::HoneyBlock,
-        "minecraft:tnt" => BlockType::Tnt { unstable: state_json.contains("\"unstable\":\"true\"") },
-        "minecraft:rail" => BlockType::Rail,
-        "minecraft:powered_rail" => BlockType::PoweredRail { powered: state_json.contains("\"powered\":\"true\"") },
-        "minecraft:detector_rail" => BlockType::DetectorRail { powered: state_json.contains("\"powered\":\"true\"") },
-        "minecraft:activator_rail" => BlockType::ActivatorRail { powered: state_json.contains("\"powered\":\"true\"") },
-        "minecraft:iron_door" => BlockType::IronDoor { open: state_json.contains("\"open\":\"true\""), facing: facing(), half: door_half(state_json) },
-        "minecraft:oak_door" => BlockType::WoodDoor { open: state_json.contains("\"open\":\"true\""), facing: facing(), half: door_half(state_json) },
-        "minecraft:iron_trapdoor" => BlockType::IronTrapdoor { open: state_json.contains("\"open\":\"true\""), facing: facing(), half: door_half(state_json) },
-        "minecraft:oak_trapdoor" => BlockType::WoodTrapdoor { open: state_json.contains("\"open\":\"true\""), facing: facing(), half: door_half(state_json) },
-        "minecraft:oak_fence_gate" => BlockType::FenceGate { open: state_json.contains("\"open\":\"true\""), facing: facing() },
-        "minecraft:oak_button" => BlockType::WoodButton { pressed: state_json.contains("\"powered\":\"true\""), facing: facing() },
-        "minecraft:stone_pressure_plate" => BlockType::StonePressurePlate { pressed: state_json.contains("\"powered\":\"true\"") },
-        "minecraft:oak_pressure_plate" => BlockType::WoodPressurePlate { pressed: state_json.contains("\"powered\":\"true\"") },
-        "minecraft:light_weighted_pressure_plate" => BlockType::LightWeightedPressurePlate { power: 0 },
-        "minecraft:heavy_weighted_pressure_plate" => BlockType::HeavyWeightedPressurePlate { power: 0 },
-        "minecraft:glass" => BlockType::Glass,
-        port::PORT_INPUT => BlockType::Port(PortMode::Input),
-        port::PORT_OUTPUT => BlockType::Port(PortMode::Output),
-        port::PORT_BIDI => BlockType::Port(PortMode::Bidirectional),
-        _ => BlockType::Solid,
-    }
-}
-
-fn door_half(state_json: &str) -> crate::vm::DoorHalf {
-    if state_json.contains("\"half\":\"upper\"") { crate::vm::DoorHalf::Upper } else { crate::vm::DoorHalf::Lower }
-}
-
-

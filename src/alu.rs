@@ -5,6 +5,7 @@ use std::sync::{LazyLock, Mutex};
 
 use yog_api::Registry;
 use crate::commands::{ALU_STATE, CHIP_PORTS, EXT_VALUES, LINKS, VM_CACHE};
+use crate::tier::{SERVER_TICKS_PER_SECOND, Tier};
 
 /// Fractional VM-steps owed to each chip, accumulated every server tick
 /// (20/s) at the chip tier's `tick_rate()` and drained in whole-step
@@ -14,31 +15,15 @@ static STEP_ACCUM: LazyLock<Mutex<HashMap<String, f32>>> = LazyLock::new(|| Mute
 
 pub const EXT_SIDES: [&str; 6] = ["N", "S", "E", "W", "U", "D"];
 
-/// Block/item id for a given ALU tier (each tier is its own real, placeable
-/// block — there is no separate generic "yog-vlsi:alu" block).
-pub fn alu_id(tier: crate::vm::Tier) -> String {
-    format!("yog-vlsi:alu_{}", tier.id())
-}
-
 pub fn is_alu_block(block_id: &str) -> bool {
-    crate::vm::Tier::ALL.iter().any(|t| alu_id(*t) == block_id)
+    Tier::from_alu_block(block_id).is_some()
 }
 
 pub fn register(registry: &mut Registry) {
-    for tier in crate::vm::Tier::ALL {
-        let id = alu_id(*tier);
-
-
-        let (corner, center) = match tier {
-            crate::vm::Tier::Wood      => ("minecraft:oak_planks", "minecraft:redstone_block"),
-            crate::vm::Tier::Stone     => ("minecraft:cobblestone", "minecraft:redstone_block"),
-            crate::vm::Tier::Gold      => ("minecraft:gold_ingot", "minecraft:diamond"),
-            crate::vm::Tier::Iron      => ("minecraft:iron_ingot", "minecraft:diamond"),
-            crate::vm::Tier::Diamond   => ("minecraft:diamond", "minecraft:diamond_block"),
-            crate::vm::Tier::Netherite => ("minecraft:netherite_ingot", "minecraft:diamond_block"),
-        };
+    for tier in Tier::ALL {
+        let (corner, center) = tier.alu_recipe_materials();
         registry.add_shaped_recipe(
-            yog_api::ShapedRecipe::new(&format!("yog-vlsi:alu_{}_craft", tier.id()), &id, 1)
+            yog_api::ShapedRecipe::new(&format!("yog-vlsi:alu_{}_craft", tier.id()), tier.alu_block(), 1)
                 .row("GCG").row("CRC").row("GDG")
                 .key('G', corner).key('C', "minecraft:copper_ingot")
                 .key('R', "minecraft:repeater").key('D', center)
@@ -76,10 +61,10 @@ pub fn tick_all(_srv: &dyn yog_api::Server) {
         let mut cache = VM_CACHE.lock().unwrap();
         let mut accum = STEP_ACCUM.lock().unwrap();
         for chips in state.values() {
-            for (chip_id, _) in chips {
+            for (chip_id, tier) in chips {
                 let Some(vm) = cache.get_mut(chip_id) else { continue };
                 let owed = accum.entry(chip_id.clone()).or_insert(0.0);
-                *owed += vm.tier.tick_rate() as f32 / 20.0;
+                *owed += tier.tick_rate() as f32 / SERVER_TICKS_PER_SECOND as f32;
                 while *owed >= 1.0 {
                     vm.step();
                     *owed -= 1.0;
@@ -97,10 +82,8 @@ pub fn tick_all(_srv: &dyn yog_api::Server) {
             let Some(vm) = cache.get(chip_id) else { continue };
             let Some(chip_ports) = ports.get(chip_id) else { continue };
             for port in chip_ports {
-                if matches!(port.dir, crate::chip::PortDir::Input) { continue; }
-                let x = port.index % vm.width;
-                let z = port.index / vm.width;
-                let value = vm.get_port_output(x, 0, z);
+                if !port.dir.outputs() { continue; }
+                let value = vm.get_port_output(port.x, port.y, port.z);
                 outputs.insert((chip_id.clone(), port.label.clone()), value);
             }
         }
@@ -118,9 +101,7 @@ pub fn tick_all(_srv: &dyn yog_api::Server) {
         if let Some(dst_ports) = ports.get(dst_chip) {
             if let Some(port) = dst_ports.iter().find(|p| &p.label == dst_label) {
                 if let Some(vm) = cache.get_mut(dst_chip) {
-                    let x = port.index % vm.width;
-                    let z = port.index / vm.width;
-                    vm.set_port_input(x, 0, z, value);
+                    vm.set_port_input(port.x, port.y, port.z, value);
                 }
                 continue;
             }
@@ -149,11 +130,11 @@ fn parse_ext_chip_id(id: &str) -> Option<(i32, i32, i32)> {
 pub fn save_state(srv: &dyn yog_api::Server) {
     use crate::commands::CHIP_NAMES;
     let game_dir = srv.game_dir();
-    let mut store = yog_api::Storage::open(&game_dir, "yog-vlsi");
+    let mut store = yog_api::Storage::open(&game_dir, crate::MOD_ID);
 
     // HashMaps with tuple/non-string keys don't round-trip through
     // serde_json (object keys must be strings), so persist as Vec<(K, V)>.
-    let state: Vec<((i32, i32, i32), Vec<(String, crate::vm::Tier)>)> =
+    let state: Vec<((i32, i32, i32), Vec<(String, Tier)>)> =
         ALU_STATE.lock().unwrap().iter().map(|(k, v)| (*k, v.clone())).collect();
     let links: Vec<((String, String), (String, String))> =
         LINKS.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -173,9 +154,9 @@ pub fn load_state(srv: &dyn yog_api::Server) {
     use crate::commands::install_chip;
     use crate::chip::ChipMeta;
     let game_dir = srv.game_dir();
-    let store = yog_api::Storage::open(&game_dir, "yog-vlsi");
+    let store = yog_api::Storage::open(&game_dir, crate::MOD_ID);
 
-    let state: Vec<((i32, i32, i32), Vec<(String, crate::vm::Tier)>)> =
+    let state: Vec<((i32, i32, i32), Vec<(String, Tier)>)> =
         store.get("alu_state").and_then(|v| v.as_str()).and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
     let names: std::collections::HashMap<String, String> =
         store.get("alu_chip_names").and_then(|v| v.as_str())

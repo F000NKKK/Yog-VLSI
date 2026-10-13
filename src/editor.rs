@@ -36,10 +36,10 @@ fn player_pos(srv: &dyn yog_api::Server, name: &str, uuid: &str) -> (f64, f64, f
     Player::with_uuid(srv, name, uuid).position().unwrap_or((BASE_X as f64, 64.0, BASE_Z as f64))
 }
 
-use crate::chip::{CircuitBlock, CircuitData, Port, PortSide};
+use crate::chip::{CircuitBlock, CircuitData, Port};
 use crate::designs::{self, DesignEntry, DesignMeta};
 use crate::port;
-use crate::vm::Tier;
+use crate::tier::Tier;
 
 /// Y level of the build platform inside every editor lane.
 const EDITOR_Y: i32 = 10;
@@ -112,10 +112,10 @@ pub fn enter(srv: &dyn yog_api::Server, player_name: &str, name: &str, tier: Tie
     if let Some(circuit) = &existing {
         for block in &circuit.blocks {
             let p = BlockPos { x: origin_x + block.x as i32, y: EDITOR_Y, z: origin_z + block.z as i32 };
-            world.set_block(p, &block.block_id);
+            world.set_block(p, block.id());
         }
         for port in &circuit.ports {
-            let p = BlockPos { x: origin_x + port.index as i32 % size as i32, y: EDITOR_Y, z: origin_z + port.index as i32 / size as i32 };
+            let p = BlockPos { x: origin_x + port.x as i32, y: EDITOR_Y, z: origin_z + port.z as i32 };
             world.set_block(p, port::block_for_dir(port.dir));
         }
     }
@@ -153,20 +153,16 @@ pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
 
             if let Some(dir) = port::dir_for_block(&block_id) {
                 let label = port::read_label(srv, dimension(), p).unwrap_or_else(|| format!("Port {}", ports.len()));
-                let side = if x == 0 { PortSide::West }
-                    else if x == size - 1 { PortSide::East }
-                    else if z == 0 { PortSide::North }
-                    else { PortSide::South };
-                ports.push(Port { label, side, index: z * size + x, dir });
+                ports.push(Port { label, x, y: 0, z, dir });
                 continue;
             }
 
-            blocks.push(CircuitBlock { x, y: 0, z, block_id, state_json: "{}".into() });
+            blocks.push(CircuitBlock { x, y: 0, z, state: block_id });
         }
     }
 
-    let design_id = session.design_id.clone().unwrap_or_else(crate::chip::new_chip_id);
-    let circuit = CircuitData { chip_id: design_id.clone(), width: size, height: size, blocks, ports };
+    let design_id = session.design_id.clone().unwrap_or_else(crate::chip::new_id);
+    let circuit = CircuitData { size: session.tier.world_size(), blocks, ports };
     let entry = DesignEntry {
         meta: DesignMeta {
             id: design_id,
@@ -193,7 +189,7 @@ pub fn register(registry: &mut Registry) {
         let sub = ctx.arg_str(0).unwrap_or("");
         if sub != "design" { return None; }
         let name = ctx.arg_str(1).unwrap_or("Unnamed").to_string();
-        let tier = match crate::commands::parse_tier_pub(ctx.arg_str(2).unwrap_or("")) {
+        let tier = match Tier::parse(ctx.arg_str(2).unwrap_or("")) {
             Some(t) => t, None => return Some("§cUsage: /vlsi design <name> <tier>".into()),
         };
         let return_pos = player_pos(srv, &ctx.source, &ctx.uuid);
