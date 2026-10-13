@@ -13,7 +13,7 @@ serde_json = "*"
 uuid       = { version = "*", features = ["v4"] }
 
 [dependencies.exports]
-yog-pipes = "0.4"
+yog-pipes = "0.5"
 
 ## `yog run <name>` — build, drop the .yog into the loader's own Gradle dev-run
 # instance, then launch it.
