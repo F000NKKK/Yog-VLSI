@@ -1,182 +1,182 @@
-//! Microchip system: item registration per tier, data model, NBT serialization.
-//!
-//! Chip items store metadata (id, tier, ports) in their NBT.
-//! The actual circuit data (block grid) lives in server-side Storage
-//! to keep item NBT compact.
+//! Microchip data: the metadata a chip item carries in its NBT and the
+//! circuit (block grid + ports) kept in server storage.
 
 use serde::{Deserialize, Serialize};
-use crate::vm::Tier;
+use yog_api::Storage;
 
-// ── Chip ID ───────────────────────────────────────────────────────────────────
+use crate::nbt;
+use crate::res::Strings;
+use crate::tier::Tier;
+use crate::vm::PortMode;
+use crate::MOD_ID;
 
-/// Unique chip identifier (UUID v4 as string).
+/// NBT tag of a fabricated chip's [`ChipMeta`].
+const CHIP_TAG: &str = "YogVlsiChip";
+/// NBT tag of a written blueprint's [`CircuitData`].
+const BLUEPRINT_TAG: &str = "YogVlsiBlueprint";
+/// Storage key prefix of fabricated chips' circuits.
+const CIRCUIT_KEY: &str = "circuit/";
+
+/// Unique id of a chip or design (UUID v4).
 pub type ChipId = String;
 
-/// Generate a new chip ID.
-pub fn new_chip_id() -> ChipId {
+pub fn new_id() -> ChipId {
     uuid::Uuid::new_v4().to_string()
 }
 
-// ── Port definitions ──────────────────────────────────────────────────────────
-
-/// Which edge of the chip a port sits on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PortSide {
-    North,
-    South,
-    East,
-    West,
-}
-
-impl PortSide {
-    pub fn name(self) -> &'static str {
+impl PortMode {
+    /// Localized long name (`Input`, …).
+    pub fn label(self) -> String {
         match self {
-            PortSide::North => "North",
-            PortSide::South => "South",
-            PortSide::East  => "East",
-            PortSide::West  => "West",
+            PortMode::Input => Strings::port_mode_input(),
+            PortMode::Output => Strings::port_mode_output(),
+            PortMode::Bidirectional => Strings::port_mode_bidi(),
         }
+    }
+
+    /// Short tag shown on pins (`IN`, `OUT`, `BIDI`).
+    pub fn short(self) -> String {
+        match self {
+            PortMode::Input => Strings::port_short_input(),
+            PortMode::Output => Strings::port_short_output(),
+            PortMode::Bidirectional => Strings::port_short_bidi(),
+        }
+    }
+
+    pub fn next(self) -> PortMode {
+        match self {
+            PortMode::Input => PortMode::Output,
+            PortMode::Output => PortMode::Bidirectional,
+            PortMode::Bidirectional => PortMode::Input,
+        }
+    }
+
+    /// Drives a value out of the chip.
+    pub fn outputs(self) -> bool {
+        matches!(self, PortMode::Output | PortMode::Bidirectional)
+    }
+
+    /// Takes a value into the chip.
+    pub fn inputs(self) -> bool {
+        matches!(self, PortMode::Input | PortMode::Bidirectional)
     }
 }
 
-/// I/O direction for a port.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PortDir {
-    Input,
-    Output,
-    Bidirectional,
-}
-
-impl PortDir {
-    pub fn name(self) -> &'static str {
-        match self {
-            PortDir::Input => "IN",
-            PortDir::Output => "OUT",
-            PortDir::Bidirectional => "BIDI",
-        }
-    }
-}
-
-/// A single I/O port on the chip boundary.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A named I/O point inside the chip's virtual world (DESIGN.md §2.2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Port {
-    /// Display label (e.g. "A0", "CLK", "Q")
     pub label: String,
-    /// Which edge of the chip
-    pub side: PortSide,
-    /// Position along the edge (0-based index within the world size)
-    pub index: u32,
-    /// I/O direction
-    pub dir: PortDir,
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
+    pub dir: PortMode,
 }
 
-// ── Chip metadata (item NBT) ──────────────────────────────────────────────────
-
-/// Chip metadata stored in the item's NBT.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// What a fabricated chip item carries in its NBT.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChipMeta {
-    /// Unique chip ID (references circuit data in server storage).
+    /// Key of the circuit in server storage.
     pub id: ChipId,
-    /// Microchip tier.
     pub tier: Tier,
-    /// User-assigned name.
     pub name: String,
-    /// I/O port list.
     pub ports: Vec<Port>,
 }
 
 impl ChipMeta {
-    /// Serialize to a JSON string (for storage in item NBT).
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap_or_default()
-    }
-
-    /// Deserialize from a JSON string.
-    pub fn from_json(json: &str) -> Option<Self> {
-        serde_json::from_str(json).ok()
-    }
-
-    /// Build the SNBT string for this chip's item NBT tag.
-    /// The chip meta is stored as a JSON string inside the `YogVlsiChip` NBT key.
     pub fn to_nbt(&self) -> String {
-        // Escape the JSON for safe embedding in SNBT string
-        let json = self.to_json();
-        let escaped = json.replace('\\', "\\\\").replace('"', "\\\"");
-        format!("{{YogVlsiChip: \"{}\"}}", escaped)
+        nbt::wrap(CHIP_TAG, &serde_json::to_string(self).unwrap_or_default())
     }
 
-    /// Parse chip meta from an SNBT string.
-    pub fn from_nbt(nbt: &str) -> Option<Self> {
-        // Simple extraction: find "YogVlsiChip":"<json>"
-        let key = "YogVlsiChip:\"";
-        if let Some(start) = nbt.find(key) {
-            let start = start + key.len();
-            // Find the closing unescaped quote
-            let mut end = start;
-            let chars: Vec<char> = nbt[start..].chars().collect();
-            let mut i = 0;
-            while i < chars.len() {
-                if chars[i] == '\\' && i + 1 < chars.len() {
-                    i += 2; // skip escaped char
-                } else if chars[i] == '"' {
-                    end = start + i;
-                    break;
-                } else {
-                    i += 1;
-                }
-            }
-            let json = &nbt[start..end].replace("\\\"", "\"").replace("\\\\", "\\");
-            Self::from_json(json)
-        } else {
-            None
-        }
+    pub fn from_nbt(snbt: &str) -> Option<Self> {
+        serde_json::from_str(&nbt::read(snbt, CHIP_TAG)?).ok()
     }
 }
 
-// ── Circuit data (server storage) ─────────────────────────────────────────────
-
-/// A single block in the virtual circuit world.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// One block of the virtual world.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CircuitBlock {
     pub x: u32,
     pub y: u32,
     pub z: u32,
-    /// Minecraft block ID (e.g. "minecraft:redstone_wire")
-    pub block_id: String,
-    /// JSON-encoded block state properties (e.g. `{"power":"0","north":"none",...}`)
-    pub state_json: String,
+    /// Full block state, `minecraft:repeater[delay=2,facing=north,…]`.
+    pub state: String,
 }
 
-/// Full circuit data for a chip — stored server-side via Storage API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A chip's whole circuit.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CircuitData {
-    /// Chip ID this data belongs to.
-    pub chip_id: ChipId,
-    /// Virtual world dimensions (matches tier).
-    pub width: u32,
-    pub height: u32,
-    /// Placed blocks in the virtual world.
+    /// Edge length of the virtual world (the tier's).
+    pub size: u32,
     pub blocks: Vec<CircuitBlock>,
-    /// Port definitions (also in ChipMeta, but duplicated here for self-containment).
     pub ports: Vec<Port>,
 }
 
 impl CircuitData {
-    pub fn new(chip_id: ChipId, width: u32, height: u32, ports: Vec<Port>) -> Self {
-        CircuitData {
-            chip_id,
-            width,
-            height,
-            blocks: Vec::new(),
-            ports,
+    pub fn empty(tier: Tier) -> Self {
+        CircuitData { size: tier.world_size(), ..Default::default() }
+    }
+
+    pub fn to_blueprint_nbt(&self) -> String {
+        nbt::wrap(BLUEPRINT_TAG, &serde_json::to_string(self).unwrap_or_default())
+    }
+
+    pub fn from_blueprint_nbt(snbt: &str) -> Option<Self> {
+        serde_json::from_str(&nbt::read(snbt, BLUEPRINT_TAG)?).ok()
+    }
+
+    /// Saves a fabricated chip's circuit (chips can travel between worlds,
+    /// so these live in the global store).
+    pub fn save_for_chip(&self, game_dir: &str, chip: &str) {
+        let mut store = Storage::open(game_dir, MOD_ID);
+        store.set(format!("{CIRCUIT_KEY}{chip}"), serde_json::to_string(self).unwrap_or_default());
+        if let Err(e) = store.flush() {
+            yog_api::warn!("[yog-vlsi] saving chip circuit {chip}: {e}");
         }
     }
 
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap_or_default()
+    pub fn load_for_chip(game_dir: &str, chip: &str) -> Option<Self> {
+        let store = Storage::open(game_dir, MOD_ID);
+        serde_json::from_str(store.get_str(&format!("{CIRCUIT_KEY}{chip}"))?).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn meta() -> ChipMeta {
+        ChipMeta {
+            id: "abc".into(),
+            tier: Tier::Gold,
+            name: "Adder \"v2\"".into(),
+            ports: vec![Port { label: "A0".into(), x: 1, y: 0, z: 2, dir: PortMode::Input }],
+        }
     }
 
-    pub fn from_json(json: &str) -> Option<Self> {
-        serde_json::from_str(json).ok()
+    #[test]
+    fn chip_meta_nbt_round_trip() {
+        let m = meta();
+        assert_eq!(ChipMeta::from_nbt(&m.to_nbt()), Some(m));
+        assert_eq!(ChipMeta::from_nbt("{}"), None);
+    }
+
+    #[test]
+    fn blueprint_nbt_round_trip() {
+        let c = CircuitData {
+            size: 16,
+            blocks: vec![CircuitBlock { x: 0, y: 0, z: 0, state: "minecraft:repeater[delay=2]".into() }],
+            ports: meta().ports,
+        };
+        assert_eq!(CircuitData::from_blueprint_nbt(&c.to_blueprint_nbt()), Some(c));
+    }
+
+    #[test]
+    fn port_modes_cycle() {
+        let mut m = PortMode::Input;
+        for _ in 0..3 {
+            m = m.next();
+        }
+        assert_eq!(m, PortMode::Input);
+        assert!(PortMode::Bidirectional.inputs() && PortMode::Bidirectional.outputs());
     }
 }
