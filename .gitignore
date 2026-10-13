@@ -4,3 +4,4 @@ artifacts/
 .yog-idle/
 benches/Cargo.lock
 benches/target/
+*.designer.rs
