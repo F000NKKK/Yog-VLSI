@@ -1,6 +1,0 @@
-{
-  "parent": "block/cube_all",
-  "textures": {
-    "all": "yog-vlsi:block/port_input"
-  }
-}

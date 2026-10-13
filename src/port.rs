@@ -7,13 +7,15 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use yog_api::{BlockDef, BlockPos, ItemDef, Registry, World};
+use yog_api::{BlockPos, Registry, World};
+
+use crate::content::Blocks;
 
 use crate::chip::PortDir;
 
-pub const PORT_INPUT: &str = "yog-vlsi:port_input";
-pub const PORT_OUTPUT: &str = "yog-vlsi:port_output";
-pub const PORT_BIDI: &str = "yog-vlsi:port_bidi";
+pub const PORT_INPUT: &str = Blocks::PORT_INPUT;
+pub const PORT_OUTPUT: &str = Blocks::PORT_OUTPUT;
+pub const PORT_BIDI: &str = Blocks::PORT_BIDI;
 
 /// Last port block each player right-clicked: player_name → (dimension, pos).
 /// Used as the target for `/vlsi port <name>`.
@@ -64,14 +66,6 @@ fn write_label(srv: &dyn yog_api::Server, dimension: &str, pos: BlockPos, label:
 }
 
 pub fn register(registry: &mut Registry) {
-    for id in [PORT_INPUT, PORT_OUTPUT, PORT_BIDI] {
-        registry.register_block(BlockDef::new(id).strength(1.0, 3.0).sound("stone"));
-        registry.register_item(
-            ItemDef::new(id)
-                .tooltip("§7Place inside a chip's virtual circuit.\n§7Right-click to cycle Input/Output/Bidirectional.\n§7Sneak + right-click, then type a name in chat to rename."),
-        );
-    }
-
     registry.add_shaped_recipe(
         yog_api::ShapedRecipe::new("yog-vlsi:port_craft", PORT_INPUT, 2)
             .row(" R ")

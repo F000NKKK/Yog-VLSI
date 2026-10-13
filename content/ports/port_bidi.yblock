@@ -1,0 +1,15 @@
+{
+  "name": "@Strings.block.port_bidi",
+  "tooltip": "@Strings.block.port.desc",
+  "block": {
+    "hardness": 1,
+    "resistance": 3,
+    "sound": "stone"
+  },
+  "model": {
+    "parent": "cube_all",
+    "textures": {
+      "all": "block/port_bidi.png"
+    }
+  }
+}

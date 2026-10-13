@@ -8,13 +8,15 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 
-use yog_api::{BlockDef, InventoryDef, ItemDef, Registry, Storage};
+use yog_api::{InventoryDef, Registry, Storage};
+
+use crate::content::{Blocks, Items};
 
 use crate::chip::CircuitData;
 use crate::vm::Tier;
 
-pub const WORKBENCH_ID: &str = "yog-vlsi:vlsi_workbench";
-pub const BLUEPRINT_ID: &str = "yog-vlsi:blueprint";
+pub const WORKBENCH_ID: &str = Blocks::VLSI_WORKBENCH;
+pub const BLUEPRINT_ID: &str = Items::BLUEPRINT;
 /// Custom slot count for the workbench's own inventory (chip + 6 resource
 /// vials + 2 spares) — the real vanilla `Slot`s at indices `0..WORKBENCH_SLOT_COUNT`,
 /// before the player's own inventory starts at `WORKBENCH_SLOT_COUNT`.
@@ -42,19 +44,9 @@ pub fn register(registry: &mut Registry) {
             .background_size(bg_w, bg_h)
     );
 
-    // ── Workbench block ────────────────────────────────────────────────────
-    registry.register_block(
-        BlockDef::new(WORKBENCH_ID)
-            .strength(3.5, 6.0)
-            .sound("metal")
-            .requires_tool()
-            .inventory(WORKBENCH_INV)
-    );
-
-    registry.register_item(
-        ItemDef::new(WORKBENCH_ID)
-            .tooltip("§7Design and fabricate redstone microchips.\n§7Right-click to open the design interface.\n§7Insert blank chips, Blueprints, or resources.")
-    );
+    // ── Workbench block (content/vlsi_workbench.yblock, registered manually
+    // to attach its inventory) ─────────────────────────────────────────────
+    registry.register_block(Blocks::vlsi_workbench().inventory(WORKBENCH_INV));
 
     registry.add_shaped_recipe(
         yog_api::ShapedRecipe::new("yog-vlsi:vlsi_workbench_craft", WORKBENCH_ID, 1)
@@ -68,12 +60,6 @@ pub fn register(registry: &mut Registry) {
     );
 
     // ── Blueprint item ─────────────────────────────────────────────────────
-    registry.register_item(
-        ItemDef::new(BLUEPRINT_ID)
-            .tooltip("§7Stores a chip design for sharing.\n§7Use in a VLSI Workbench to import.\n§7Craft an empty Blueprint, then Export from the workbench.")
-            .max_stack(1)
-    );
-
     // Empty Blueprint recipe
     registry.add_shaped_recipe(
         yog_api::ShapedRecipe::new("yog-vlsi:blueprint_craft", BLUEPRINT_ID, 1)
@@ -87,39 +73,15 @@ pub fn register(registry: &mut Registry) {
 
     // ── Cable blocks ───────────────────────────────────────────────────────
     // Analog Cable
-    registry.register_block(
-        BlockDef::new("yog-vlsi:analog_cable")
-            .strength(0.5, 0.5)
-            .sound("stone")
-            .shape(5.0, 5.0, 5.0, 11.0, 11.0, 11.0)
-            .connects_to_neighbors()
-            .connect_groups(&["analog"])
-    );
-    registry.register_item(
-        ItemDef::new("yog-vlsi:analog_cable")
-            .tooltip("§7Carries a single analog redstone signal (0–15).\n§7Connects Redstone Port to external redstone.")
-    );
     registry.add_shaped_recipe(
-        yog_api::ShapedRecipe::new("yog-vlsi:analog_cable_craft", "yog-vlsi:analog_cable", 3)
+        yog_api::ShapedRecipe::new("yog-vlsi:analog_cable_craft", Blocks::ANALOG_CABLE, 3)
             .row("RRR")
             .key('R', "minecraft:redstone")
     );
 
     // Digital Cable
-    registry.register_block(
-        BlockDef::new("yog-vlsi:digital_cable")
-            .strength(0.5, 0.5)
-            .sound("stone")
-            .shape(5.0, 5.0, 5.0, 11.0, 11.0, 11.0)
-            .connects_to_neighbors()
-            .connect_groups(&["digital"])
-    );
-    registry.register_item(
-        ItemDef::new("yog-vlsi:digital_cable")
-            .tooltip("§7Carries up to 256 digital bits (64 channels × 4 colors).\n§7Connects Digital Ports between ALUs.")
-    );
     registry.add_shaped_recipe(
-        yog_api::ShapedRecipe::new("yog-vlsi:digital_cable_craft", "yog-vlsi:digital_cable", 4)
+        yog_api::ShapedRecipe::new("yog-vlsi:digital_cable_craft", Blocks::DIGITAL_CABLE, 4)
             .row("GRG")
             .row("RIR")
             .row("GRG")
@@ -129,18 +91,8 @@ pub fn register(registry: &mut Registry) {
     );
 
     // Redstone Port (adapter block)
-    registry.register_block(
-        BlockDef::new("yog-vlsi:redstone_port")
-            .strength(2.0, 6.0)
-            .sound("stone")
-            .connect_groups(&["analog"])
-    );
-    registry.register_item(
-        ItemDef::new("yog-vlsi:redstone_port")
-            .tooltip("§7Adapter between ALU and external redstone.\n§7Place on any side of an ALU. Connect Analog Cable on one side, redstone on the other.")
-    );
     registry.add_shaped_recipe(
-        yog_api::ShapedRecipe::new("yog-vlsi:redstone_port_craft", "yog-vlsi:redstone_port", 1)
+        yog_api::ShapedRecipe::new("yog-vlsi:redstone_port_craft", Blocks::REDSTONE_PORT, 1)
             .row("SSS")
             .row("SRS")
             .row("SSS")

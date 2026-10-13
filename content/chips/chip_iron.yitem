@@ -1,0 +1,13 @@
+{
+  "name": "@Strings.item.chip_iron",
+  "tooltip": "@Strings.item.chip_iron.desc",
+  "item": {
+    "stack_size": 1
+  },
+  "model": {
+    "parent": "generated",
+    "textures": {
+      "layer0": "item/chip_iron.png"
+    }
+  }
+}

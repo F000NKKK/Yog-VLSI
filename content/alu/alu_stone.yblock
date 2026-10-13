@@ -1,0 +1,24 @@
+{
+  "name": "@Strings.block.alu_stone",
+  "tooltip": "@Strings.block.alu_stone.desc",
+  "block": {
+    "hardness": 5,
+    "resistance": 12,
+    "sound": "metal",
+    "light": 7,
+    "tool": "pickaxe",
+    "requires_tool": true,
+    "connect_groups": [
+      "analog",
+      "digital"
+    ]
+  },
+  "model": {
+    "parent": "cube_bottom_top",
+    "textures": {
+      "top": "block/alu_top_stone.png",
+      "bottom": "block/alu_top_stone.png",
+      "side": "block/alu_side_stone.png"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@Strings.item.blueprint",
+  "tooltip": "@Strings.item.blueprint.desc",
+  "item": {
+    "stack_size": 1
+  },
+  "model": {
+    "parent": "generated",
+    "textures": {
+      "layer0": "item/blueprint.png"
+    }
+  }
+}

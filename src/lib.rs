@@ -12,6 +12,11 @@ mod vm;
 mod workbench;
 mod workbench_inv_ui;
 
+// `crate::res` — typed accessors for resources/*.yres (Strings::...).
+yog_api::resources!();
+// `crate::content` — ids and definitions of content/ blocks and items.
+yog_api::content!();
+
 use yog_api::{info, Mod, Registry, YogDimensionDef, YogDimensionTypeDef};
 
 pub struct YogVlsi;
@@ -47,7 +52,6 @@ impl Mod for YogVlsi {
         workbench::register(registry);
         alu::register(registry);
         alu_ui::register(registry);
-        chip::register(registry);
         port::register(registry);
         editor::register(registry);
         network::register(registry);

@@ -1,0 +1,18 @@
+{
+  "name": "@Strings.block.redstone_port",
+  "tooltip": "@Strings.block.redstone_port.desc",
+  "block": {
+    "hardness": 2,
+    "resistance": 6,
+    "sound": "stone",
+    "connect_groups": [
+      "analog"
+    ]
+  },
+  "model": {
+    "parent": "cube_all",
+    "textures": {
+      "all": "block/redstone_port.png"
+    }
+  }
+}

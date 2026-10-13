@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use yog_api::{BlockDef, ItemDef, Registry};
+use yog_api::Registry;
 use crate::commands::{ALU_STATE, CHIP_PORTS, EXT_VALUES, LINKS, VM_CACHE};
 
 /// Fractional VM-steps owed to each chip, accumulated every server tick
@@ -27,22 +27,7 @@ pub fn is_alu_block(block_id: &str) -> bool {
 pub fn register(registry: &mut Registry) {
     for tier in crate::vm::Tier::ALL {
         let id = alu_id(*tier);
-        let (max_chips, channels) = match tier {
-            crate::vm::Tier::Wood => (2, 8), crate::vm::Tier::Stone => (3, 16),
-            crate::vm::Tier::Gold => (4, 24), crate::vm::Tier::Iron => (5, 32),
-            crate::vm::Tier::Diamond => (6, 48), crate::vm::Tier::Netherite => (8, 64),
-        };
 
-        registry.register_block(
-            BlockDef::new(&id).strength(5.0, 12.0).sound("metal").requires_tool().light_level(7)
-                // Accepts both cable kinds — analog via a Redstone Port on
-                // one of its faces, digital cable straight into the face.
-                .connect_groups(&["analog", "digital"])
-        );
-        registry.register_item(
-            ItemDef::new(&id)
-                .tooltip(&format!("§7Insert programmed microchips. Right-click to open the node editor.\n§7Max chips: {} | Digital channels/side: {}", max_chips, channels))
-        );
 
         let (corner, center) = match tier {
             crate::vm::Tier::Wood      => ("minecraft:oak_planks", "minecraft:redstone_block"),

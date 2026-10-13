@@ -5,7 +5,6 @@
 //! to keep item NBT compact.
 
 use serde::{Deserialize, Serialize};
-use yog_api::{ItemDef, Registry};
 use crate::vm::Tier;
 
 // ── Chip ID ───────────────────────────────────────────────────────────────────
@@ -179,30 +178,5 @@ impl CircuitData {
 
     pub fn from_json(json: &str) -> Option<Self> {
         serde_json::from_str(json).ok()
-    }
-}
-
-// ── Item registration ─────────────────────────────────────────────────────────
-
-pub fn register(registry: &mut Registry) {
-    for tier in Tier::ALL {
-        let item_id = format!("yog-vlsi:chip_{}", tier.id());
-
-        let tooltip = format!(
-            "§7Tier: §e{}§7 | §b{} ticks/s§7 | §a{}×{} world\n§7Place in a §6VLSI Workbench§7 to design circuits.\n§7Ports: none (unprogrammed)",
-            tier.name(),
-            tier.tick_rate(),
-            tier.world_size(),
-            tier.world_size()
-        );
-
-        registry.register_item(
-            ItemDef::new(&item_id)
-                .tooltip(&tooltip)
-                .max_stack(1)
-        );
-
-        // Register programmed variant (same item, NBT distinguishes programmed vs blank)
-        // The item is the same — we detect blank vs programmed by presence of NBT.
     }
 }
