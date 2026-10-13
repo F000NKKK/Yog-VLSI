@@ -101,3 +101,32 @@ impl WorkbenchVm {
             .unwrap_or_default();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slots_fit_the_screen_apart() {
+        let def = yog_kit::inventory_of::<View>().unwrap();
+        assert_eq!(def.slot_count, 7);
+        assert!(def.include_player_inventory);
+        let (px, py) = def.player_inv_offset;
+        // The player's inventory (9×18 by 3×18 + 4 + 18) stays on screen.
+        assert!(px + 9.0 * 18.0 <= WIDTH && py + 76.0 <= HEIGHT, "{px},{py}");
+        for (i, a) in def.layout.iter().enumerate() {
+            assert!(a.x >= 0.0 && a.y >= 0.0 && a.x + 16.0 <= WIDTH && a.y + 16.0 < py, "slot {i} at {a:?}");
+            for b in &def.layout[i + 1..] {
+                assert!((a.x - b.x).abs() >= 18.0 || (a.y - b.y).abs() >= 18.0, "{a:?} overlaps {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn empty_library() {
+        let mut h = yog_kit::testing::TestHost::<View>::new(WorkbenchVm::default());
+        h.open();
+        assert!(!h.vm().has_selection());
+        assert!(!h.widget(ids::FABRICATE).unwrap().enabled);
+    }
+}
