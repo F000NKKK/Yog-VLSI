@@ -1,7 +1,7 @@
 [mod]
 id          = "yog-vlsi"
 name        = "Yog VLSI"
-version     = "0.1.0"
+version     = "0.2.0"
 description = "Very Large Scale Integration — design and fabricate redstone microchips with a Rust-accelerated simulation VM. Multi-tier workbench, ALU block, and chip-to-chip linking."
 authors     = ["F000NK", "Yog Team"]
 license     = "AGPL-3.0-only"
@@ -12,7 +12,7 @@ serde_json = "*"
 uuid       = { version = "*", features = ["v4"] }
 
 [dependencies.exports]
-yog-pipes = "0.3"
+yog-pipes = "0.4"
 
 ## `yog run <name>` — build, drop the .yog into the loader's own Gradle dev-run
 # instance, then launch it.
