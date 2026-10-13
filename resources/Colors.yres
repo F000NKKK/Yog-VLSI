@@ -1,0 +1,84 @@
+{
+  "accent": {
+    "type": "color",
+    "value": "#5A9BE0",
+    "comment": "Section headers"
+  },
+  "panel": {
+    "type": "color",
+    "value": "#F01A1A1A",
+    "comment": "Screen background"
+  },
+  "bar": {
+    "type": "color",
+    "value": "#FF252525",
+    "comment": "Title bar, chip card headers"
+  },
+  "pane": {
+    "type": "color",
+    "value": "#FF0D0D0D",
+    "comment": "Lists, vial background"
+  },
+  "button": {
+    "type": "color",
+    "value": "#FF333333"
+  },
+  "button_hover": {
+    "type": "color",
+    "value": "#FF4A4A4A"
+  },
+  "selected": {
+    "type": "color",
+    "value": "#FF2A4A6E",
+    "comment": "Selected list row"
+  },
+  "text": {
+    "type": "color",
+    "value": "#FFCCCCCC"
+  },
+  "text_dim": {
+    "type": "color",
+    "value": "#FF777777"
+  },
+  "pin_input": {
+    "type": "color",
+    "value": "#FF3B8CFF"
+  },
+  "pin_output": {
+    "type": "color",
+    "value": "#FFFF6A2A"
+  },
+  "pin_bidi": {
+    "type": "color",
+    "value": "#FFB05CFF"
+  },
+  "pin_selected": {
+    "type": "color",
+    "value": "#FFFFD700",
+    "comment": "The port a new link starts from"
+  },
+  "vial.redstone": {
+    "type": "color",
+    "value": "#FFAA0000"
+  },
+  "vial.iron": {
+    "type": "color",
+    "value": "#FFD8D8D8"
+  },
+  "vial.gold": {
+    "type": "color",
+    "value": "#FFFFD700"
+  },
+  "vial.quartz": {
+    "type": "color",
+    "value": "#FFFFFAFA"
+  },
+  "vial.wood": {
+    "type": "color",
+    "value": "#FF8B6914"
+  },
+  "vial.cobblestone": {
+    "type": "color",
+    "value": "#FF808080"
+  }
+}
