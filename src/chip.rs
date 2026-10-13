@@ -52,6 +52,15 @@ impl PortMode {
         }
     }
 
+    /// The color its pins are drawn in.
+    pub fn color(self) -> u32 {
+        match self {
+            PortMode::Input => crate::res::Colors::PIN_INPUT,
+            PortMode::Output => crate::res::Colors::PIN_OUTPUT,
+            PortMode::Bidirectional => crate::res::Colors::PIN_BIDI,
+        }
+    }
+
     /// Drives a value out of the chip.
     pub fn outputs(self) -> bool {
         matches!(self, PortMode::Output | PortMode::Bidirectional)

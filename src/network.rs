@@ -118,7 +118,7 @@ pub fn register(registry: &mut Registry) {
                     let Some(meta) = crate::chip::ChipMeta::from_nbt(&nbt) else { continue };
                     lines.push(format!("{}\t{}\t{}", slot, meta.tier.name(), meta.name));
                 }
-                srv.send_to_player(&player, crate::alu_ui::CHIP_LIST_CHANNEL, lines.join("\n").as_bytes());
+                srv.send_to_player(&player, crate::alu::CHIP_LIST_CHANNEL, lines.join("\n").as_bytes());
             }
             Some("save_links") => {
                 srv.send_actionbar(&player, "§aLink graph saved.");

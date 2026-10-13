@@ -48,7 +48,7 @@ pub static LINKS: LazyLock<Mutex<HashMap<(String, String), (String, String)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// I/O mode per ALU external port: `"__ext_<x>_<y>_<z>:<side>"` → mode string.
-pub static IO_MODES: LazyLock<Mutex<HashMap<String, String>>> =
+pub static IO_MODES: LazyLock<Mutex<HashMap<String, crate::vm::PortMode>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Latest computed value for each ALU's external analog ports (what a

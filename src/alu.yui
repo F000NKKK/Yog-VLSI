@@ -18,7 +18,7 @@
                hover:bg="sprite:button_hover"
                disabled:bg="sprite:button_disabled"
                disabled:color="#FFA0A0A0" />
-        <Style x:Key="Pin" target="Button" w="100%" h="12" padding="0 4" shadow="false" no_wrap="true" hover:bg="#33FFFFFF" />
+        <Style x:Key="Pin" target="Button" h="12" padding="0 4" shadow="false" no_wrap="true" hover:bg="#33FFFFFF" />
     </Screen.Resources>
     <Grid w="100%" h="100%" rows="18,*,Auto" padding="6 8">
         <Label x:Name="title" style="@Header" text="{x:Bind title()}" />
@@ -33,7 +33,6 @@
                             <Row w="100%" h="12" gap="2">
                                 <Button style="@Pin"
                                         flex="1"
-                                        w="Auto"
                                         text="{x:Bind label()}"
                                         color="{x:Bind color()}"
                                         command="{x:Bind vm.select_ext(side)}" />
@@ -54,6 +53,7 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="PinRow">
                                 <Button style="@Pin"
+                                        w="100%"
                                         text="{x:Bind text}"
                                         color="{x:Bind color}"
                                         bg="{x:Bind bg}"
