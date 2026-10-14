@@ -114,7 +114,7 @@
                              max_length="32"
                              text="{x:Bind name, Mode=TwoWay}"
                              placeholder="@Strings.screen.workbench.name_placeholder" />
-                    <Button x:Name="tier" style="@Action" text="{x:Bind tier_text()}" command="{x:Bind next_tier()}" />
+                    <Button x:Name="tier" style="@Action" text="{x:Bind tier_text()}" d:text="@Strings.tier_wood" command="{x:Bind next_tier()}" />
                     <Button x:Name="create"
                             style="@Action"
                             text="@Strings.screen.workbench.create"
