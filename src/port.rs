@@ -52,7 +52,7 @@ pub fn read_label(srv: &dyn yog_api::Server, dimension: &str, pos: BlockPos) -> 
     Some(nbt[start..end].to_string())
 }
 
-fn write_label(srv: &dyn yog_api::Server, dimension: &str, pos: BlockPos, label: &str) {
+pub fn write_label(srv: &dyn yog_api::Server, dimension: &str, pos: BlockPos, label: &str) {
     let escaped = label.replace('\\', "\\\\").replace('"', "\\\"");
     srv.set_block_nbt(dimension, pos, &format!("{{YogVlsiPortLabel:\"{}\"}}", escaped));
 }

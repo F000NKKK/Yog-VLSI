@@ -1,63 +1,65 @@
 //! Virtual circuit editor.
 //!
-//! Runs in a dedicated pocket dimension (`DIMENSION_ID`, declared in `lib.rs`)
-//! rather than the real Overworld — players never see or affect this space,
-//! and it can't collide with anything a player builds. Multiple concurrent
-//! editors are still handled with the same per-player "lane" offset as
-//! before: one lane per player, allocated on first use and reused on every
-//! subsequent edit. Each lane holds a single flat (y = EDITOR_Y) build
-//! platform sized to the chip's tier — matching how `vm::RedstoneVM` and the
-//! existing test-chip factory already only ever populate the y = 0 layer.
-//! Multi-layer (3D) circuits are a follow-up once the loader exposes a
-//! bulk-region primitive; scanning/clearing a full `size^3` cube one
-//! `set_block` call at a time is not practical for the larger tiers today.
+//! Runs in a dedicated pocket dimension (`DIMENSION_ID`, declared in
+//! `lib.rs`). Each player gets a lane of their own: a flat build platform
+//! (y = EDITOR_Y) the size of the chip's tier, inside a closed box of
+//! barriers. The box and the floor can't be broken — not even in creative.
 //!
-//! Block state (facing, delay, powered, …) cannot be read back from the
-//! world — the loader's `get_block` only returns the registry id — so
-//! `/vlsi save` captures block identity only. Directional pieces (repeaters,
-//! pistons, …) come back at their default orientation and may need a
-//! re-rotate after import; this is a documented loader limitation, not a bug
-//! here.
+//! The design comes from a Blueprint in a workbench's blueprint slot and
+//! goes back onto it on `/vlsi save` (onto a new Blueprint in the player's
+//! inventory if that one was taken out meanwhile).
+//!
+//! Block state (facing, delay, powered, …) can't be read back from the
+//! world yet — the loader's `get_block` only returns the id — so saving
+//! captures block identity only (a loader limitation, not a bug here).
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use yog_api::player::Player;
-use yog_api::{BlockPos, Registry, World};
+use yog_api::{BlockPos, EventPhase, Registry, World};
+
+use crate::chip::{Blueprint, CircuitBlock, CircuitData, Port};
+use crate::content::Items;
+use crate::port;
+use crate::tier::Tier;
 
 /// Id of the pocket dimension the editor runs in — declared via
 /// `Registry::register_dimension` in `lib.rs`.
 pub const DIMENSION_ID: &str = "yog-vlsi:editor";
-/// Id of the (void) chunk generator backing [`DIMENSION_ID`] — registered
-/// alongside it via `Registry::register_chunk_generator`.
+/// Id of the (void) chunk generator backing [`DIMENSION_ID`].
 pub const GENERATOR_ID: &str = "yog-vlsi:editor_terrain";
-
-fn player_pos(srv: &dyn yog_api::Server, name: &str, uuid: &str) -> (f64, f64, f64) {
-    Player::with_uuid(srv, name, uuid).position().unwrap_or((BASE_X as f64, 64.0, BASE_Z as f64))
-}
-
-use crate::chip::{CircuitBlock, CircuitData, Port};
-use crate::designs::{self, DesignEntry, DesignMeta};
-use crate::port;
-use crate::tier::Tier;
 
 /// Y level of the build platform inside every editor lane.
 const EDITOR_Y: i32 = 10;
-/// Fixed base coordinates for lane 0; each further lane is offset along X.
-/// No need to hide these out in the boonies anymore — this is its own
-/// pocket dimension, not a reserved corner of the real Overworld.
+/// Height of the box's room above the platform.
+const ROOM_HEIGHT: i32 = 8;
+/// What the floor and the box are made of.
+const FLOOR: &str = "minecraft:bedrock";
+const WALL: &str = "minecraft:barrier";
+/// Lane 0's corner; each further lane is offset along X.
 const BASE_X: i32 = 0;
 const BASE_Z: i32 = 0;
-/// Spacing between lanes — comfortably larger than the biggest tier (256).
+/// Spacing between lanes — comfortably larger than the biggest tier (256)
+/// plus its walls.
 const LANE_SPACING: i32 = 320;
+/// Player inventory slots that can take a new Blueprint (main + hotbar).
+const PLAYER_SLOTS: u32 = 36;
+
+/// Where an edited design lives: a slot of a block container.
+#[derive(Debug, Clone)]
+pub struct Source {
+    pub dimension: String,
+    pub pos: BlockPos,
+    pub slot: u32,
+}
 
 struct EditorSession {
-    design_id: Option<String>,
     name: String,
     tier: Tier,
     origin_x: i32,
     origin_z: i32,
     size: u32,
+    source: Source,
     return_dim: String,
     return_pos: (f64, f64, f64),
 }
@@ -72,158 +74,165 @@ fn lane_for(player_name: &str) -> u32 {
     *lanes.entry(player_name.to_string()).or_insert(next)
 }
 
-fn dimension() -> &'static str {
-    DIMENSION_ID
+/// Lays the lane's floor and its barrier box, and clears the platform.
+fn build_room(world: &World, origin_x: i32, origin_z: i32, size: i32) {
+    let top = EDITOR_Y + ROOM_HEIGHT;
+    for x in -1..=size {
+        for z in -1..=size {
+            let (wx, wz) = (origin_x + x, origin_z + z);
+            let edge = x == -1 || z == -1 || x == size || z == size;
+            world.set_block(BlockPos { x: wx, y: EDITOR_Y - 1, z: wz }, FLOOR);
+            world.set_block(BlockPos { x: wx, y: top, z: wz }, WALL);
+            for y in EDITOR_Y..top {
+                let block = if edge {
+                    WALL
+                } else if y == EDITOR_Y {
+                    "minecraft:air"
+                } else {
+                    continue;
+                };
+                world.set_block(BlockPos { x: wx, y, z: wz }, block);
+            }
+        }
+    }
 }
 
-/// Enter (or re-enter) the editor for a design. `existing` is `Some` when
-/// editing a previously saved design, `None` for a brand-new blank one.
-/// `return_dim`/`return_pos` are where the player gets teleported back to on
-/// `/vlsi save` — callers should pass the player's real, currently-known
-/// dimension and position since the loader can only resolve
-/// `Player::position()` when a UUID is on hand.
-#[allow(clippy::too_many_arguments)]
-pub fn enter(srv: &dyn yog_api::Server, player_name: &str, name: &str, tier: Tier, design_id: Option<String>, existing: Option<CircuitData>, return_dim: &str, return_pos: (f64, f64, f64)) {
+/// Opens `blueprint` (from `source`) in `player_name`'s lane and moves them
+/// there; `/vlsi save` takes them back to `return_dim`/`return_pos`.
+pub fn enter(
+    srv: &dyn yog_api::Server,
+    player_name: &str,
+    blueprint: &Blueprint,
+    source: Source,
+    return_dim: &str,
+    return_pos: (f64, f64, f64),
+) -> Result<(), String> {
     let lane = lane_for(player_name);
     let origin_x = BASE_X + lane as i32 * LANE_SPACING;
     let origin_z = BASE_Z;
-    let size = tier.world_size();
-    let world = World::new(srv, dimension());
+    let size = blueprint.tier.world_size();
+    let world = World::new(srv, DIMENSION_ID);
+    build_room(&world, origin_x, origin_z, size as i32);
 
-    // Clear the platform, then lay bedrock floor + a low glass boundary wall.
-    for x in 0..size as i32 {
-        for z in 0..size as i32 {
-            let p = BlockPos { x: origin_x + x, y: EDITOR_Y, z: origin_z + z };
-            world.set_block(p, "minecraft:air");
-            world.set_block(BlockPos { x: p.x, y: EDITOR_Y - 1, z: p.z }, "minecraft:bedrock");
-        }
+    let at = |x: u32, z: u32| BlockPos { x: origin_x + x as i32, y: EDITOR_Y, z: origin_z + z as i32 };
+    for block in &blueprint.circuit.blocks {
+        world.set_block(at(block.x, block.z), block.id());
     }
-    for x in 0..size as i32 {
-        for &z in &[0, size as i32 - 1] {
-            world.set_block(BlockPos { x: origin_x + x, y: EDITOR_Y, z: origin_z + z }, "minecraft:glass");
-        }
+    for p in &blueprint.circuit.ports {
+        world.set_block(at(p.x, p.z), port::block_for_dir(p.dir));
+        port::write_label(srv, DIMENSION_ID, at(p.x, p.z), &p.label);
     }
-    for z in 0..size as i32 {
-        for &x in &[0, size as i32 - 1] {
-            world.set_block(BlockPos { x: origin_x + x, y: EDITOR_Y, z: origin_z + z }, "minecraft:glass");
-        }
-    }
-
-    if let Some(circuit) = &existing {
-        for block in &circuit.blocks {
-            let p = BlockPos { x: origin_x + block.x as i32, y: EDITOR_Y, z: origin_z + block.z as i32 };
-            world.set_block(p, block.id());
-        }
-        for port in &circuit.ports {
-            let p = BlockPos { x: origin_x + port.x as i32, y: EDITOR_Y, z: origin_z + port.z as i32 };
-            world.set_block(p, port::block_for_dir(port.dir));
-        }
-    }
-
-    SESSIONS.lock().unwrap().insert(player_name.to_string(), EditorSession {
-        design_id, name: name.to_string(), tier, origin_x, origin_z, size,
-        return_dim: return_dim.to_string(), return_pos,
-    });
 
     let (cx, cz) = ((origin_x + size as i32 / 2) as f64, (origin_z + size as i32 / 2) as f64);
-    if !srv.teleport_to_dim(player_name, dimension(), cx, (EDITOR_Y + 1) as f64, cz) {
-        SESSIONS.lock().unwrap().remove(player_name);
-        srv.send_actionbar(player_name, "§cCouldn't enter the editor dimension — see the game log.");
-        return;
+    if !srv.teleport_to_dim(player_name, DIMENSION_ID, cx, (EDITOR_Y + 1) as f64, cz) {
+        return Err("§cCouldn't enter the editor dimension — see the game log.".into());
     }
-    srv.send_actionbar(player_name, &format!("§6Editing '{}' — {} tier, {}×{}. §7/vlsi save when done.", name, tier.name(), size, size));
+    SESSIONS.lock().unwrap().insert(
+        player_name.to_string(),
+        EditorSession {
+            name: blueprint.name.clone(),
+            tier: blueprint.tier,
+            origin_x,
+            origin_z,
+            size,
+            source,
+            return_dim: return_dim.to_string(),
+            return_pos,
+        },
+    );
+    srv.send_actionbar(
+        player_name,
+        &format!(
+            "§6Editing '{}' — {} tier, {}×{}. §7/vlsi save when done.",
+            blueprint.name,
+            blueprint.tier.name(),
+            size,
+            size
+        ),
+    );
+    Ok(())
 }
 
-/// Scan the player's active editor platform, save it as a design, and
-/// teleport them back. Returns a status message.
+/// Scans the player's platform, writes the design back onto its Blueprint
+/// and takes them back. Returns a status message.
 pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
-    let session = match SESSIONS.lock().unwrap().remove(player_name) {
-        Some(s) => s,
-        None => return "§cYou are not editing a VLSI circuit right now.".into(),
+    let Some(session) = SESSIONS.lock().unwrap().remove(player_name) else {
+        return "§cYou are not editing a VLSI circuit right now.".into();
     };
 
-    let world = World::new(srv, dimension());
-    let size = session.size;
+    let world = World::new(srv, DIMENSION_ID);
     let mut blocks = Vec::new();
     let mut ports = Vec::new();
-
-    for x in 0..size {
-        for z in 0..size {
+    for x in 0..session.size {
+        for z in 0..session.size {
             let p = BlockPos { x: session.origin_x + x as i32, y: EDITOR_Y, z: session.origin_z + z as i32 };
-            let block_id = match world.get_block(p) {
-                Some(id) => id,
-                None => continue,
-            };
-            if block_id == "minecraft:air" || block_id == "minecraft:glass" { continue; }
-
+            let Some(block_id) = world.get_block(p) else { continue };
+            if block_id == "minecraft:air" || block_id == WALL {
+                continue;
+            }
             if let Some(dir) = port::dir_for_block(&block_id) {
-                let label = port::read_label(srv, dimension(), p).unwrap_or_else(|| format!("Port {}", ports.len()));
+                let label = port::read_label(srv, DIMENSION_ID, p).unwrap_or_else(|| format!("Port {}", ports.len()));
                 ports.push(Port { label, x, y: 0, z, dir });
                 continue;
             }
-
             blocks.push(CircuitBlock { x, y: 0, z, state: block_id });
         }
     }
-
-    let design_id = session.design_id.clone().unwrap_or_else(crate::chip::new_id);
-    let circuit = CircuitData { size: session.tier.world_size(), blocks, ports };
-    let entry = DesignEntry {
-        meta: DesignMeta {
-            id: design_id,
-            name: session.name.clone(),
-            tier: session.tier,
-            description: format!("{} ports, {} blocks", circuit.ports.len(), circuit.blocks.len()),
-            saved_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
-            port_count: circuit.ports.len(),
-        },
-        circuit,
+    let blueprint = Blueprint {
+        name: session.name.clone(),
+        tier: session.tier,
+        circuit: CircuitData { size: session.tier.world_size(), blocks, ports },
     };
-    let game_dir = srv.game_dir();
-    designs::save_design(&game_dir, player_name, &entry);
+    let summary = format!(
+        "{} ports, {} blocks",
+        blueprint.circuit.ports.len(),
+        blueprint.circuit.blocks.len()
+    );
+
+    // Back onto the Blueprint it came from — or a new one, if that's gone.
+    let src = &session.source;
+    let still_there = srv
+        .get_inventory_slot(&src.dimension, src.pos, src.slot)
+        .is_some_and(|(id, _, _)| id == Items::BLUEPRINT);
+    let written = if still_there {
+        srv.set_inventory_slot(&src.dimension, src.pos, src.slot, Items::BLUEPRINT, 1, &blueprint.to_nbt())
+    } else {
+        let taken: Vec<u32> = srv.player_inventory(player_name).into_iter().map(|(slot, ..)| slot).collect();
+        match (0..PLAYER_SLOTS).find(|s| !taken.contains(s)) {
+            Some(slot) => srv.set_slot_item(player_name, slot, Items::BLUEPRINT, 1, &blueprint.to_nbt()),
+            None => false,
+        }
+    };
+    if !written {
+        SESSIONS.lock().unwrap().insert(player_name.to_string(), session);
+        return "§cNowhere to write the design: put its Blueprint back in the workbench or free an inventory slot, then /vlsi save again.".into();
+    }
 
     let (rx, ry, rz) = session.return_pos;
     srv.teleport_to_dim(player_name, &session.return_dim, rx, ry, rz);
+    if still_there {
+        format!("§aSaved '{}' to its Blueprint — {summary}.", blueprint.name)
+    } else {
+        format!("§aSaved '{}' to a new Blueprint in your inventory — {summary}.", blueprint.name)
+    }
+}
 
-    format!("§aSaved '{}' — {} ports, {} blocks.", entry.meta.name, entry.meta.port_count, entry.circuit.blocks.len())
+/// Whether a block in the editor dimension is part of a lane's box or floor.
+fn is_structure(block_id: &str, pos: BlockPos) -> bool {
+    block_id == WALL || (block_id == FLOOR && pos.y == EDITOR_Y - 1)
 }
 
 pub fn register(registry: &mut Registry) {
-    // `/vlsi design <name> <tier>` — create a blank design and jump straight into the editor.
-    registry.on_typed_command("vlsi", "word word word", |ctx, srv| {
-        let sub = ctx.arg_str(0).unwrap_or("");
-        if sub != "design" { return None; }
-        let name = ctx.arg_str(1).unwrap_or("Unnamed").to_string();
-        let tier = match Tier::parse(ctx.arg_str(2).unwrap_or("")) {
-            Some(t) => t, None => return Some("§cUsage: /vlsi design <name> <tier>".into()),
-        };
-        let return_pos = player_pos(srv, &ctx.source, &ctx.uuid);
-        enter(srv, &ctx.source, &name, tier, None, None, &ctx.dimension, return_pos);
-        Some(format!("§aOpened editor for new design '{}'.", name))
-    });
-
-    // `/vlsi edit <name>` — reopen an existing design for editing.
-    registry.on_typed_command("vlsi", "word word", |ctx, srv| {
-        if ctx.arg_str(0).unwrap_or("") != "edit" { return None; }
-        let name = ctx.arg_str(1).unwrap_or("");
-        let game_dir = srv.game_dir();
-        let list = designs::list_designs(&game_dir, &ctx.source);
-        let meta = match list.iter().find(|d| d.name == name) {
-            Some(m) => m.clone(),
-            None => return Some(format!("§cDesign '{}' not found.", name)),
-        };
-        let entry = match designs::load_design(&game_dir, &ctx.source, &meta.id) {
-            Some(e) => e,
-            None => return Some("§cFailed to load design data.".into()),
-        };
-        let return_pos = player_pos(srv, &ctx.source, &ctx.uuid);
-        enter(srv, &ctx.source, &meta.name, meta.tier, Some(meta.id), Some(entry.circuit), &ctx.dimension, return_pos);
-        Some(format!("§aOpened editor for '{}'.", name))
-    });
-
     // `/vlsi save` — save the active editor session and return.
     registry.on_typed_command("vlsi", "word", |ctx, srv| {
-        if ctx.arg_str(0).unwrap_or("") != "save" { return None; }
+        if ctx.arg_str(0).unwrap_or("") != "save" {
+            return None;
+        }
         Some(save(srv, &ctx.source))
+    });
+
+    // The box and the floor stay — even for creative players.
+    registry.on_block_break(|e, phase, _srv| {
+        !(phase == EventPhase::Pre && e.dimension == DIMENSION_ID && is_structure(&e.block_id, e.pos))
     });
 }
