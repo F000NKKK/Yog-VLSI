@@ -78,11 +78,16 @@ struct PortEdit {
 
 // ── The screen's view model ──────────────────────────────────────────────────
 
-#[derive(Default)]
 pub struct PortVm {
     edit: Option<PortEdit>,
     label: String,
-    mode: Option<PortMode>,
+    mode: PortMode,
+}
+
+impl Default for PortVm {
+    fn default() -> Self {
+        Self { edit: None, label: String::new(), mode: PortMode::Input }
+    }
 }
 
 impl ViewModel for PortVm {}
@@ -90,23 +95,20 @@ impl ViewModel for PortVm {}
 impl PortVm {
     fn load(&mut self, edit: PortEdit) {
         self.label = edit.label.clone();
-        self.mode = Some(edit.mode);
+        self.mode = edit.mode;
         self.edit = Some(edit);
     }
-    pub fn mode(&self) -> PortMode {
-        self.mode.unwrap_or(PortMode::Input)
-    }
     pub fn set_mode(&mut self, mode: PortMode) {
-        self.mode = Some(mode);
+        self.mode = mode;
     }
-    pub fn done(&mut self, cx: &mut Cx<'_, Self>) {
+    pub fn done(&mut self) {
         if let Some(edit) = &self.edit {
-            let out = PortEdit { label: self.label.trim().to_string(), mode: self.mode(), ..edit.clone() };
+            let out = PortEdit { label: self.label.trim().to_string(), mode: self.mode, ..edit.clone() };
             if let (Some(srv), Ok(json)) = (yog_api::server(), serde_json::to_string(&out)) {
                 srv.send_to_server(CHANNEL, json.as_bytes());
             }
         }
-        cx.close();
+        close();
     }
 }
 
