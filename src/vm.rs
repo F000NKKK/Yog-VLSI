@@ -105,6 +105,10 @@ pub enum BlockType {
 
     /// A VLSI port block.
     Port(PortMode),
+    /// An ALU inside the circuit: its chips run inside it ([`NestedAlu`],
+    /// set with [`RedstoneVM::set_nested`]); its six faces read and give
+    /// power like a component's, a level each.
+    Alu,
 }
 
 /// What a piston does to a block in its way.
@@ -133,6 +137,11 @@ pub enum Facing {
 impl Facing {
     pub const ALL: [Facing; 6] = [Facing::North, Facing::South, Facing::East, Facing::West, Facing::Up, Facing::Down];
     pub const HORIZONTAL: [Facing; 4] = [Facing::North, Facing::South, Facing::East, Facing::West];
+
+    /// Its place in [`Facing::ALL`] (an ALU's sides N S E W U D).
+    pub fn index(self) -> usize {
+        Facing::ALL.iter().position(|&f| f == self).unwrap_or(0)
+    }
 
     pub fn opposite(self) -> Facing {
         match self {
@@ -250,7 +259,8 @@ impl Cell {
             | BlockType::Container { .. }
             | BlockType::Hopper { .. }
             | BlockType::Dropper { .. }
-            | BlockType::Port(_) => Push::Stuck,
+            | BlockType::Port(_)
+            | BlockType::Alu => Push::Stuck,
             BlockType::RedstoneWire
             | BlockType::RedstoneTorch { .. }
             | BlockType::Repeater { .. }
@@ -287,7 +297,8 @@ impl Cell {
             | BlockType::PressurePlate { .. }
             | BlockType::TargetBlock { .. }
             | BlockType::Source { .. }
-            | BlockType::Port(_) => true,
+            | BlockType::Port(_)
+            | BlockType::Alu => true,
             _ => false,
         }
     }
@@ -307,6 +318,11 @@ impl Cell {
                 if to == facing.opposite() { (p, p) } else { (0, 0) }
             }
             BlockType::Port(PortMode::Input | PortMode::Bidirectional) => (self.port_in, 0),
+            // A nested ALU's faces: a level each, packed in `watched`.
+            BlockType::Alu => {
+                let level = ((self.watched >> (4 * to.index())) & 0xF) as u8;
+                (level, level)
+            }
             _ => (0, 0),
         }
     }
@@ -337,6 +353,8 @@ pub struct RedstoneVM {
     pub tick: u64,
     /// The items of every container, by cell: (item, count) per slot.
     inventories: HashMap<u32, Vec<(u16, u8)>>,
+    /// The nested ALUs' insides, by cell.
+    nested: HashMap<u32, NestedAlu>,
     /// Item ids, indexed by the numbers in `inventories`.
     items: Vec<String>,
     rng: u64,
@@ -374,6 +392,7 @@ impl RedstoneVM {
             active: Vec::new(),
             tick: 0,
             inventories: HashMap::new(),
+            nested: HashMap::new(),
             items: Vec::new(),
             rng: 0x9E37_79B9_7F4A_7C15,
         }
@@ -527,6 +546,17 @@ impl RedstoneVM {
     }
 
     /// Drives `power` into the Input/Bidirectional port at `(x, y, z)`.
+    /// Puts `alu`'s insides into the ALU block at `(x, y, z)`.
+    pub fn set_nested(&mut self, x: u32, y: u32, z: u32, alu: NestedAlu) {
+        if !self.in_bounds(x as i32, y as i32, z as i32) {
+            return;
+        }
+        let i = self.idx(x, y, z);
+        if self.get(i).block == BlockType::Alu {
+            self.nested.insert(i, alu);
+        }
+    }
+
     pub fn set_port_input(&mut self, x: u32, y: u32, z: u32, power: u8) {
         if !self.in_bounds(x as i32, y as i32, z as i32) {
             return;
@@ -586,6 +616,13 @@ impl RedstoneVM {
             std::hash::Hash::hash(&c.block, &mut bh);
             mix(std::hash::Hasher::finish(&bh));
             mix(u64::from(c.power) | u64::from(c.strong) << 8 | u64::from(c.weak) << 16 | u64::from(c.timer) << 24 | u64::from(i) << 32);
+            mix(u64::from(c.watched));
+        }
+        // A nested ALU's chips settle inside a step; still running (a clock), the circuit isn't settled.
+        for alu in self.nested.values() {
+            for chip in &alu.chips {
+                mix(chip.vm.state());
+            }
         }
         h
     }
@@ -848,6 +885,24 @@ impl RedstoneVM {
                     .then_some((i, next))
             })
             .collect();
+        // Nested ALUs: their faces' power in, their chips run, their faces' levels out.
+        let mut changes = changes;
+        let alus: Vec<(u32, [u8; 6])> = self
+            .nested
+            .keys()
+            .filter(|&&i| self.get(i).block == BlockType::Alu)
+            .map(|&i| (i, Facing::ALL.map(|f| self.input_from(i, f, true))))
+            .collect();
+        for (i, inputs) in alus {
+            let Some(alu) = self.nested.get_mut(&i) else { continue };
+            let outputs = alu.run(inputs);
+            let packed = outputs.iter().enumerate().fold(0u32, |p, (k, &l)| p | u32::from(l.min(15)) << (4 * k));
+            let cell = *self.get(i);
+            if cell.watched != packed {
+                let power = outputs.iter().copied().max().unwrap_or(0);
+                changes.push((i, Cell { watched: packed, power, ..cell }));
+            }
+        }
         for (i, next) in changes {
             *self.get_mut(i) = next;
         }
@@ -1130,6 +1185,73 @@ impl RedstoneVM {
             }
         }
         cell
+    }
+}
+
+// ── Nested ALUs ──────────────────────────────────────────────────────────────
+
+/// A pin of a nested ALU's board: a side as a source (`In`) or a sink
+/// (`Out`), by its index in N S E W U D, or a chip's port by its slot and label.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NestedPin {
+    In(u8),
+    Out(u8),
+    Chip(u8, String),
+}
+
+/// A port of a chip in a nested ALU.
+#[derive(Debug, Clone)]
+pub struct NestedPort {
+    pub label: String,
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
+    pub mode: PortMode,
+}
+
+/// A chip in a nested ALU: its ports, its circuit, the most steps it takes
+/// to settle each time the ALU runs (its tier's).
+pub struct NestedChip {
+    pub slot: u8,
+    pub ports: Vec<NestedPort>,
+    pub budget: u32,
+    pub vm: RedstoneVM,
+}
+
+/// An ALU inside a circuit: its chips and the wires of its board, run each
+/// step of the circuit around it — as the ALU it was in the world.
+pub struct NestedAlu {
+    pub chips: Vec<NestedChip>,
+    pub wires: Vec<(NestedPin, NestedPin)>,
+}
+
+impl NestedAlu {
+    /// One run: the faces' power in, the chips settle, the faces' levels out.
+    fn run(&mut self, inputs: [u8; 6]) -> [u8; 6] {
+        let mut levels: HashMap<NestedPin, u8> = HashMap::new();
+        for (f, &l) in inputs.iter().enumerate() {
+            levels.insert(NestedPin::In(f as u8), l);
+        }
+        let outputs = |chips: &[NestedChip], levels: &mut HashMap<NestedPin, u8>| {
+            for c in chips {
+                for p in c.ports.iter().filter(|p| p.mode.outputs()) {
+                    levels.insert(NestedPin::Chip(c.slot, p.label.clone()), c.vm.get_port_output(p.x, p.y, p.z));
+                }
+            }
+        };
+        outputs(&self.chips, &mut levels);
+        let into = |wires: &[(NestedPin, NestedPin)], levels: &HashMap<NestedPin, u8>, to: &NestedPin| {
+            wires.iter().find(|(_, t)| t == to).and_then(|(f, _)| levels.get(f)).copied().unwrap_or(0)
+        };
+        for c in &mut self.chips {
+            for p in c.ports.iter().filter(|p| p.mode.inputs()) {
+                let level = into(&self.wires, &levels, &NestedPin::Chip(c.slot, p.label.clone()));
+                c.vm.set_port_input(p.x, p.y, p.z, level);
+            }
+            c.vm.settle(c.budget);
+        }
+        outputs(&self.chips, &mut levels);
+        std::array::from_fn(|f| into(&self.wires, &levels, &NestedPin::Out(f as u8)))
     }
 }
 
