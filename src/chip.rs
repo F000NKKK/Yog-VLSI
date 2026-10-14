@@ -229,14 +229,6 @@ impl CircuitData {
         vm
     }
 
-    pub fn to_blueprint_nbt(&self) -> String {
-        nbt::wrap(BLUEPRINT_TAG, &serde_json::to_string(self).unwrap_or_default())
-    }
-
-    pub fn from_blueprint_nbt(snbt: &str) -> Option<Self> {
-        serde_json::from_str(&nbt::read(snbt, BLUEPRINT_TAG)?).ok()
-    }
-
     /// Saves a fabricated chip's circuit (chips can travel between worlds,
     /// so these live in the global store).
     pub fn save_for_chip(&self, game_dir: &str, chip: &str) {
@@ -250,6 +242,31 @@ impl CircuitData {
     pub fn load_for_chip(game_dir: &str, chip: &str) -> Option<Self> {
         let store = Storage::open(game_dir, MOD_ID);
         serde_json::from_str(store.get_str(&format!("{CIRCUIT_KEY}{chip}"))?).ok()
+    }
+}
+
+/// A design, written on a Blueprint item (DESIGN.md §2.4): what the
+/// workbench edits in the editor and fabricates chips from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Blueprint {
+    pub name: String,
+    pub tier: Tier,
+    pub circuit: CircuitData,
+}
+
+impl Blueprint {
+    /// A new, empty design.
+    pub fn new(name: impl Into<String>, tier: Tier) -> Self {
+        Blueprint { name: name.into(), tier, circuit: CircuitData::empty(tier) }
+    }
+
+    pub fn to_nbt(&self) -> String {
+        nbt::wrap(BLUEPRINT_TAG, &serde_json::to_string(self).unwrap_or_default())
+    }
+
+    /// The design on a Blueprint's NBT; `None` for a blank one.
+    pub fn from_nbt(snbt: &str) -> Option<Self> {
+        serde_json::from_str(&nbt::read(snbt, BLUEPRINT_TAG)?).ok()
     }
 }
 
@@ -280,7 +297,8 @@ mod tests {
             blocks: vec![CircuitBlock { x: 0, y: 0, z: 0, state: "minecraft:repeater[delay=2]".into() }],
             ports: meta().ports,
         };
-        assert_eq!(CircuitData::from_blueprint_nbt(&c.to_blueprint_nbt()), Some(c));
+        let bp = Blueprint { name: "Adder".into(), tier: Tier::Iron, circuit: c };
+        assert_eq!(Blueprint::from_nbt(&bp.to_nbt()), Some(bp));
     }
 
     #[test]
