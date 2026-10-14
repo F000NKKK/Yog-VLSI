@@ -1,0 +1,15 @@
+{
+  "type": "shaped",
+  "pattern": [
+    "GRG",
+    "RIR",
+    "GRG"
+  ],
+  "key": {
+    "G": "minecraft:gold_nugget",
+    "R": "minecraft:redstone",
+    "I": "minecraft:iron_ingot"
+  },
+  "result": "yog-vlsi:digital_cable",
+  "count": 4
+}

@@ -1,0 +1,11 @@
+{
+  "type": "shaped",
+  "pattern": [
+    "RRR"
+  ],
+  "key": {
+    "R": "minecraft:redstone"
+  },
+  "result": "yog-vlsi:analog_cable",
+  "count": 3
+}

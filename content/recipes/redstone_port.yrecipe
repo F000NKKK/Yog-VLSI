@@ -1,0 +1,13 @@
+{
+  "type": "shaped",
+  "pattern": [
+    "SSS",
+    "SRS",
+    "SSS"
+  ],
+  "key": {
+    "S": "minecraft:smooth_stone",
+    "R": "minecraft:redstone"
+  },
+  "result": "yog-vlsi:redstone_port"
+}

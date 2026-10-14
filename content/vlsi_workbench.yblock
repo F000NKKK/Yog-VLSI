@@ -1,13 +1,13 @@
 {
   "name": "@Strings.block.vlsi_workbench",
   "tooltip": "@Strings.block.vlsi_workbench.desc",
-  "register": "manual",
   "block": {
     "hardness": 3.5,
     "resistance": 6,
     "sound": "metal",
     "tool": "pickaxe",
-    "requires_tool": true
+    "requires_tool": true,
+    "inventory": "yog-vlsi:workbench"
   },
   "model": {
     "parent": "cube_bottom_top",

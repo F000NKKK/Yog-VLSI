@@ -1,0 +1,14 @@
+{
+  "type": "shaped",
+  "pattern": [
+    " R ",
+    "RSR",
+    " R "
+  ],
+  "key": {
+    "R": "minecraft:redstone",
+    "S": "minecraft:stone"
+  },
+  "result": "yog-vlsi:port_input",
+  "count": 2
+}

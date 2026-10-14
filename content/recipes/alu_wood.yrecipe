@@ -1,0 +1,15 @@
+{
+  "type": "shaped",
+  "pattern": [
+    "GCG",
+    "CRC",
+    "GDG"
+  ],
+  "key": {
+    "G": "minecraft:oak_planks",
+    "C": "minecraft:copper_ingot",
+    "R": "minecraft:repeater",
+    "D": "minecraft:redstone_block"
+  },
+  "result": "yog-vlsi:alu_wood"
+}

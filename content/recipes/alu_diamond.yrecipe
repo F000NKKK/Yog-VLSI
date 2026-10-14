@@ -1,0 +1,15 @@
+{
+  "type": "shaped",
+  "pattern": [
+    "GCG",
+    "CRC",
+    "GDG"
+  ],
+  "key": {
+    "G": "minecraft:diamond",
+    "C": "minecraft:copper_ingot",
+    "R": "minecraft:repeater",
+    "D": "minecraft:diamond_block"
+  },
+  "result": "yog-vlsi:alu_diamond"
+}

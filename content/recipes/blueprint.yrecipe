@@ -1,0 +1,13 @@
+{
+  "type": "shaped",
+  "pattern": [
+    "PPP",
+    "PIP",
+    "PPP"
+  ],
+  "key": {
+    "P": "minecraft:paper",
+    "I": "minecraft:iron_ingot"
+  },
+  "result": "yog-vlsi:blueprint"
+}
