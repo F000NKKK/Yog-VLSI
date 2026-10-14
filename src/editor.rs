@@ -8,7 +8,10 @@
 //!
 //! The design comes from a Blueprint in a workbench's blueprint slot and
 //! goes back onto it on `/vlsi save` (onto a new Blueprint in the player's
-//! inventory if that one was taken out meanwhile).
+//! inventory if that one was taken out meanwhile). Then the field is
+//! removed. Leaving the game (or the server stopping) saves it the same
+//! way — onto a Blueprint dropped where the player left if there's
+//! nowhere else. No one stays in the editor dimension without a session.
 //!
 //! Saving reads the whole cube in one `scan_region` call, with every
 //! block's full state (a repeater's delay and facing, …), and what the
@@ -64,6 +67,8 @@ struct EditorSession {
 
 /// Stable per-player lane index, assigned on first use.
 static LANES: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Where each player last was outside the editor dimension.
+static LAST_OUTSIDE: LazyLock<Mutex<HashMap<String, (String, (f64, f64, f64))>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static SESSIONS: LazyLock<Mutex<HashMap<String, EditorSession>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn lane_for(player_name: &str) -> u32 {
@@ -80,20 +85,25 @@ fn interior(origin_x: i32, origin_z: i32, size: i32) -> (BlockPos, BlockPos) {
     )
 }
 
-/// Wraps the lane's cube in its barrier shell and empties it.
-fn build_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i32) {
-    let (lo, hi) = interior(origin_x, origin_z, size);
+/// The six faces of the shell around the cube `lo`..`hi` — 6 × 258²
+/// blocks rather than 258³.
+fn shell(lo: BlockPos, hi: BlockPos) -> [(BlockPos, BlockPos); 6] {
     let (x0, y0, z0, x1, y1, z1) = (lo.x - 1, lo.y - 1, lo.z - 1, hi.x + 1, hi.y + 1, hi.z + 1);
     let at = |x, y, z| BlockPos { x, y, z };
-    // Six faces, not the whole cube: 6 × 258² blocks rather than 258³.
-    for (from, to) in [
+    [
         (at(x0, y0, z0), at(x1, y0, z1)),
         (at(x0, y1, z0), at(x1, y1, z1)),
         (at(x0, y0, z0), at(x0, y1, z1)),
         (at(x1, y0, z0), at(x1, y1, z1)),
         (at(x0, y0, z0), at(x1, y1, z0)),
         (at(x0, y0, z1), at(x1, y1, z1)),
-    ] {
+    ]
+}
+
+/// Wraps the lane's cube in its barrier shell and empties it.
+fn build_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i32) {
+    let (lo, hi) = interior(origin_x, origin_z, size);
+    for (from, to) in shell(lo, hi) {
         srv.fill_region(DIMENSION_ID, from, to, WALL);
     }
     // What a previous design left inside.
@@ -164,13 +174,23 @@ pub fn enter(
     Ok(())
 }
 
-/// Scans the player's platform, writes the design back onto its Blueprint
-/// and takes them back. Returns a status message.
+/// `/vlsi save`: writes the design back onto its Blueprint, takes the
+/// player back and removes their editing field. Returns a status message.
 pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
     let Some(session) = SESSIONS.lock().unwrap().remove(player_name) else {
         return "§cYou are not editing a VLSI circuit right now.".into();
     };
+    match finish(srv, player_name, session, false) {
+        Ok(message) => message,
+        Err((session, message)) => {
+            SESSIONS.lock().unwrap().insert(player_name.to_string(), session);
+            message
+        }
+    }
+}
 
+/// Reads the design off the player's field.
+fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
     let mut blocks = Vec::new();
     let mut ports = Vec::new();
     let (lo, hi) = interior(session.origin_x, session.origin_z, session.size as i32);
@@ -190,42 +210,71 @@ pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
             .collect();
         blocks.push(CircuitBlock { x, y, z, state, items });
     }
-    let blueprint = Blueprint {
+    Blueprint {
         name: session.name.clone(),
         tier: session.tier,
         circuit: CircuitData { size: session.tier.world_size(), blocks, ports },
-    };
-    let summary = format!(
-        "{} ports, {} blocks",
-        blueprint.circuit.ports.len(),
-        blueprint.circuit.blocks.len()
-    );
+    }
+}
 
-    // Back onto the Blueprint it came from — or a new one, if that's gone.
+/// Saves the session's design and ends it: back onto its Blueprint, onto a
+/// new one in the player's inventory, or — `leaving`, when neither works —
+/// dropped as a Blueprint where they'll come back to. Then the field goes
+/// and the player goes back. Gives the session back if it can't be saved.
+fn finish(
+    srv: &dyn yog_api::Server,
+    player_name: &str,
+    session: EditorSession,
+    leaving: bool,
+) -> Result<String, (EditorSession, String)> {
+    let blueprint = scan(srv, &session);
+    let summary = format!("{} ports, {} blocks", blueprint.circuit.ports.len(), blueprint.circuit.blocks.len());
+    let nbt = blueprint.to_nbt();
     let src = &session.source;
+    let (rx, ry, rz) = session.return_pos;
+
     let still_there = srv
         .get_inventory_slot(&src.dimension, src.pos, src.slot)
         .is_some_and(|(id, _, _)| id == Items::BLUEPRINT);
-    let written = if still_there {
-        srv.set_inventory_slot(&src.dimension, src.pos, src.slot, Items::BLUEPRINT, 1, &blueprint.to_nbt())
-    } else {
-        let taken: Vec<u32> = srv.player_inventory(player_name).into_iter().map(|(slot, ..)| slot).collect();
-        match (0..PLAYER_SLOTS).find(|s| !taken.contains(s)) {
-            Some(slot) => srv.set_slot_item(player_name, slot, Items::BLUEPRINT, 1, &blueprint.to_nbt()),
-            None => false,
-        }
-    };
-    if !written {
-        SESSIONS.lock().unwrap().insert(player_name.to_string(), session);
-        return "§cNowhere to write the design: put its Blueprint back in the workbench or free an inventory slot, then /vlsi save again.".into();
-    }
-
-    let (rx, ry, rz) = session.return_pos;
-    srv.teleport_to_dim(player_name, &session.return_dim, rx, ry, rz);
-    if still_there {
+    let message = if still_there && srv.set_inventory_slot(&src.dimension, src.pos, src.slot, Items::BLUEPRINT, 1, &nbt) {
         format!("§aSaved '{}' to its Blueprint — {summary}.", blueprint.name)
     } else {
-        format!("§aSaved '{}' to a new Blueprint in your inventory — {summary}.", blueprint.name)
+        let taken: Vec<u32> = srv.player_inventory(player_name).into_iter().map(|(slot, ..)| slot).collect();
+        let free = (0..PLAYER_SLOTS).find(|s| !taken.contains(s));
+        if free.is_some_and(|slot| srv.set_slot_item(player_name, slot, Items::BLUEPRINT, 1, &nbt)) {
+            format!("§aSaved '{}' to a new Blueprint in your inventory — {summary}.", blueprint.name)
+        } else if leaving {
+            srv.spawn_item(&session.return_dim, (rx, ry, rz), (0.0, 0.0, 0.0), Items::BLUEPRINT, 1, &nbt);
+            format!("§eSaved '{}' to a Blueprint dropped where you left — {summary}.", blueprint.name)
+        } else {
+            return Err((
+                session,
+                "§cNowhere to write the design: put its Blueprint back in the workbench or free an inventory slot, then /vlsi save again.".into(),
+            ));
+        }
+    };
+
+    remove_room(srv, session.origin_x, session.origin_z, session.size as i32);
+    srv.teleport_to_dim(player_name, &session.return_dim, rx, ry, rz);
+    Ok(message)
+}
+
+/// Removes a field: what's in it, and its shell.
+fn remove_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i32) {
+    let (lo, hi) = interior(origin_x, origin_z, size);
+    for (pos, _) in srv.scan_region(DIMENSION_ID, lo, hi) {
+        srv.set_block_state(DIMENSION_ID, pos, "minecraft:air");
+    }
+    for (from, to) in shell(lo, hi) {
+        srv.fill_region(DIMENSION_ID, from, to, "minecraft:air");
+    }
+}
+
+/// Saves everyone's design and ends every session (the server stops).
+pub fn finish_all(srv: &dyn yog_api::Server) {
+    let sessions: Vec<(String, EditorSession)> = SESSIONS.lock().unwrap().drain().collect();
+    for (player, session) in sessions {
+        let _ = finish(srv, &player, session, true);
     }
 }
 
@@ -251,6 +300,39 @@ pub fn register(registry: &mut Registry) {
             return None;
         }
         Some(save(srv, &ctx.source))
+    });
+
+    // Leaving the game: the design is saved and the field goes.
+    // (Whichever phase comes first: the session goes with it.)
+    registry.on_player_leave(|e, _phase, srv| {
+        if let Some(session) = SESSIONS.lock().unwrap().remove(&e.player_name) {
+            let _ = finish(srv, &e.player_name, session, true);
+        }
+        true
+    });
+
+    // Nobody stays in the editor dimension without a session (a warp, a
+    // teleport, a rejoin): back to where they last were outside it.
+    registry.on_player_move(|e, phase, srv| {
+        if phase != EventPhase::Pre {
+            return true;
+        }
+        if e.dimension != DIMENSION_ID {
+            LAST_OUTSIDE.lock().unwrap().insert(e.player_name.clone(), (e.dimension.clone(), (e.x, e.y, e.z)));
+            return true;
+        }
+        if SESSIONS.lock().unwrap().contains_key(&e.player_name) {
+            return true;
+        }
+        let (dim, (x, y, z)) = LAST_OUTSIDE
+            .lock()
+            .unwrap()
+            .get(&e.player_name)
+            .cloned()
+            .unwrap_or_else(|| ("minecraft:overworld".into(), (0.5, 100.0, 0.5)));
+        srv.teleport_to_dim(&e.player_name, &dim, x, y, z);
+        srv.send_actionbar(&e.player_name, "§cThe circuit editor is only open from a VLSI Workbench.");
+        false
     });
 
     // The shell stays — even for creative players.

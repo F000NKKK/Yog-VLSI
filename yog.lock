@@ -824,9 +824,9 @@ checksum = "b8c3f0ceee895f5325ba3231a70c38d38f773de474eaa56a9e142a7219b3d81e"
 
 [[package]]
 name = "yog-api"
-version = "0.92.10"
+version = "0.92.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2861bf5c6e44da6713bcb69ae7e51d3f5228761669d5a50a90d6c05bdbc7adf"
+checksum = "c875b8c44f801c341cb69e5ffc224d3ee7b5e781dd16cdf67b03165eed20b0c1"
 dependencies = [
  "ctor",
  "rkyv",
@@ -884,9 +884,9 @@ checksum = "09b3065718bc13e4b9d93adc5a03528ac07451cf645d676b20f2bbacfafdded4"
 
 [[package]]
 name = "yog-dimensions"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e2bcab35d4d42741b9a3609cd42879e309fcb7ea3e0c78e8a2dd40c20362382"
+checksum = "5f9cce1945f16491d86735607a471e0c4110aa4e3104687bbbc0217060b2127d"
 dependencies = [
  "serde",
  "serde_json",
@@ -922,9 +922,9 @@ dependencies = [
 
 [[package]]
 name = "yog-interop"
-version = "0.21.1"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1351231d68acaaddd88a13acbd070ea30dff9855aac31cffe837c9d6f5cc7886"
+checksum = "ffb24a50e781f926d584851c25ad222af42ff1771a68b66e281d62b861cc68cc"
 dependencies = [
  "proc-macro2",
  "quote",

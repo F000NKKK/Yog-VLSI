@@ -47,7 +47,10 @@ impl Mod for YogVlsi {
                     .height(384)
                     .logical_height(384),
             )
-            .generator_type(editor::GENERATOR_ID),
+            .generator_type(editor::GENERATOR_ID)
+            .structures(false)
+            .features(false)
+            .mob_spawning(false),
         );
         registry.register_chunk_generator(editor::GENERATOR_ID, |_writer| {
             // Void — the editor builds its own floor/walls per session.
@@ -75,6 +78,7 @@ impl Mod for YogVlsi {
             port::load(srv);
         });
         registry.on_server_stopping(|srv| {
+            editor::finish_all(srv);
             workbench::save_resources(srv);
             board::save(srv);
             cables::save(srv);
