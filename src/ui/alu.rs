@@ -11,7 +11,10 @@
 //!   or into empty space to remove it;
 //! - drag a chip by its title to move it;
 //! - drag empty space to move the view, turn the wheel to zoom it; the In
-//!   and Out panels move by their titles too, as wide as their names.
+//!   and Out panels move by their titles too, as wide as their names;
+//! - a bus (a side a digital cable reaches) shows its channels: wire into a
+//!   channel's left pin to drive it, out of its right pin to read it; pull
+//!   the bar at its bottom down for more channels.
 
 yog_api::ui_include!("ui/alu");
 
@@ -71,6 +74,9 @@ const HEAD: f32 = 12.0;
 const SIDE_MIN_W: f32 = 40.0;
 const CHIP_W: f32 = 100.0;
 const GAP: f32 = 10.0;
+/// A bus node's width and the height of the bar that pulls it open.
+const BUS_W: f32 = 64.0;
+const GRIP: f32 = 4.0;
 /// How near a pin the pointer has to be to take it.
 const REACH: f32 = 6.0;
 
@@ -188,6 +194,8 @@ enum Drag {
     Node { node: Node, dx: f32, dy: f32 },
     /// The view being moved: where the pointer and the view were at the start.
     Pan { from: (f32, f32), pan: (f32, f32) },
+    /// A bus node being pulled open or closed: its side, its top (local).
+    Rows { side: u8, top: f32 },
 }
 
 struct Graph {
@@ -197,11 +205,13 @@ struct Graph {
     pointer: (f32, f32),
     /// Node positions moved here but not yet echoed back by the server.
     moved: HashMap<Node, (f32, f32)>,
+    /// Bus rows pulled here but not yet echoed back by the server.
+    rows: HashMap<u8, u16>,
     camera: Camera,
 }
 
 static GRAPH: LazyLock<Mutex<Graph>> = LazyLock::new(|| {
-    Mutex::new(Graph { view: None, layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), camera: Camera::default() })
+    Mutex::new(Graph { view: None, layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default() })
 });
 
 fn mode_color(mode: PortMode) -> u32 {
@@ -228,7 +238,15 @@ fn level_color(level: u8) -> u32 {
 /// Lays the graph out in a `w`×`h` box, every node where `cam` shows it —
 /// where the player put it, else the In panel on the left, the Out panel
 /// on the right and the chips in columns between; `width_of` measures text.
-fn layout(view: &BoardView, moved: &HashMap<Node, (f32, f32)>, w: f32, h: f32, cam: Camera, width_of: &dyn Fn(&str) -> f32) -> Layout {
+fn layout(
+    view: &BoardView,
+    moved: &HashMap<Node, (f32, f32)>,
+    rows: &HashMap<u8, u16>,
+    w: f32,
+    h: f32,
+    cam: Camera,
+    width_of: &dyn Fn(&str) -> f32,
+) -> Layout {
     let _ = h;
     let mut out = Layout::default();
     let fit = |s: &str, room: f32| -> String {
@@ -282,6 +300,40 @@ fn layout(view: &BoardView, moved: &HashMap<Node, (f32, f32)>, w: f32, h: f32, c
             head: HEAD * z,
             scale: z,
             title,
+            awake: true,
+            labels,
+        });
+    }
+
+    // The buses, under the In panel unless moved.
+    let mut bus_y = 2.0 + HEAD + view.sides.len() as f32 * ROW + 2.0 + GAP;
+    for bus in &view.buses {
+        let node = Node::Bus(bus.index);
+        let n_rows = rows.get(&bus.index).copied().unwrap_or(bus.rows).clamp(1, bus.channels.max(1));
+        let nh = HEAD + n_rows as f32 * ROW + 2.0 + GRIP;
+        let (x, y) = placed(node).unwrap_or((2.0, bus_y));
+        bus_y += nh + GAP;
+        let mut labels = Vec::new();
+        for n in 1..=n_rows {
+            let ry = y + HEAD + (n - 1) as f32 * ROW;
+            let name = n.to_string();
+            let (tx, ty) = at(x + (BUS_W - width_of(&name)) / 2.0, ry + 1.0);
+            labels.push((name.clone(), tx, ty, TEXT));
+            for source in [false, true] {
+                let (px, py) = at(if source { x + BUS_W } else { x }, ry + ROW / 2.0);
+                out.pins.push(PinAt { pin: Pin::new(node, name.as_str()), x: px, y: py, reach_y: ROW * z / 2.0, source, usable: true });
+            }
+        }
+        let (nx, ny) = at(x, y);
+        out.nodes.push(NodeAt {
+            node,
+            x: nx,
+            y: ny,
+            w: BUS_W * z,
+            h: nh * z,
+            head: HEAD * z,
+            scale: z,
+            title: fit(&Strings::screen_alu_bus(&bus.side), BUS_W - 6.0),
             awake: true,
             labels,
         });
@@ -365,6 +417,14 @@ fn pin_color(view: &BoardView, p: &PinAt) -> u32 {
             .find(|c| c.slot == slot)
             .and_then(|c| c.pins.iter().find(|(n, _)| *n == p.pin.name))
             .map_or(TEXT_DIM, |(_, m)| mode_color(*m)),
+        // Left: driven onto the bus; right: read from it.
+        Node::Bus(_) => {
+            if p.source {
+                PIN_OUT
+            } else {
+                PIN_IN
+            }
+        }
     }
 }
 
@@ -425,7 +485,7 @@ impl Surface for GraphSurface {
         d2.rect(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, BG);
         let Some(view) = g.view.clone() else { return };
         let width_of = |t: &str| d2.text_width(t, "");
-        g.layout = layout(&view, &g.moved, rect.w, rect.h, g.camera, &width_of);
+        g.layout = layout(&view, &g.moved, &g.rows, rect.w, rect.h, g.camera, &width_of);
         let (ox, oy) = (rect.x, rect.y);
         let at = |x: f32, y: f32| (ox + x, oy + y);
         let levels: HashMap<&Pin, u8> = view.levels.iter().map(|(p, l)| (p, *l)).collect();
@@ -444,6 +504,10 @@ impl Surface for GraphSurface {
             c.text(&n.title, x + 3.0 * n.scale, y + 2.0 * n.scale, n.scale, color);
             for (text, tx, ty, color) in &n.labels {
                 c.text(text, ox + tx, oy + ty, n.scale, *color);
+            }
+            if matches!(n.node, Node::Bus(_)) {
+                let gy = y + n.h - GRIP * n.scale;
+                c.rect(x + n.w / 3.0, gy + n.scale, x + 2.0 * n.w / 3.0, gy + 2.0 * n.scale, HEADER);
             }
         };
         let pin = |p: &PinAt| {
@@ -509,6 +573,17 @@ impl Surface for GraphSurface {
         match ev {
             Pointer::Down { x, y } => {
                 g.pointer = (x, y);
+                // A bus's bar: pulls it open or closed.
+                let grip = g.layout.nodes.iter().rev().find_map(|n| match n.node {
+                    Node::Bus(side) if x >= n.x && x <= n.x + n.w && y >= n.y + n.h - GRIP * n.scale - 1.0 && y <= n.y + n.h + 1.0 => {
+                        Some((side, n.y, n.head, n.scale))
+                    }
+                    _ => None,
+                });
+                if let Some((side, top, ..)) = grip {
+                    g.drag = Drag::Rows { side, top };
+                    return true;
+                }
                 let pin = g.layout.hit(x, y).cloned();
                 g.drag = match pin {
                     Some(p) if p.usable && p.source => Drag::FromSource { from: p.pin, lifted: None },
@@ -533,6 +608,12 @@ impl Surface for GraphSurface {
                         g.moved.insert(node, world);
                     }
                     Drag::Pan { from, pan } => g.camera.pan = (pan.0 + x - from.0, pan.1 + y - from.1),
+                    Drag::Rows { side, top } => {
+                        let z = g.camera.zoom;
+                        let channels = view.buses.iter().find(|b| b.index == side).map_or(1, |b| b.channels);
+                        let rows = ((y - top - (HEAD + 2.0 + GRIP) * z) / (ROW * z)).round().clamp(1.0, channels as f32) as u16;
+                        g.rows.insert(side, rows);
+                    }
                     _ => {}
                 }
                 matches!(ev, Pointer::Drag { .. })
@@ -553,6 +634,7 @@ impl Surface for GraphSurface {
                     Drag::Node { node, .. } => {
                         g.moved.get(&node).map(|&(x, y)| Request::Move { alu, node, x: x.round(), y: y.round() })
                     }
+                    Drag::Rows { side, .. } => g.rows.get(&side).map(|&rows| Request::BusRows { alu, side, rows }),
                     Drag::Pan { .. } | Drag::None => None,
                 };
                 if let Some(request) = request {
@@ -596,6 +678,7 @@ pub fn setup(registry: &mut Registry) {
             let mut g = GRAPH.lock().unwrap();
             // The server has the moves it was sent.
             g.moved.retain(|node, p| !view.layout.iter().any(|(n, q)| n == node && q == p));
+            g.rows.retain(|side, r| !view.buses.iter().any(|b| b.index == *side && b.rows == *r));
             if g.view.as_ref().is_some_and(|v| v.alu != view.alu) {
                 g.moved.clear();
             }
@@ -623,6 +706,7 @@ mod tests {
                 active: true,
             }],
             sides: board::SIDES.iter().map(|s| SideView { side: s.to_string(), name: None, output: *s == "E" }).collect(),
+            buses: vec![board::BusView { index: 2, side: "E".into(), channels: 32, rows: 3 }],
             wires: Vec::new(),
             layout: Vec::new(),
             levels: Vec::new(),
@@ -631,7 +715,7 @@ mod tests {
 
     #[test]
     fn pins_sit_on_their_edges() {
-        let l = layout(&view(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
+        let l = layout(&view(), &HashMap::new(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
         let chip = l.nodes.iter().find(|n| n.node == Node::Chip(0)).unwrap();
         let a = l.pin(&Pin::new(Node::Chip(0), "A"), false).unwrap();
         let s = l.pin(&Pin::new(Node::Chip(0), "S"), true).unwrap();
@@ -664,7 +748,7 @@ mod tests {
         assert_eq!(cam.zoom, 2.0);
         assert_eq!(Camera::default().zoomed(100.0, (0.0, 0.0)).zoom, Camera::MAX);
         let moved = Camera { zoom: 1.0, pan: (-500.0, 0.0) };
-        let l = layout(&view(), &HashMap::new(), 360.0, 140.0, moved, &|t| t.len() as f32 * 6.0);
+        let l = layout(&view(), &HashMap::new(), &HashMap::new(), 360.0, 140.0, moved, &|t| t.len() as f32 * 6.0);
         let chip = l.nodes.iter().find(|n| n.node == Node::Chip(0)).unwrap();
         assert!(chip.x < 0.0, "panned out of the box, not held in it");
         let side = l.nodes.iter().find(|n| n.node == Node::In).unwrap();
@@ -672,14 +756,27 @@ mod tests {
         // A panel is as wide as its longest name.
         let mut named = view();
         named.sides[0].name = Some("A very long port name, longer than the title".into());
-        let l = layout(&named, &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
+        let l = layout(&named, &HashMap::new(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
         let inp = l.nodes.iter().find(|n| n.node == Node::In).unwrap();
         assert_eq!(inp.w, "N A very long port name, longer than the title".len() as f32 * 6.0 + 8.0);
     }
 
     #[test]
+    fn a_bus_shows_its_rows_each_a_pin_to_drive_and_one_to_read() {
+        let l = layout(&view(), &HashMap::new(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
+        let bus = l.nodes.iter().find(|n| n.node == Node::Bus(2)).unwrap();
+        assert_eq!(bus.labels.len(), 3);
+        let drive = l.pin(&Pin::new(Node::Bus(2), "3"), false).unwrap();
+        let read = l.pin(&Pin::new(Node::Bus(2), "3"), true).unwrap();
+        assert_eq!((drive.x, read.x), (bus.x, bus.x + BUS_W));
+        // Pulled open: more rows.
+        let l = layout(&view(), &HashMap::new(), &HashMap::from([(2, 10)]), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
+        assert!(l.pin(&Pin::new(Node::Bus(2), "10"), true).is_some());
+    }
+
+    #[test]
     fn hits_the_nearest_pin() {
-        let l = layout(&view(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
+        let l = layout(&view(), &HashMap::new(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
         let s = l.pin(&Pin::new(Node::Chip(0), "S"), true).unwrap().clone();
         assert_eq!(l.hit(s.x + 3.0, s.y - 2.0).map(|p| &p.pin), Some(&s.pin));
         assert!(l.hit(180.0, 139.0).is_none());
