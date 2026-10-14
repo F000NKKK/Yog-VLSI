@@ -24,7 +24,8 @@ use std::sync::{LazyLock, Mutex};
 
 use yog_api::{BlockPos, EventPhase, Registry};
 
-use crate::chip::{Blueprint, CircuitBlock, CircuitData, Port, container_slots};
+use crate::board;
+use crate::chip::{Blueprint, ChipMeta, CircuitBlock, CircuitData, Port, SavedAlu, container_slots};
 use crate::content::Items;
 use crate::port;
 use crate::tier::Tier;
@@ -192,6 +193,14 @@ pub fn enter(
         srv.set_block_state(DIMENSION_ID, at(p.x, p.y, p.z), port::block_for_dir(p.dir));
         port::write_label(srv, DIMENSION_ID, at(p.x, p.y, p.z), &p.label);
     }
+    // Its ALUs as they were: their chips in their slots, their boards.
+    for a in &blueprint.circuit.alus {
+        let pos = at(a.x, a.y, a.z);
+        for (slot, meta) in &a.chips {
+            srv.set_inventory_slot(DIMENSION_ID, pos, *slot as u32, meta.tier.chip_item(), 1, &meta.to_nbt());
+        }
+        board::restore(board::AluId { dimension: DIMENSION_ID.to_string(), x: pos.x, y: pos.y, z: pos.z }, a.tier, &a.wires);
+    }
 
     let (cx, cz) = ((origin_x + size as i32 / 2) as f64, (origin_z + size as i32 / 2) as f64);
     if !srv.teleport_to_dim(player_name, DIMENSION_ID, cx, (EDITOR_Y + 1) as f64, cz) {
@@ -242,6 +251,7 @@ pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
 fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
     let mut blocks = Vec::new();
     let mut ports = Vec::new();
+    let mut alus = Vec::new();
     let (lo, hi) = interior(session.origin_x, session.origin_z, session.size as i32);
     for (p, state) in srv.scan_region(DIMENSION_ID, lo, hi) {
         let (x, y, z) = ((p.x - lo.x) as u32, (p.y - lo.y) as u32, (p.z - lo.z) as u32);
@@ -250,6 +260,17 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
             let label = port::read_label(srv, DIMENSION_ID, p).unwrap_or_else(|| format!("Port {}", ports.len()));
             ports.push(Port { label, x, y, z, dir });
             continue;
+        }
+        // An ALU: its chips and its board go into the design with it.
+        if let Some(tier) = Tier::from_alu_block(id) {
+            let chips = (0..board::CHIP_SLOTS)
+                .filter_map(|slot| {
+                    let (_, _, nbt) = srv.get_inventory_slot(DIMENSION_ID, p, slot as u32)?;
+                    Some((slot, ChipMeta::from_nbt(&nbt)?))
+                })
+                .collect();
+            let wires = board::nested_wires(&board::AluId { dimension: DIMENSION_ID.to_string(), x: p.x, y: p.y, z: p.z });
+            alus.push(SavedAlu { x, y, z, tier, chips, wires });
         }
         let items = (0..container_slots(id))
             .filter_map(|slot| {
@@ -262,7 +283,7 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
     Blueprint {
         name: session.name.clone(),
         tier: session.tier,
-        circuit: CircuitData { size: session.tier.world_size(), blocks, ports },
+        circuit: CircuitData { size: session.tier.world_size(), blocks, ports, alus },
     }
 }
 
@@ -317,6 +338,7 @@ fn remove_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i3
     for (from, to) in shell(lo, hi).into_iter().chain(skin(lo, hi)) {
         srv.fill_region(DIMENSION_ID, from, to, "minecraft:air");
     }
+    board::forget_in(DIMENSION_ID, lo, hi);
 }
 
 /// Saves everyone's design and ends every session (the server stops).
