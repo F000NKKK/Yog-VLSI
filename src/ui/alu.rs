@@ -368,9 +368,35 @@ fn pin_color(view: &BoardView, p: &PinAt) -> u32 {
     }
 }
 
+/// Drawing cut to the graph's box: rects are cut, text that doesn't fit
+/// whole isn't drawn (as yog-ui clips; 2D drawing has no scissor).
+struct Clip<'a> {
+    d2: &'a Draw2D<'a>,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+}
+
+impl Clip<'_> {
+    fn rect(&self, x0: f32, y0: f32, x1: f32, y1: f32, color: u32) {
+        let (x0, y0, x1, y1) = (x0.max(self.x0), y0.max(self.y0), x1.min(self.x1), y1.min(self.y1));
+        if x1 > x0 && y1 > y0 {
+            self.d2.rect(x0, y0, x1, y1, color);
+        }
+    }
+
+    fn text(&self, text: &str, x: f32, y: f32, scale: f32, color: u32) {
+        let w = self.d2.text_width(text, "") * scale;
+        if x >= self.x0 - 0.5 && y >= self.y0 - 0.5 && x + w <= self.x1 + 0.5 && y + 8.0 * scale <= self.y1 + 0.5 {
+            self.d2.text_scaled(text, "", x, y, scale, color, false);
+        }
+    }
+}
+
 /// A wire from `(x1, y1)` (a right edge) to `(x2, y2)` (a left edge), in
 /// right-angled runs like a board's traces.
-fn trace(d2: &Draw2D<'_>, (x1, y1): (f32, f32), (x2, y2): (f32, f32), color: u32) {
+fn trace(d2: &Clip<'_>, (x1, y1): (f32, f32), (x2, y2): (f32, f32), color: u32) {
     let hline = |xa: f32, xb: f32, y: f32| d2.rect(xa.min(xb), y - 0.5, xa.max(xb) + 1.0, y + 0.5, color);
     let vline = |x: f32, ya: f32, yb: f32| d2.rect(x - 0.5, ya.min(yb), x + 0.5, ya.max(yb) + 1.0, color);
     if x2 >= x1 + 8.0 {
@@ -408,25 +434,25 @@ impl Surface for GraphSurface {
             _ => None,
         };
         // Nothing drawn past the graph's box, however the view is moved.
-        gfx.set_scissor(rect.x.floor() as i32, rect.y.floor() as i32, rect.w.ceil() as i32, rect.h.ceil() as i32);
+        let c = Clip { d2: &d2, x0: rect.x, y0: rect.y, x1: rect.x + rect.w, y1: rect.y + rect.h };
 
         let node = |n: &NodeAt| {
             let (x, y) = at(n.x, n.y);
-            d2.rect(x, y, x + n.w, y + n.h, NODE);
-            d2.rect(x, y, x + n.w, y + n.head - n.scale, if n.awake { HEADER } else { HEADER_SLEEPING });
+            c.rect(x, y, x + n.w, y + n.h, NODE);
+            c.rect(x, y, x + n.w, y + n.head - n.scale, if n.awake { HEADER } else { HEADER_SLEEPING });
             let color = if n.awake { TEXT } else { TEXT_DIM };
-            d2.text_scaled(&n.title, "", x + 3.0 * n.scale, y + 2.0 * n.scale, n.scale, color, false);
+            c.text(&n.title, x + 3.0 * n.scale, y + 2.0 * n.scale, n.scale, color);
             for (text, tx, ty, color) in &n.labels {
-                d2.text_scaled(text, "", ox + tx, oy + ty, n.scale, *color, false);
+                c.text(text, ox + tx, oy + ty, n.scale, *color);
             }
         };
         let pin = |p: &PinAt| {
             let (x, y) = at(p.x, p.y);
-            d2.rect(x - 2.0, y - 2.0, x + 2.0, y + 2.0, pin_color(&view, p));
+            c.rect(x - 2.0, y - 2.0, x + 2.0, y + 2.0, pin_color(&view, p));
             if p.source
                 && let Some(level) = levels.get(&p.pin).filter(|l| **l > 0)
             {
-                d2.text(&level.to_string(), x + 3.0, y - 8.0, 0xFFFFD0D0, false);
+                c.text(&level.to_string(), x + 3.0, y - 8.0, 1.0, 0xFFFFD0D0);
             }
         };
         // The nodes, under the wires.
@@ -441,7 +467,7 @@ impl Surface for GraphSurface {
             }
             let (Some(a), Some(b)) = (g.layout.pin(from, true), g.layout.pin(to, false)) else { continue };
             let level = levels.get(from).copied().unwrap_or(0);
-            trace(&d2, at(a.x, a.y), at(b.x, b.y), level_color(level));
+            trace(&c, at(a.x, a.y), at(b.x, b.y), level_color(level));
         }
         for p in &g.layout.pins {
             pin(p);
@@ -452,12 +478,12 @@ impl Surface for GraphSurface {
         match &g.drag {
             Drag::FromSource { from, .. } => {
                 if let Some(a) = g.layout.pin(from, true) {
-                    trace(&d2, at(a.x, a.y), at(px, py), WIRE_NEW);
+                    trace(&c, at(a.x, a.y), at(px, py), WIRE_NEW);
                 }
             }
             Drag::FromSink { to } => {
                 if let Some(b) = g.layout.pin(to, false) {
-                    trace(&d2, at(px, py), at(b.x, b.y), WIRE_NEW);
+                    trace(&c, at(px, py), at(b.x, b.y), WIRE_NEW);
                 }
             }
             _ => {}
@@ -467,7 +493,6 @@ impl Surface for GraphSurface {
             let w = width_of(&hint);
             d2.text(&hint, ox + (rect.w - w) / 2.0, oy + rect.h / 2.0 - 4.0, TEXT_DIM, false);
         }
-        gfx.clear_scissor();
     }
 
     /// The wheel zooms the view about the pointer.
