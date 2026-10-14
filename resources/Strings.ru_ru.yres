@@ -82,5 +82,7 @@
   "screen.workbench.cost_row": "{resource}: {need} ({have})",
   "screen.workbench.free": "Бесплатно — схема пустая",
   "screen.workbench.resource_tooltip": "{resource}: {amount}\nПринимает: {inputs}",
-  "screen.alu.full": "Этот АЛУ вмещает не больше {max} чипов."
+  "screen.alu.full": "Этот АЛУ вмещает не больше {max} чипов.",
+  "redstone_port.input": "Редстоун-порт: вход — редстоун идёт в кабель",
+  "redstone_port.output": "Редстоун-порт: выход — уровень кабеля выходит редстоуном"
 }

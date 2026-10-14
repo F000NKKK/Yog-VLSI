@@ -5,6 +5,7 @@
     "hardness": 2,
     "resistance": 6,
     "sound": "stone",
+    "redstone": true,
     "connect_groups": [
       "analog"
     ]

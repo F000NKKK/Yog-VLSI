@@ -54,6 +54,10 @@ pub static EXT_VALUES: LazyLock<Mutex<HashMap<(i32, i32, i32), HashMap<String, u
 /// Display name per installed chip (for the ALU node editor): chip_id → name.
 pub static CHIP_NAMES: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Each ALU's dimension, by position — recorded when it's opened (its
+/// cables are read and driven there); saved with the ALU state.
+pub static ALU_DIMS: LazyLock<Mutex<HashMap<(i32, i32, i32), String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// Each ALU's tier, by position — recorded when it's opened (its chip limit).
 pub static ALU_TIERS: LazyLock<Mutex<HashMap<(i32, i32, i32), Tier>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 

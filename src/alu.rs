@@ -278,6 +278,7 @@ pub fn setup(registry: &mut Registry) {
         let pos = (e.pos.x, e.pos.y, e.pos.z);
         let Some(tier) = Tier::from_alu_block(&e.block_id) else { return true };
         crate::commands::ALU_TIERS.lock().unwrap().insert(pos, tier);
+        crate::commands::ALU_DIMS.lock().unwrap().insert(pos, e.dimension.clone());
         screen.update(move |vm| vm.open_at(pos, tier));
         network::open_ui_for(srv, &e.player_name, ID);
         false
@@ -297,7 +298,7 @@ pub fn setup(registry: &mut Registry) {
 /// to the physical world. Digital Cable channel routing has no such
 /// dependency: it's purely link-graph bit routing between ALUs, so it's
 /// fully wired below.
-pub fn tick_all(_srv: &dyn yog_api::Server) {
+pub fn tick_all(srv: &dyn yog_api::Server) {
     let state = ALU_STATE.lock().unwrap().clone();
 
     // 1. Step every chip's VM at its tier's own rate.
@@ -334,6 +335,23 @@ pub fn tick_all(_srv: &dyn yog_api::Server) {
     }
     drop(cache);
 
+    // 2b. What arrives at the ALUs' input sides from their cables acts as an
+    //     output of the ALU's external pseudo-chip.
+    let dims = crate::commands::ALU_DIMS.lock().unwrap().clone();
+    let modes = IO_MODES.lock().unwrap().clone();
+    let side_mode = |pos: (i32, i32, i32), side: &str| {
+        modes.get(&format!("{}:{side}", ext_chip_id(pos))).copied().unwrap_or(PortMode::Input)
+    };
+    for (pos, dim) in &dims {
+        for side in EXT_SIDES {
+            if side_mode(*pos, side).inputs()
+                && let Some(level) = crate::cables::side_input(srv, dim, *pos, side)
+            {
+                outputs.insert((ext_chip_id(*pos), side.to_string()), level);
+            }
+        }
+    }
+
     // 3. Push linked outputs into inputs (chip inputs take effect next tick;
     //    external pseudo-ports are recorded into EXT_VALUES for bridging).
     let links = LINKS.lock().unwrap();
@@ -354,6 +372,17 @@ pub fn tick_all(_srv: &dyn yog_api::Server) {
         // Destination isn't a chip port — must be an ALU external pseudo-port.
         if let Some(alu_pos) = parse_ext_chip_id(dst_chip) {
             ext.entry(alu_pos).or_default().insert(dst_label.clone(), value);
+        }
+    }
+    drop(cache);
+
+    // 4. The ALUs' output sides drive their cables.
+    for (pos, dim) in &dims {
+        for side in EXT_SIDES {
+            if side_mode(*pos, side).outputs() {
+                let level = ext.get(pos).and_then(|m| m.get(side)).copied().unwrap_or(0);
+                crate::cables::side_output(srv, dim, *pos, side, level);
+            }
         }
     }
 }
@@ -389,6 +418,9 @@ pub fn save_state(srv: &dyn yog_api::Server) {
     store.set("alu_links", serde_json::to_string(&links).unwrap_or_default());
     store.set("alu_io_modes", serde_json::to_string(&modes).unwrap_or_default());
     store.set("alu_chip_names", serde_json::to_string(&names).unwrap_or_default());
+    let dims: Vec<((i32, i32, i32), String)> =
+        crate::commands::ALU_DIMS.lock().unwrap().iter().map(|(k, v)| (*k, v.clone())).collect();
+    store.set("alu_dims", serde_json::to_string(&dims).unwrap_or_default());
     let _ = store.flush();
 }
 
@@ -405,6 +437,11 @@ pub fn load_state(srv: &dyn yog_api::Server) {
             .and_then(|j| serde_json::from_str::<Vec<(String, String)>>(j).ok())
             .map(|v| v.into_iter().collect())
             .unwrap_or_default();
+    if let Some(dims) = store.get("alu_dims").and_then(|v| v.as_str())
+        .and_then(|j| serde_json::from_str::<Vec<((i32, i32, i32), String)>>(j).ok())
+    {
+        *crate::commands::ALU_DIMS.lock().unwrap() = dims.into_iter().collect();
+    }
     if let Some(links) = store.get("alu_links").and_then(|v| v.as_str())
         .and_then(|j| serde_json::from_str::<Vec<((String, String), (String, String))>>(j).ok())
     {

@@ -125,5 +125,7 @@
   "screen.alu.full": {
     "value": "This ALU holds {max} chips at most.",
     "comment": "Installing a chip into a full ALU"
-  }
+  },
+  "redstone_port.input": "Redstone Port: input — redstone goes into the cable",
+  "redstone_port.output": "Redstone Port: output — the cable's level comes out as redstone"
 }
