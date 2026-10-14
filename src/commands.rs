@@ -1,16 +1,11 @@
-//! Commands for Yog VLSI — design management, fabrication, blueprint, ALU, debug.
+//! Commands for Yog VLSI — ALU and debugging. Designs are made in the
+//! workbench, on Blueprints (see `workbench.rs`), not by command.
 //!
 //! /vlsi                            — help
 //! /vlsi chip <tier>                — give blank chip
 //! /vlsi info                       — show held chip NBT
 //! /vlsi test <tier>                — create programmed test chip
 //! /vlsi vm step                    — step VM on held chip
-//! /vlsi designs                    — list saved designs
-//! /vlsi designs create <name> <tier> — create blank design
-//! /vlsi designs delete <name>      — delete design
-//! /vlsi fabricate <design> <tier>  — print chip from design (at workbench)
-//! /vlsi blueprint export <design>  — export design to Blueprint item
-//! /vlsi blueprint import           — copy the held Blueprint into your designs
 //! /vlsi alu install                — install held chip into nearest ALU
 //! /vlsi alu list                   — list chips in nearest ALU
 
@@ -21,10 +16,8 @@ use yog_api::player::Player;
 use yog_api::Registry;
 
 use crate::chip::{ChipMeta, CircuitBlock, CircuitData, Port};
-use crate::designs;
 use crate::tier::Tier;
 use crate::vm::{PortMode, RedstoneVM};
-use crate::workbench::{BLUEPRINT_ID, RESOURCES};
 
 /// In-memory ALU state: (x, y, z) → list of (chip_id, tier)
 pub static ALU_STATE: LazyLock<Mutex<HashMap<(i32, i32, i32), Vec<(String, Tier)>>>> =
@@ -103,18 +96,15 @@ pub fn register(registry: &mut Registry) {
     registry.on_command("vlsi", |_ctx, _srv| {
         Some(format!(
             "§6Yog VLSI §7— Very Large Scale Integration\n\
-             §7/vlsi chip <tier>          §f— give blank chip\n\
-             §7/vlsi info                 §f— show held chip\n\
-             §7/vlsi test <tier>          §f— create test chip\n\
-             §7/vlsi vm step              §f— step VM on held chip\n\
-             §7/vlsi designs              §f— list saved designs\n\
-             §7/vlsi designs create <n> <t> §f— create design\n\
-             §7/vlsi designs delete <n>   §f— delete design\n\
-             §7/vlsi fabricate <name> <t> §f— print chip from design\n\
-             §7/vlsi blueprint export <n> §f— export design to Blueprint\n\
-             §7/vlsi blueprint import     §f— import held Blueprint\n\
-             §7/vlsi alu install          §f— install held chip into ALU\n\
-             §7/vlsi alu list             §f— list ALU chips"
+             §7Designs live on Blueprints: put one in a VLSI Workbench.\n\
+             §7/vlsi save                 §f— save the circuit you're editing and return\n\
+             §7/vlsi port <name>          §f— name the port you last right-clicked\n\
+             §7/vlsi alu install          §f— install the held chip into an ALU\n\
+             §7/vlsi alu list             §f— list an ALU's chips\n\
+             §7/vlsi chip <tier>          §f— give a blank chip\n\
+             §7/vlsi info                 §f— show the held chip\n\
+             §7/vlsi test <tier>          §f— make a test chip\n\
+             §7/vlsi vm step              §f— step the held chip's VM"
         ))
     });
 
@@ -190,70 +180,6 @@ pub fn register(registry: &mut Registry) {
         Some(format!("§6VM Step §f{}→{}\n§7Outputs: {}", before, vm.tick, out_str))
     });
 
-    // ── /vlsi designs ──────────────────────────────────────────────────────
-    registry.on_typed_command("vlsi", "word", |ctx, srv| {
-        if ctx.arg_str(0).unwrap_or("") != "designs" { return None; }
-        let game_dir = srv.game_dir();
-        let list = designs::list_designs(&game_dir, &ctx.source);
-        if list.is_empty() { return Some("§7No saved designs.".into()); }
-        let lines: Vec<String> = list.iter().map(|d|
-            format!("§e{}§7 [{}] {} ports — {}",
-                d.name, d.tier.name(), d.port_count, d.id))
-            .collect();
-        Some(format!("§6Designs ({}):\n{}", list.len(), lines.join("\n")))
-    });
-
-    // ── /vlsi designs create <name> <tier> ─────────────────────────────────
-    registry.on_typed_command("vlsi", "word word word word", |ctx, srv| {
-        if ctx.arg_str(0).unwrap_or("") != "designs" || ctx.arg_str(1).unwrap_or("") != "create" { return None; }
-        let name = ctx.arg_str(2).unwrap_or("Unnamed");
-        let tier = match Tier::parse(ctx.arg_str(3).unwrap_or("")) {
-            Some(t) => t, None => return Some("§cUsage: /vlsi designs create <name> <tier>".into()),
-        };
-        let game_dir = srv.game_dir();
-        let id = designs::create_design(&game_dir, &ctx.source, name, tier);
-        Some(format!("§aDesign '{}' created ({} tier, ID: {}).", name, tier.name(), &id[..8]))
-    });
-
-    // ── /vlsi designs delete <name> ────────────────────────────────────────
-    registry.on_typed_command("vlsi", "word word word", |ctx, srv| {
-        if ctx.arg_str(0).unwrap_or("") != "designs" || ctx.arg_str(1).unwrap_or("") != "delete" { return None; }
-        let name = ctx.arg_str(2).unwrap_or("");
-        let game_dir = srv.game_dir();
-        let list = designs::list_designs(&game_dir, &ctx.source);
-        if let Some(d) = list.iter().find(|d| d.name == name) {
-            designs::delete_design(&game_dir, &ctx.source, &d.id);
-            Some(format!("§aDesign '{}' deleted.", name))
-        } else {
-            Some(format!("§cDesign '{}' not found.", name))
-        }
-    });
-
-    // ── /vlsi fabricate <design_name> <tier> ────────────────────────────────
-    registry.on_typed_command("vlsi", "word word word", |ctx, srv| {
-        let sub = ctx.arg_str(0).unwrap_or("");
-        let action = ctx.arg_str(1).unwrap_or("");
-        if sub != "fabricate" { return None; }
-        let design_name = action;
-        let tier = match Tier::parse(ctx.arg_str(2).unwrap_or("")) {
-            Some(t) => t, None => return Some("§cUsage: /vlsi fabricate <design_name> <tier>".into()),
-        };
-        Some(do_fabricate(srv, &ctx.source, &ctx.uuid, design_name, tier))
-    });
-
-    // ── /vlsi blueprint export <design_name> ───────────────────────────────
-    registry.on_typed_command("vlsi", "word word word", |ctx, srv| {
-        if ctx.arg_str(0).unwrap_or("") != "blueprint" || ctx.arg_str(1).unwrap_or("") != "export" { return None; }
-        let design_name = ctx.arg_str(2).unwrap_or("");
-        Some(do_export_blueprint(srv, &ctx.source, design_name))
-    });
-
-    // ── /vlsi blueprint import ─────────────────────────────────────────────
-    registry.on_typed_command("vlsi", "word word", |ctx, srv| {
-        if ctx.arg_str(0).unwrap_or("") != "blueprint" || ctx.arg_str(1).unwrap_or("") != "import" { return None; }
-        Some(do_import_blueprint(srv, &ctx.source))
-    });
-
     // ── /vlsi alu install ──────────────────────────────────────────────────
     registry.on_typed_command("vlsi", "word word", |ctx, srv| {
         if ctx.arg_str(0).unwrap_or("") != "alu" || ctx.arg_str(1).unwrap_or("") != "install" { return None; }
@@ -292,114 +218,6 @@ pub fn register(registry: &mut Registry) {
     });
 }
 
-// ── Fabrication / Blueprint export (shared by commands and GUI network actions) ─
-
-pub fn do_fabricate(srv: &dyn yog_api::Server, player_name: &str, player_uuid: &str, design_name: &str, tier: Tier) -> String {
-    let game_dir = srv.game_dir();
-    let list = designs::list_designs(&game_dir, player_name);
-    let design = match list.iter().find(|d| d.name == design_name) {
-        Some(d) => d.clone(),
-        None => return format!("§cDesign '{}' not found.", design_name),
-    };
-    let entry = match designs::load_design(&game_dir, player_name, &design.id) {
-        Some(e) => e,
-        None => return "§cFailed to load design data.".into(),
-    };
-
-    let cost = calculate_cost(&entry.circuit.blocks);
-
-    // Try to consume resources from a workbench the player has previously fed.
-    let pos = match Player::with_uuid(srv, player_name, player_uuid).position() {
-        Some((px, py, pz)) => {
-            let mut found = None;
-            'search: for dx in -3..=3i32 {
-                for dy in -3..=3i32 {
-                    for dz in -3..=3i32 {
-                        let key = ((px as i32) + dx, (py as i32) + dy, (pz as i32) + dz);
-                        if RESOURCES.lock().unwrap().contains_key(&key) {
-                            found = Some(key);
-                            break 'search;
-                        }
-                    }
-                }
-            }
-            found
-        }
-        None => None,
-    };
-
-    if let Some(wb_key) = pos {
-        let mut resources = RESOURCES.lock().unwrap();
-        let wb_res = resources.entry(wb_key).or_default();
-        let missing: Vec<String> = cost.iter()
-            .filter_map(|(item, qty)| {
-                let have = wb_res.get(item).copied().unwrap_or(0);
-                if have < *qty { Some(format!("{}: need {} have {}", item, qty, have)) } else { None }
-            })
-            .collect();
-        if !missing.is_empty() {
-            return format!("§cInsufficient resources in workbench:\n{}", missing.join("\n"));
-        }
-        for (item, qty) in &cost {
-            let have = wb_res.get_mut(item).unwrap();
-            *have = have.saturating_sub(*qty);
-        }
-    }
-
-    let cost_str: Vec<String> = cost.iter().map(|(item, qty)| format!("{}: {}", item, qty)).collect();
-
-    let meta = ChipMeta {
-        id: crate::chip::new_id(),
-        tier,
-        name: design_name.to_string(),
-        ports: entry.circuit.ports.clone(),
-    };
-    entry.circuit.save_for_chip(&game_dir, &meta.id);
-
-    let item_id = tier.chip_item();
-    Player::new(srv, player_name).give(item_id, 1);
-    let _ = srv.set_held_item_nbt(player_name, &meta.to_nbt());
-
-    format!(
-        "§aFabricated '{}' ({} tier, {} ports).\n§7Cost: {}",
-        meta.name, tier.name(), meta.ports.len(),
-        if cost_str.is_empty() { "free (empty design)".into() } else { cost_str.join(", ") }
-    )
-}
-
-pub fn do_export_blueprint(srv: &dyn yog_api::Server, player_name: &str, design_name: &str) -> String {
-    let game_dir = srv.game_dir();
-    let list = designs::list_designs(&game_dir, player_name);
-    let design = match list.iter().find(|d| d.name == design_name) {
-        Some(d) => d.clone(),
-        None => return format!("§cDesign '{}' not found.", design_name),
-    };
-    let entry = match designs::load_design(&game_dir, player_name, &design.id) {
-        Some(e) => e,
-        None => return "§cFailed to load design data.".into(),
-    };
-
-    Player::new(srv, player_name).give(BLUEPRINT_ID, 1);
-    let _ = srv.set_held_item_nbt(player_name, &entry.circuit.to_blueprint_nbt());
-    format!("§aBlueprint exported: '{}' ({} blocks, {} ports).",
-        design_name, entry.circuit.blocks.len(), entry.circuit.ports.len())
-}
-
-/// Copies the held Blueprint's circuit into the player's design library;
-/// the Blueprint is kept (DESIGN.md §2.4).
-pub fn do_import_blueprint(srv: &dyn yog_api::Server, player_name: &str) -> String {
-    let Some(circuit) = srv.get_held_item_nbt(player_name).and_then(|nbt| CircuitData::from_blueprint_nbt(&nbt)) else {
-        return "§cHold a written Blueprint.".into();
-    };
-    let Some(tier) = Tier::ALL.into_iter().find(|t| t.world_size() == circuit.size) else {
-        return "§cThat Blueprint's circuit fits no chip tier.".into();
-    };
-    let name = format!("Blueprint {}", designs::list_designs(&srv.game_dir(), player_name).len() + 1);
-    let (blocks, ports) = (circuit.blocks.len(), circuit.ports.len());
-    designs::import_design(&srv.game_dir(), player_name, &name, tier, circuit);
-    format!("§aImported '{}' ({} tier, {} blocks, {} ports).", name, tier.name(), blocks, ports)
-}
-
 // ── Test chip factory ──────────────────────────────────────────────────────
 
 fn create_test_chip(tier: Tier, srv: &dyn yog_api::Server) -> ChipMeta {
@@ -421,91 +239,6 @@ fn create_test_chip(tier: Tier, srv: &dyn yog_api::Server) -> ChipMeta {
     let id = crate::chip::new_id();
     circuit.save_for_chip(&srv.game_dir(), &id);
     ChipMeta { id, tier, name: format!("Test {}", tier.name()), ports: circuit.ports }
-}
-
-// ── Resource cost calculator ────────────────────────────────────────────────
-
-/// Calculate fabrication cost at 25% vanilla rate.
-pub fn calculate_cost(blocks: &[CircuitBlock]) -> Vec<(String, u64)> {
-    let mut costs: HashMap<String, u64> = HashMap::new();
-    for block in blocks {
-        let recipe = block_cost(block);
-        for (item, qty) in recipe {
-            *costs.entry(item).or_default() += qty;
-        }
-    }
-    // Apply 25% rate (divide by 4, ceil)
-    costs.into_iter()
-        .map(|(item, qty)| (item, (qty + 3) / 4))
-        .filter(|(_, qty)| *qty > 0)
-        .collect()
-}
-
-/// Vanilla recipe cost for a block (in items).
-fn block_cost(block: &CircuitBlock) -> Vec<(String, u64)> {
-    let mut c = Vec::new();
-    match block.id() {
-        // Redstone components
-        "minecraft:redstone_wire" => { c.push(("minecraft:redstone".into(), 1)); }
-        "minecraft:redstone_torch" | "minecraft:redstone_wall_torch" => {
-            c.push(("minecraft:redstone".into(), 1)); c.push(("minecraft:stick".into(), 1));
-        }
-        "minecraft:repeater" => {
-            c.push(("minecraft:redstone".into(), 3)); c.push(("minecraft:stick".into(), 2)); c.push(("minecraft:stone".into(), 3));
-        }
-        "minecraft:comparator" => {
-            c.push(("minecraft:redstone".into(), 3)); c.push(("minecraft:quartz".into(), 1)); c.push(("minecraft:stone".into(), 3));
-        }
-        "minecraft:redstone_lamp" => { c.push(("minecraft:redstone".into(), 4)); c.push(("minecraft:glowstone_dust".into(), 1)); }
-        "minecraft:redstone_block" => { c.push(("minecraft:redstone".into(), 9)); }
-        "minecraft:lever" => { c.push(("minecraft:stick".into(), 1)); c.push(("minecraft:cobblestone".into(), 1)); }
-        "minecraft:stone_button" => { c.push(("minecraft:stone".into(), 1)); }
-        "minecraft:observer" => { c.push(("minecraft:cobblestone".into(), 6)); c.push(("minecraft:redstone".into(), 2)); c.push(("minecraft:quartz".into(), 1)); }
-        "minecraft:note_block" => { c.push(("minecraft:oak_planks".into(), 8)); c.push(("minecraft:redstone".into(), 1)); }
-        "minecraft:target" => { c.push(("minecraft:redstone".into(), 4)); c.push(("minecraft:hay_block".into(), 1)); }
-        // Pistons
-        "minecraft:piston" => { c.push(("minecraft:oak_planks".into(), 3)); c.push(("minecraft:cobblestone".into(), 4)); c.push(("minecraft:iron_ingot".into(), 1)); c.push(("minecraft:redstone".into(), 1)); }
-        "minecraft:sticky_piston" => { c.push(("minecraft:slime_ball".into(), 1)); c.push(("minecraft:piston".into(), 1)); }
-        // Containers
-        "minecraft:chest" | "minecraft:barrel" => { c.push(("minecraft:oak_planks".into(), 8)); }
-        "minecraft:trapped_chest" => { c.push(("minecraft:oak_planks".into(), 8)); c.push(("minecraft:tripwire_hook".into(), 1)); }
-        "minecraft:ender_chest" => { c.push(("minecraft:obsidian".into(), 8)); c.push(("minecraft:ender_eye".into(), 1)); }
-        "minecraft:hopper" => { c.push(("minecraft:iron_ingot".into(), 5)); c.push(("minecraft:chest".into(), 1)); }
-        "minecraft:dropper" => { c.push(("minecraft:cobblestone".into(), 7)); c.push(("minecraft:redstone".into(), 1)); }
-        "minecraft:dispenser" => { c.push(("minecraft:cobblestone".into(), 7)); c.push(("minecraft:redstone".into(), 1)); c.push(("minecraft:bow".into(), 1)); }
-        "minecraft:furnace" => { c.push(("minecraft:cobblestone".into(), 8)); }
-        "minecraft:blast_furnace" => { c.push(("minecraft:smooth_stone".into(), 3)); c.push(("minecraft:furnace".into(), 1)); c.push(("minecraft:iron_ingot".into(), 5)); }
-        "minecraft:smoker" => { c.push(("minecraft:oak_log".into(), 4)); c.push(("minecraft:furnace".into(), 1)); }
-        "minecraft:brewing_stand" => { c.push(("minecraft:blaze_rod".into(), 1)); c.push(("minecraft:cobblestone".into(), 3)); }
-        // Movement / utility
-        "minecraft:slime_block" => { c.push(("minecraft:slime_ball".into(), 9)); }
-        "minecraft:honey_block" => { c.push(("minecraft:honey_bottle".into(), 4)); }
-        "minecraft:tnt" => { c.push(("minecraft:sand".into(), 4)); c.push(("minecraft:gunpowder".into(), 5)); }
-        // Rails
-        "minecraft:rail" => { c.push(("minecraft:iron_ingot".into(), 6)); c.push(("minecraft:stick".into(), 1)); }
-        "minecraft:powered_rail" => { c.push(("minecraft:gold_ingot".into(), 6)); c.push(("minecraft:stick".into(), 1)); c.push(("minecraft:redstone".into(), 1)); }
-        "minecraft:detector_rail" => { c.push(("minecraft:iron_ingot".into(), 6)); c.push(("minecraft:stone_pressure_plate".into(), 1)); c.push(("minecraft:redstone".into(), 1)); }
-        "minecraft:activator_rail" => { c.push(("minecraft:iron_ingot".into(), 6)); c.push(("minecraft:stick".into(), 2)); c.push(("minecraft:redstone_torch".into(), 1)); }
-        // Doors / trapdoors / gates
-        "minecraft:iron_door" => { c.push(("minecraft:iron_ingot".into(), 6)); }
-        "minecraft:iron_trapdoor" => { c.push(("minecraft:iron_ingot".into(), 4)); }
-        // Glass
-        "minecraft:glass" => { c.push(("minecraft:sand".into(), 1)); } // smelted
-        "minecraft:glowstone" => { c.push(("minecraft:glowstone_dust".into(), 4)); }
-        "minecraft:sea_lantern" => { c.push(("minecraft:prismarine_shard".into(), 4)); c.push(("minecraft:prismarine_crystals".into(), 5)); }
-        // VLSI blocks
-        "yog-vlsi:port_input" | "yog-vlsi:port_output" | "yog-vlsi:port_bidi" =>
-            { c.push(("minecraft:redstone".into(), 2)); c.push(("minecraft:stone".into(), 4)); }
-        "yog-vlsi:vlsi_workbench" => { c.push(("minecraft:iron_ingot".into(), 4)); c.push(("minecraft:smooth_stone".into(), 3)); c.push(("minecraft:redstone_block".into(), 1)); }
-        id if id.starts_with("yog-vlsi:alu_") =>
-            { c.push(("minecraft:gold_ingot".into(), 4)); c.push(("minecraft:copper_ingot".into(), 2)); c.push(("minecraft:repeater".into(), 1)); c.push(("minecraft:diamond".into(), 1)); }
-        "yog-vlsi:analog_cable" => { c.push(("minecraft:redstone".into(), 1)); }
-        "yog-vlsi:digital_cable" => { c.push(("minecraft:gold_nugget".into(), 4)); c.push(("minecraft:redstone".into(), 4)); c.push(("minecraft:iron_ingot".into(), 1)); }
-        "yog-vlsi:redstone_port" => { c.push(("minecraft:smooth_stone".into(), 8)); c.push(("minecraft:redstone".into(), 1)); }
-        // Default: 1 stone
-        _ => { c.push(("minecraft:stone".into(), 1)); }
-    }
-    c
 }
 
 // ── Storage helpers ─────────────────────────────────────────────────────────
