@@ -109,6 +109,12 @@ pub enum BlockType {
     /// set with [`RedstoneVM::set_nested`]); its six faces read and give
     /// power like a component's, a level each.
     Alu,
+    /// An analog cable: a run of them carries one level between the ALUs'
+    /// faces and the Redstone Ports on it (in `power`), none as redstone.
+    Cable,
+    /// A Redstone Port: `output`, its cable's level comes out as redstone
+    /// (weak, every side); else the redstone it receives goes into it.
+    RedstonePort { output: bool },
 }
 
 /// What a piston does to a block in its way.
@@ -298,6 +304,7 @@ impl Cell {
             | BlockType::TargetBlock { .. }
             | BlockType::Source { .. }
             | BlockType::Port(_)
+            | BlockType::RedstonePort { .. }
             | BlockType::Alu => true,
             _ => false,
         }
@@ -308,7 +315,10 @@ impl Cell {
     fn emits(&self, to: Facing) -> (u8, u8) {
         let p = self.power;
         match self.block {
-            BlockType::RedstoneBlock | BlockType::TargetBlock { .. } | BlockType::Source { .. } => (p, 0),
+            BlockType::RedstoneBlock
+            | BlockType::TargetBlock { .. }
+            | BlockType::Source { .. }
+            | BlockType::RedstonePort { output: true } => (p, 0),
             BlockType::Lever { attach, .. } | BlockType::Button { attach, .. } => (p, if to == attach { p } else { 0 }),
             BlockType::PressurePlate { .. } => (p, if to == Facing::Down { p } else { 0 }),
             BlockType::RedstoneTorch { attach, .. } => {
@@ -861,8 +871,47 @@ impl RedstoneVM {
         }
     }
 
+    /// 5a. Analog cables: each run carries the strongest level put into it
+    /// — by an input Redstone Port (the redstone around it) or an ALU's face
+    /// — to the ALUs' faces on it and out of its output ports. Worked out
+    /// from its sources each step: a source gone, the level goes.
+    fn cable_networks(&mut self) {
+        let mut seen: HashSet<u32> = HashSet::new();
+        let mut changes: Vec<(u32, u8)> = Vec::new();
+        for k in 0..self.active.len() {
+            let start = self.active[k];
+            if self.get(start).block != BlockType::Cable || !seen.insert(start) {
+                continue;
+            }
+            let (mut run, mut outs, mut level) = (vec![start], Vec::new(), 0u8);
+            let mut queue = VecDeque::from([start]);
+            while let Some(i) = queue.pop_front() {
+                for d in Facing::ALL {
+                    let Some(n) = self.at(i, d) else { continue };
+                    match self.get(n).block {
+                        BlockType::Cable => {
+                            if seen.insert(n) {
+                                run.push(n);
+                                queue.push_back(n);
+                            }
+                        }
+                        BlockType::Alu => level = level.max(self.get(n).emits(d.opposite()).0),
+                        BlockType::RedstonePort { output: false } => level = level.max(self.received(n, true)),
+                        BlockType::RedstonePort { output: true } => outs.push(n),
+                        _ => {}
+                    }
+                }
+            }
+            changes.extend(run.into_iter().chain(outs).map(|i| (i, level)));
+        }
+        for (i, level) in changes {
+            self.get_mut(i).power = level;
+        }
+    }
+
     /// 5. Every component decides its next output.
     fn settle_components(&mut self) {
+        self.cable_networks();
         let mut pistons = Vec::new();
         let changes: Vec<(u32, Cell)> = self
             .active
@@ -916,7 +965,14 @@ impl RedstoneVM {
             .nested
             .keys()
             .filter(|&&i| self.get(i).block == BlockType::Alu)
-            .map(|&i| (i, Facing::ALL.map(|f| self.input_from(i, f, true))))
+            .map(|&i| {
+                // From a cable, its level; else the redstone into that face.
+                let face = |f| match self.next(i, f).block {
+                    BlockType::Cable => self.next(i, f).power,
+                    _ => self.input_from(i, f, true),
+                };
+                (i, Facing::ALL.map(face))
+            })
             .collect();
         for (i, inputs) in alus {
             let Some(alu) = self.nested.get_mut(&i) else { continue };
@@ -1741,6 +1797,42 @@ mod tests {
         vm.new_tick();
         vm.settle(8);
         vm
+    }
+
+    #[test]
+    fn cables_and_redstone_ports_carry_an_alus_faces_inside_a_chip() {
+        // IN → wire → port (input) → cable → ALU (a NOT) → cable → port (output) → wire → OUT.
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(0, 0, 0, BlockType::Port(PortMode::Input));
+        vm.set_block(1, 0, 0, BlockType::RedstoneWire);
+        vm.set_block(2, 0, 0, BlockType::RedstonePort { output: false });
+        vm.set_block(3, 0, 0, BlockType::Cable);
+        vm.set_block(4, 0, 0, BlockType::Alu);
+        vm.set_block(5, 0, 0, BlockType::Cable);
+        vm.set_block(6, 0, 0, BlockType::Cable);
+        vm.set_block(7, 0, 0, BlockType::RedstonePort { output: true });
+        vm.set_block(8, 0, 0, BlockType::RedstoneWire);
+        vm.set_block(9, 0, 0, BlockType::Port(PortMode::Output));
+        let wires = vec![
+            (NestedPin::In(Facing::West.index() as u8), NestedPin::Chip(0, "IN".into())),
+            (NestedPin::Chip(0, "OUT".into()), NestedPin::Out(Facing::East.index() as u8)),
+        ];
+        vm.set_nested(4, 0, 0, NestedAlu { chips: vec![not_chip(8)], wires });
+        vm.new_tick();
+        vm.settle(128);
+        assert_eq!(vm.get_port_output(9, 0, 0), 15, "NOT of nothing, out through the cable");
+        vm.set_port_input(0, 0, 0, 15);
+        for _ in 0..3 {
+            vm.new_tick();
+            vm.settle(128);
+        }
+        assert_eq!(vm.get_port_output(9, 0, 0), 0, "in through the cable too");
+        vm.set_port_input(0, 0, 0, 0);
+        for _ in 0..3 {
+            vm.new_tick();
+            vm.settle(128);
+        }
+        assert_eq!(vm.get_port_output(9, 0, 0), 15, "and back: a cable holds no level of its own");
     }
 
     #[test]

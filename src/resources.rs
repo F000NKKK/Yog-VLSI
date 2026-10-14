@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn cost_in_resources() {
-        let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new() };
+        let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new(), redstone_port: None };
         // Half of crafting, rounded up: 8 dust → 4 redstone; 4 repeaters
         // (3 redstone, 3 stone, ¼ log each) → 6, 6, 1.
         let c = cost(&vec![block("minecraft:redstone_wire"); 8]);
@@ -362,7 +362,7 @@ mod tests {
     fn a_chip_in_an_alu_in_the_design_costs_another_half() {
         use crate::chip::{ChipMeta, CircuitData, SavedAlu};
         use crate::tier::Tier;
-        let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new() };
+        let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new(), redstone_port: None };
         // The inner chip: 64 dust — 32 redstone printed alone, 16 inside an ALU.
         let inner = CircuitData { size: 16, blocks: vec![block("minecraft:redstone_wire"); 64], ..Default::default() };
         let meta = ChipMeta { id: "inner".into(), tier: Tier::Wood, name: "x".into(), ports: Vec::new() };

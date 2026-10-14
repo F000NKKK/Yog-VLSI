@@ -26,7 +26,8 @@ use yog_api::{BlockPos, EventPhase, Registry};
 
 use crate::board;
 use crate::chip::{Blueprint, ChipMeta, CircuitBlock, CircuitData, Port, SavedAlu, container_slots};
-use crate::content::Items;
+use crate::cables::{self, RedstonePort};
+use crate::content::{Blocks, Items};
 use crate::port;
 use crate::tier::Tier;
 
@@ -157,8 +158,13 @@ fn build_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i32
         paint_face(srv, face, lo);
     }
     // What a previous design left inside.
-    for (pos, _) in srv.scan_region(DIMENSION_ID, lo, hi) {
+    for (pos, state) in srv.scan_region(DIMENSION_ID, lo, hi) {
         srv.set_block_state(DIMENSION_ID, pos, "minecraft:air");
+        let id = state.split('[').next().unwrap_or(&state);
+        cables::refresh(DIMENSION_ID, pos, id);
+        if id == Blocks::REDSTONE_PORT {
+            cables::forget_port(DIMENSION_ID, pos);
+        }
     }
 }
 
@@ -188,6 +194,15 @@ pub fn enter(
         for (slot, item, count) in &block.items {
             srv.set_inventory_slot(DIMENSION_ID, pos, *slot as u32, item, *count as u32, "");
         }
+        // A Redstone Port as it was set (an old design's: an unnamed input).
+        if block.id() == Blocks::REDSTONE_PORT {
+            let port = block.redstone_port.clone().unwrap_or(RedstonePort { output: false, name: String::new() });
+            cables::set_redstone_port(srv, DIMENSION_ID, pos, port);
+        }
+    }
+    // Cables and ports placed, Yog Pipes joins them up.
+    for block in &blueprint.circuit.blocks {
+        cables::refresh(DIMENSION_ID, at(block.x, block.y, block.z), block.id());
     }
     for p in &blueprint.circuit.ports {
         srv.set_block_state(DIMENSION_ID, at(p.x, p.y, p.z), port::block_for_dir(p.dir));
@@ -278,7 +293,8 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
                 Some((slot, item, count.min(255) as u8))
             })
             .collect();
-        blocks.push(CircuitBlock { x, y, z, state, items });
+        let redstone_port = (id == Blocks::REDSTONE_PORT).then(|| cables::redstone_port(DIMENSION_ID, p));
+        blocks.push(CircuitBlock { x, y, z, state, items, redstone_port });
     }
     Blueprint {
         name: session.name.clone(),

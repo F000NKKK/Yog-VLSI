@@ -65,6 +65,22 @@ pub fn redstone_port(dimension: &str, pos: BlockPos) -> RedstonePort {
         .unwrap_or(RedstonePort { output: false, name: String::new() })
 }
 
+/// A cable or Redstone Port the mod set or cleared itself (the editor's
+/// field), not a player: Yog Pipes looks at it again, and a port gone is
+/// forgotten.
+pub fn refresh(dim: &str, pos: BlockPos, block: &str) {
+    if is_cable(block) || block == Blocks::REDSTONE_PORT {
+        if let Err(e) = yog_pipes::refresh(pipe_pos(dim, pos)) {
+            warn!("[yog-vlsi] Yog Pipes: {e}");
+        }
+    }
+}
+
+/// Forgets the Redstone Port that stood at `pos`.
+pub fn forget_port(dim: &str, pos: BlockPos) {
+    PORTS.lock().unwrap().remove(&(dim.to_string(), pos.x, pos.y, pos.z));
+}
+
 /// Sets a Redstone Port's mode and name.
 pub fn set_redstone_port(srv: &dyn yog_api::Server, dimension: &str, pos: BlockPos, port: RedstonePort) {
     if !port.output {

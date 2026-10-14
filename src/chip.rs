@@ -10,6 +10,7 @@ use crate::tier::Tier;
 use crate::port;
 use crate::vm::{BlockType, ComparatorMode, Facing, NestedAlu, NestedChip, NestedPin, NestedPort, PortMode, RedstoneVM};
 use crate::MOD_ID;
+use crate::content::Blocks;
 
 /// NBT tag of a fabricated chip's [`ChipMeta`].
 const CHIP_TAG: &str = "YogVlsiChip";
@@ -113,6 +114,9 @@ pub struct CircuitBlock {
     /// A container's items: (slot, item id, count).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<(u8, String, u8)>,
+    /// A Redstone Port's mode and name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redstone_port: Option<crate::cables::RedstonePort>,
 }
 
 /// How many slots a container block has (0: not a container).
@@ -175,6 +179,10 @@ impl CircuitBlock {
         let id = self.id();
         let path = id.strip_prefix("minecraft:").unwrap_or(id);
         match path {
+            _ if id == Blocks::ANALOG_CABLE => BlockType::Cable,
+            // Buses don't run inside a chip: a digital cable there is just a block.
+            _ if id == Blocks::DIGITAL_CABLE => BlockType::Transparent,
+            _ if id == Blocks::REDSTONE_PORT => BlockType::RedstonePort { output: self.redstone_port.as_ref().is_some_and(|p| p.output) },
             "air" | "cave_air" | "void_air" => BlockType::Air,
             "redstone_wire" => BlockType::RedstoneWire,
             "redstone_torch" => BlockType::RedstoneTorch { lit: !self.is("lit", "false"), attach: Facing::Down },
@@ -389,7 +397,7 @@ mod tests {
     fn blueprint_nbt_round_trip() {
         let c = CircuitData {
             size: 16,
-            blocks: vec![CircuitBlock { x: 0, y: 0, z: 0, state: "minecraft:repeater[delay=2]".into(), items: Vec::new() }],
+            blocks: vec![CircuitBlock { x: 0, y: 0, z: 0, state: "minecraft:repeater[delay=2]".into(), items: Vec::new(), redstone_port: None }],
             ports: meta().ports,
             alus: Vec::new(),
         };
@@ -399,7 +407,7 @@ mod tests {
 
     #[test]
     fn block_states_parse() {
-        let b = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new() };
+        let b = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new(), redstone_port: None };
         assert_eq!(b("minecraft:repeater[delay=3,facing=east,locked=false]").block_type(),
             BlockType::Repeater { delay_ticks: 3, facing: Facing::East });
         assert_eq!(b("minecraft:lever[face=wall,facing=east,powered=true]").block_type(),

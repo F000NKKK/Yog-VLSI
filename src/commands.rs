@@ -110,7 +110,7 @@ pub fn register(registry: &mut Registry) {
 
 fn create_test_chip(tier: Tier, srv: &dyn yog_api::Server) -> ChipMeta {
     let size = tier.world_size();
-    let block = |x, state: &str| CircuitBlock { x, y: 0, z: 0, state: state.into(), items: Vec::new() };
+    let block = |x, state: &str| CircuitBlock { x, y: 0, z: 0, state: state.into(), items: Vec::new(), redstone_port: None };
     let mut blocks = vec![block(1, "minecraft:redstone_block")];
     for x in 2..size.saturating_sub(1) {
         blocks.push(block(x, "minecraft:redstone_wire"));
