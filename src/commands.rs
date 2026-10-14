@@ -54,6 +54,9 @@ pub static EXT_VALUES: LazyLock<Mutex<HashMap<(i32, i32, i32), HashMap<String, u
 /// Display name per installed chip (for the ALU node editor): chip_id → name.
 pub static CHIP_NAMES: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Each ALU's tier, by position — recorded when it's opened (its chip limit).
+pub static ALU_TIERS: LazyLock<Mutex<HashMap<(i32, i32, i32), Tier>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
 pub fn ext_chip_id(alu_pos: (i32, i32, i32)) -> String {
     format!("__ext_{}_{}_{}", alu_pos.0, alu_pos.1, alu_pos.2)
 }
@@ -84,6 +87,12 @@ pub fn install_chip_from_slot(srv: &dyn yog_api::Server, player_name: &str, slot
     let Some(meta) = ChipMeta::from_nbt(&nbt) else {
         return "§cThat chip hasn't been programmed with a design yet.".into();
     };
+    if let Some(tier) = ALU_TIERS.lock().unwrap().get(&alu_pos).copied() {
+        let installed = ALU_STATE.lock().unwrap().get(&alu_pos).map_or(0, Vec::len);
+        if installed >= tier.max_chips() {
+            return format!("§c{}", crate::res::Strings::screen_alu_full(tier.max_chips()));
+        }
+    }
     install_chip(srv, &meta, alu_pos);
     Player::new(srv, player_name).set_slot(slot, "minecraft:air", 0);
     format!("§aInstalled '{}' into the ALU.", meta.name)

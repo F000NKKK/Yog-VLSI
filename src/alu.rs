@@ -82,8 +82,9 @@ pub struct LinkRow {
 
 #[derive(Default)]
 pub struct AluVm {
-    /// The ALU being edited.
+    /// The ALU being edited, and its tier.
     pos: (i32, i32, i32),
+    tier: Option<Tier>,
     /// The chip selector is showing (the server listed the chips).
     choosing: bool,
     choices: Vec<ChipChoice>,
@@ -100,8 +101,9 @@ impl ViewModel for AluVm {
 
 impl AluVm {
     /// The editor opens on the ALU at `pos`.
-    pub fn open_at(&mut self, pos: (i32, i32, i32)) {
+    pub fn open_at(&mut self, pos: (i32, i32, i32), tier: Tier) {
         self.pos = pos;
+        self.tier = Some(tier);
         self.choosing = false;
         self.from = None;
     }
@@ -125,7 +127,14 @@ impl AluVm {
     }
 
     pub fn title(&self) -> String {
-        Strings::screen_alu_title(self.chips().len(), LINKS.lock().unwrap().len())
+        let tier = self.tier.unwrap_or(Tier::ALL[0]);
+        Strings::screen_alu_title(
+            tier.name(),
+            self.chips().len(),
+            tier.max_chips(),
+            LINKS.lock().unwrap().len(),
+            tier.digital_channels(),
+        )
     }
     pub fn editing(&self) -> bool {
         !self.choosing
@@ -267,7 +276,9 @@ pub fn setup(registry: &mut Registry) {
             return true;
         }
         let pos = (e.pos.x, e.pos.y, e.pos.z);
-        screen.update(move |vm| vm.open_at(pos));
+        let Some(tier) = Tier::from_alu_block(&e.block_id) else { return true };
+        crate::commands::ALU_TIERS.lock().unwrap().insert(pos, tier);
+        screen.update(move |vm| vm.open_at(pos, tier));
         network::open_ui_for(srv, &e.player_name, ID);
         false
     });
@@ -430,7 +441,7 @@ mod tests {
         CHIP_PORTS.lock().unwrap().insert("chip_b".into(), vec![port("clk", PortMode::Input), port("rst", PortMode::Input)]);
 
         let mut vm = AluVm::default();
-        vm.open_at(pos);
+        vm.open_at(pos, Tier::Wood);
         // Header, pin, header, pin, pin.
         assert_eq!(vm.pins().len(), 5);
         vm.select_pin("chip_a".into(), "clk".into());

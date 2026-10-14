@@ -57,7 +57,7 @@
   "screen.workbench.resources": "Ресурсы",
   "screen.workbench.edit": "Редактор",
   "screen.workbench.fabricate": "Изготовить",
-  "screen.alu.title": "АЛУ — чипов: {chips}, связей: {links}",
+  "screen.alu.title": "АЛУ ({tier}) — чипов: {chips}/{max}, связей: {links}, каналов: {channels}",
   "screen.alu.external_ports": "Внешние порты",
   "screen.alu.chips": "Чипы",
   "screen.alu.links": "Связи",
@@ -81,5 +81,6 @@
   "screen.workbench.cost": "Стоимость",
   "screen.workbench.cost_row": "{resource}: {need} ({have})",
   "screen.workbench.free": "Бесплатно — схема пустая",
-  "screen.workbench.resource_tooltip": "{resource}: {amount}\nПринимает: {inputs}"
+  "screen.workbench.resource_tooltip": "{resource}: {amount}\nПринимает: {inputs}",
+  "screen.alu.full": "Этот АЛУ вмещает не больше {max} чипов."
 }

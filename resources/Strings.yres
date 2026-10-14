@@ -71,7 +71,7 @@
   "screen.workbench.edit": "Design",
   "screen.workbench.fabricate": "Fabricate",
   "screen.alu.title": {
-    "value": "ALU — {chips} chips, {links} links",
+    "value": "ALU ({tier}) — chips {chips}/{max}, links {links}, {channels} channels",
     "comment": "ALU screen header"
   },
   "screen.alu.external_ports": "External ports",
@@ -121,5 +121,9 @@
   "screen.workbench.resource_tooltip": {
     "value": "{resource}: {amount}\nTakes: {inputs}",
     "comment": "A resource vial's tooltip"
+  },
+  "screen.alu.full": {
+    "value": "This ALU holds {max} chips at most.",
+    "comment": "Installing a chip into a full ALU"
   }
 }
