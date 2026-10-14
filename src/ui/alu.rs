@@ -9,7 +9,9 @@
 //!   (a dot on a left edge) to wire them — or the other way round;
 //! - drag a wire off the input pin it ends at to move it to another pin,
 //!   or into empty space to remove it;
-//! - drag a chip by its title to move it.
+//! - drag a chip by its title to move it;
+//! - drag empty space to move the view, turn the wheel to zoom it (the
+//!   ALU's sides stay at the edges).
 
 yog_api::ui_include!("ui/alu");
 
@@ -84,12 +86,48 @@ const WIRE_OFF: u32 = 0xFF5A1818;
 const WIRE_ON: u32 = 0xFFFF3A3A;
 const WIRE_NEW: u32 = 0xFFFFE070;
 
+/// The view of the chips: their place `(x, y)` is drawn at
+/// `pan + (x, y) · zoom` (local to the graph).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Camera {
+    zoom: f32,
+    pan: (f32, f32),
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Camera { zoom: 1.0, pan: (0.0, 0.0) }
+    }
+}
+
+impl Camera {
+    const MIN: f32 = 0.4;
+    const MAX: f32 = 3.0;
+
+    fn to_local(self, (x, y): (f32, f32)) -> (f32, f32) {
+        (self.pan.0 + x * self.zoom, self.pan.1 + y * self.zoom)
+    }
+
+    fn to_world(self, (x, y): (f32, f32)) -> (f32, f32) {
+        ((x - self.pan.0) / self.zoom, (y - self.pan.1) / self.zoom)
+    }
+
+    /// Zoomed by `factor` keeping the point under `at` (local) where it is.
+    fn zoomed(self, factor: f32, at: (f32, f32)) -> Camera {
+        let zoom = (self.zoom * factor).clamp(Self::MIN, Self::MAX);
+        let world = self.to_world(at);
+        Camera { zoom, pan: (at.0 - world.0 * zoom, at.1 - world.1 * zoom) }
+    }
+}
+
 /// A pin where it's drawn (local to the graph).
 #[derive(Clone)]
 struct PinAt {
     pin: Pin,
     x: f32,
     y: f32,
+    /// How far up and down from `y` it takes the pointer (half a row, zoomed).
+    reach_y: f32,
     /// A source (a dot on a right edge); else a sink.
     source: bool,
     usable: bool,
@@ -101,6 +139,9 @@ struct NodeAt {
     y: f32,
     w: f32,
     h: f32,
+    /// Its title bar's height and its text's size: a chip's zoom, a side's 1.
+    head: f32,
+    scale: f32,
     title: String,
     awake: bool,
     /// (text, x, y, color) — pin labels.
@@ -122,14 +163,14 @@ impl Layout {
     fn hit(&self, x: f32, y: f32) -> Option<&PinAt> {
         self.pins
             .iter()
-            .filter(|p| (p.y - y).abs() <= ROW / 2.0 && (p.x - x).abs() <= REACH * 2.0)
+            .filter(|p| (p.y - y).abs() <= p.reach_y && (p.x - x).abs() <= REACH * 2.0)
             .min_by(|a, b| (a.x - x).abs().total_cmp(&(b.x - x).abs()))
     }
 
     /// The chip whose title bar is at `(x, y)`.
     fn header(&self, x: f32, y: f32) -> Option<&NodeAt> {
         self.nodes.iter().rev().find(|n| {
-            matches!(n.node, Node::Chip(_)) && x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + HEAD
+            matches!(n.node, Node::Chip(_)) && x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.head
         })
     }
 }
@@ -143,6 +184,8 @@ enum Drag {
     FromSink { to: Pin },
     /// A chip being moved; the pointer's offset in its title bar.
     Node { slot: u8, dx: f32, dy: f32 },
+    /// The view being moved: where the pointer and the view were at the start.
+    Pan { from: (f32, f32), pan: (f32, f32) },
 }
 
 struct Graph {
@@ -152,10 +195,11 @@ struct Graph {
     pointer: (f32, f32),
     /// Chip positions moved here but not yet echoed back by the server.
     moved: HashMap<u8, (f32, f32)>,
+    camera: Camera,
 }
 
 static GRAPH: LazyLock<Mutex<Graph>> = LazyLock::new(|| {
-    Mutex::new(Graph { view: None, layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new() })
+    Mutex::new(Graph { view: None, layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), camera: Camera::default() })
 });
 
 fn mode_color(mode: PortMode) -> u32 {
@@ -179,8 +223,10 @@ fn level_color(level: u8) -> u32 {
     0xFF00_0000 | mix(16) | mix(8) | mix(0)
 }
 
-/// Lays the graph out in a `w`×`h` box; `width_of` measures text.
-fn layout(view: &BoardView, moved: &HashMap<u8, (f32, f32)>, w: f32, h: f32, width_of: &dyn Fn(&str) -> f32) -> Layout {
+/// Lays the graph out in a `w`×`h` box — the ALU's sides at its edges, the
+/// chips where `cam` shows them; `width_of` measures text.
+fn layout(view: &BoardView, moved: &HashMap<u8, (f32, f32)>, w: f32, h: f32, cam: Camera, width_of: &dyn Fn(&str) -> f32) -> Layout {
+    let _ = h;
     let mut out = Layout::default();
     let fit = |s: &str, room: f32| -> String {
         if width_of(s) <= room {
@@ -211,12 +257,13 @@ fn layout(view: &BoardView, moved: &HashMap<u8, (f32, f32)>, w: f32, h: f32, wid
                 pin: Pin::new(node, &side.side),
                 x: if source { x + SIDE_W } else { x },
                 y: y + ROW / 2.0,
+                reach_y: ROW / 2.0,
                 source,
                 usable,
             });
         }
         let title = if node == Node::In { Strings::screen_alu_inputs() } else { Strings::screen_alu_outputs() };
-        out.nodes.push(NodeAt { node, x, y: 2.0, w: SIDE_W, h: HEAD + 6.0 * ROW + 2.0, title, awake: true, labels });
+        out.nodes.push(NodeAt { node, x, y: 2.0, w: SIDE_W, h: HEAD + 6.0 * ROW + 2.0, head: HEAD, scale: 1.0, title, awake: true, labels });
     }
 
     // The chips, in columns between them unless moved.
@@ -237,25 +284,29 @@ fn layout(view: &BoardView, moved: &HashMap<u8, (f32, f32)>, w: f32, h: f32, wid
                 p
             }
         };
-        let x = x.clamp(0.0, (w - CHIP_W).max(0.0));
-        let y = y.clamp(0.0, (h - HEAD).max(0.0));
+        // Laid out in the world, drawn where the camera shows it.
+        let z = cam.zoom;
+        let at = |wx: f32, wy: f32| cam.to_local((wx, wy));
         let mut labels = Vec::new();
-        for (row, (name, mode)) in ins.iter().enumerate() {
-            let y = y + HEAD + row as f32 * ROW;
+        for (row, (name, _)) in ins.iter().enumerate() {
+            let ry = y + HEAD + row as f32 * ROW;
             let text = fit(name, CHIP_W / 2.0 - 5.0);
-            labels.push((text, x + 4.0, y + 1.0, if chip.active { TEXT } else { TEXT_DIM }));
-            let _ = mode;
-            out.pins.push(PinAt { pin: Pin::new(Node::Chip(chip.slot), name.as_str()), x, y: y + ROW / 2.0, source: false, usable: chip.active });
+            let (tx, ty) = at(x + 4.0, ry + 1.0);
+            labels.push((text, tx, ty, if chip.active { TEXT } else { TEXT_DIM }));
+            let (px, py) = at(x, ry + ROW / 2.0);
+            out.pins.push(PinAt { pin: Pin::new(Node::Chip(chip.slot), name.as_str()), x: px, y: py, reach_y: ROW * z / 2.0, source: false, usable: chip.active });
         }
         for (row, (name, _)) in outs.iter().enumerate() {
-            let y = y + HEAD + row as f32 * ROW;
+            let ry = y + HEAD + row as f32 * ROW;
             let text = fit(name, CHIP_W / 2.0 - 5.0);
-            let tx = x + CHIP_W - 4.0 - width_of(&text);
-            labels.push((text, tx, y + 1.0, if chip.active { TEXT } else { TEXT_DIM }));
+            let (tx, ty) = at(x + CHIP_W - 4.0 - width_of(&text), ry + 1.0);
+            labels.push((text, tx, ty, if chip.active { TEXT } else { TEXT_DIM }));
+            let (px, py) = at(x + CHIP_W, ry + ROW / 2.0);
             out.pins.push(PinAt {
                 pin: Pin::new(Node::Chip(chip.slot), name.as_str()),
-                x: x + CHIP_W,
-                y: y + ROW / 2.0,
+                x: px,
+                y: py,
+                reach_y: ROW * z / 2.0,
                 source: true,
                 usable: chip.active,
             });
@@ -265,12 +316,15 @@ fn layout(view: &BoardView, moved: &HashMap<u8, (f32, f32)>, w: f32, h: f32, wid
         } else {
             format!("{} {} ({})", chip.slot + 1, chip.name, Strings::screen_alu_sleeping())
         };
+        let (nx, ny) = at(x, y);
         out.nodes.push(NodeAt {
             node: Node::Chip(chip.slot),
-            x,
-            y,
-            w: CHIP_W,
-            h: nh,
+            x: nx,
+            y: ny,
+            w: CHIP_W * z,
+            h: nh * z,
+            head: HEAD * z,
+            scale: z,
             title: fit(&title, CHIP_W - 6.0),
             awake: chip.active,
             labels,
@@ -327,7 +381,7 @@ impl Surface for GraphSurface {
         d2.rect(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, BG);
         let Some(view) = g.view.clone() else { return };
         let width_of = |t: &str| d2.text_width(t, "");
-        g.layout = layout(&view, &g.moved, rect.w, rect.h, &width_of);
+        g.layout = layout(&view, &g.moved, rect.w, rect.h, g.camera, &width_of);
         let (ox, oy) = (rect.x, rect.y);
         let at = |x: f32, y: f32| (ox + x, oy + y);
         let levels: HashMap<&Pin, u8> = view.levels.iter().map(|(p, l)| (p, *l)).collect();
@@ -335,16 +389,33 @@ impl Surface for GraphSurface {
             Drag::FromSource { lifted, .. } => lifted.clone(),
             _ => None,
         };
+        // Nothing drawn past the graph's box, however the view is moved.
+        gfx.set_scissor(rect.x.floor() as i32, rect.y.floor() as i32, rect.w.ceil() as i32, rect.h.ceil() as i32);
 
-        // Nodes.
-        for n in &g.layout.nodes {
+        let node = |n: &NodeAt| {
             let (x, y) = at(n.x, n.y);
             d2.rect(x, y, x + n.w, y + n.h, NODE);
-            d2.rect(x, y, x + n.w, y + HEAD - 1.0, if n.awake { HEADER } else { HEADER_SLEEPING });
-            d2.text(&n.title, x + 3.0, y + 2.0, if n.awake { TEXT } else { TEXT_DIM }, false);
+            d2.rect(x, y, x + n.w, y + n.head - n.scale, if n.awake { HEADER } else { HEADER_SLEEPING });
+            let color = if n.awake { TEXT } else { TEXT_DIM };
+            d2.text_scaled(&n.title, "", x + 3.0 * n.scale, y + 2.0 * n.scale, n.scale, color, false);
             for (text, tx, ty, color) in &n.labels {
-                d2.text(text, ox + tx, oy + ty, *color, false);
+                d2.text_scaled(text, "", ox + tx, oy + ty, n.scale, *color, false);
             }
+        };
+        let pin = |p: &PinAt| {
+            let (x, y) = at(p.x, p.y);
+            d2.rect(x - 2.0, y - 2.0, x + 2.0, y + 2.0, pin_color(&view, p));
+            if p.source
+                && let Some(level) = levels.get(&p.pin).filter(|l| **l > 0)
+            {
+                d2.text(&level.to_string(), x + 3.0, y - 8.0, 0xFFFFD0D0, false);
+            }
+        };
+        let is_side = |n: &Node| matches!(n, Node::In | Node::Out);
+
+        // The chips, under everything.
+        for n in g.layout.nodes.iter().filter(|n| !is_side(&n.node)) {
+            node(n);
         }
 
         // Wires.
@@ -356,16 +427,16 @@ impl Surface for GraphSurface {
             let level = levels.get(from).copied().unwrap_or(0);
             trace(&d2, at(a.x, a.y), at(b.x, b.y), level_color(level));
         }
+        for p in g.layout.pins.iter().filter(|p| !is_side(&p.pin.node)) {
+            pin(p);
+        }
 
-        // Pins.
-        for p in &g.layout.pins {
-            let (x, y) = at(p.x, p.y);
-            d2.rect(x - 2.0, y - 2.0, x + 2.0, y + 2.0, pin_color(&view, p));
-            if p.source
-                && let Some(level) = levels.get(&p.pin).filter(|l| **l > 0)
-            {
-                d2.text(&level.to_string(), x + 3.0, y - 8.0, 0xFFFFD0D0, false);
-            }
+        // The ALU's sides, on top: they stay at the edges.
+        for n in g.layout.nodes.iter().filter(|n| is_side(&n.node)) {
+            node(n);
+        }
+        for p in g.layout.pins.iter().filter(|p| is_side(&p.pin.node)) {
+            pin(p);
         }
 
         // The wire being drawn.
@@ -388,6 +459,15 @@ impl Surface for GraphSurface {
             let w = width_of(&hint);
             d2.text(&hint, ox + (rect.w - w) / 2.0, oy + rect.h / 2.0 - 4.0, TEXT_DIM, false);
         }
+        gfx.clear_scissor();
+    }
+
+    /// The wheel zooms the view about the pointer.
+    fn scroll(&self, dy: f32, _size: (f32, f32)) -> bool {
+        let mut g = GRAPH.lock().unwrap();
+        let factor = if dy > 0.0 { 1.15 } else { 1.0 / 1.15 };
+        g.camera = g.camera.zoomed(factor, g.pointer);
+        true
     }
 
     fn pointer(&self, ev: Pointer, _size: (f32, f32)) -> bool {
@@ -409,15 +489,21 @@ impl Surface for GraphSurface {
                             Node::Chip(slot) => Drag::Node { slot, dx: x - n.x, dy: y - n.y },
                             _ => Drag::None,
                         },
-                        None => return false,
+                        // Empty space: the view moves.
+                        None => Drag::Pan { from: (x, y), pan: g.camera.pan },
                     },
                 };
                 true
             }
             Pointer::Drag { x, y } | Pointer::Move { x, y } => {
                 g.pointer = (x, y);
-                if let Drag::Node { slot, dx, dy } = g.drag {
-                    g.moved.insert(slot, (x - dx, y - dy));
+                match g.drag {
+                    Drag::Node { slot, dx, dy } => {
+                        let world = g.camera.to_world((x - dx, y - dy));
+                        g.moved.insert(slot, world);
+                    }
+                    Drag::Pan { from, pan } => g.camera.pan = (pan.0 + x - from.0, pan.1 + y - from.1),
+                    _ => {}
                 }
                 matches!(ev, Pointer::Drag { .. })
             }
@@ -437,7 +523,7 @@ impl Surface for GraphSurface {
                     Drag::Node { slot, .. } => {
                         g.moved.get(&slot).map(|&(x, y)| Request::Move { alu, slot, x: x.round(), y: y.round() })
                     }
-                    Drag::None => None,
+                    Drag::Pan { .. } | Drag::None => None,
                 };
                 if let Some(request) = request {
                     // Show it now; the server's view follows.
@@ -515,7 +601,7 @@ mod tests {
 
     #[test]
     fn pins_sit_on_their_edges() {
-        let l = layout(&view(), &HashMap::new(), 360.0, 140.0, &|t| t.len() as f32 * 6.0);
+        let l = layout(&view(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
         let chip = l.nodes.iter().find(|n| n.node == Node::Chip(0)).unwrap();
         let a = l.pin(&Pin::new(Node::Chip(0), "A"), false).unwrap();
         let s = l.pin(&Pin::new(Node::Chip(0), "S"), true).unwrap();
@@ -541,8 +627,22 @@ mod tests {
     }
 
     #[test]
+    fn the_wheel_zooms_about_the_pointer_and_chips_follow_the_view() {
+        let cam = Camera::default().zoomed(2.0, (100.0, 50.0));
+        assert_eq!(cam.to_local(cam.to_world((100.0, 50.0))), (100.0, 50.0), "the point under the pointer stays");
+        assert_eq!(cam.zoom, 2.0);
+        assert_eq!(Camera::default().zoomed(100.0, (0.0, 0.0)).zoom, Camera::MAX);
+        let moved = Camera { zoom: 1.0, pan: (-500.0, 0.0) };
+        let l = layout(&view(), &HashMap::new(), 360.0, 140.0, moved, &|t| t.len() as f32 * 6.0);
+        let chip = l.nodes.iter().find(|n| n.node == Node::Chip(0)).unwrap();
+        assert!(chip.x < 0.0, "panned out of the box, not held in it");
+        let side = l.nodes.iter().find(|n| n.node == Node::In).unwrap();
+        assert_eq!(side.x, 2.0, "the sides stay at the edges");
+    }
+
+    #[test]
     fn hits_the_nearest_pin() {
-        let l = layout(&view(), &HashMap::new(), 360.0, 140.0, &|t| t.len() as f32 * 6.0);
+        let l = layout(&view(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
         let s = l.pin(&Pin::new(Node::Chip(0), "S"), true).unwrap().clone();
         assert_eq!(l.hit(s.x + 3.0, s.y - 2.0).map(|p| &p.pin), Some(&s.pin));
         assert!(l.hit(180.0, 139.0).is_none());

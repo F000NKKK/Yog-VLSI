@@ -127,7 +127,7 @@
   },
   "screen.alu.empty": "Put programmed chips in the slots below",
   "screen.alu.help": {
-    "value": "Inputs (left): what each side's cable brings in. Outputs (right): what goes out into it.\nDrag from an output pin (right edge) to an input pin (left edge) to wire them — chip to chip stays inside the ALU.\nDrag a wire off its input pin to move it, or into empty space to remove it. Drag a chip by its title.\nName a Redstone Port (right-click it) and its name shows on the side its cable reaches.",
+    "value": "Inputs (left): what each side's cable brings in. Outputs (right): what goes out into it.\nDrag from an output pin (right edge) to an input pin (left edge) to wire them — chip to chip stays inside the ALU.\nDrag a wire off its input pin to move it, or into empty space to remove it. Drag a chip by its title.\nDrag empty space to move the view; the wheel zooms it.\nName a Redstone Port (right-click it) and its name shows on the side its cable reaches.",
     "comment": "Tooltip of the (i) in the ALU screen"
   },
   "screen.port.redstone_title": "Redstone Port"
