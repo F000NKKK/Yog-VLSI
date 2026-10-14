@@ -190,22 +190,44 @@ fn register_networks() {
     }
 }
 
-/// Every Redstone Port, each tick: redstone in, or cable level out.
-pub fn tick(srv: &dyn yog_api::Server) {
-    let ports: Vec<(Key, bool)> = PORTS.lock().unwrap().iter().map(|(k, p)| (k.clone(), p.output)).collect();
-    for ((dim, x, y, z), output) in ports {
+/// The Redstone Ports that still stand, with whether they're outputs.
+fn ports(srv: &dyn yog_api::Server) -> Vec<((String, i32, i32, i32), bool)> {
+    let all: Vec<(Key, bool)> = PORTS.lock().unwrap().iter().map(|(k, p)| (k.clone(), p.output)).collect();
+    all.into_iter()
+        .filter(|((dim, x, y, z), _)| {
+            let there = srv
+                .get_block_state(dim, BlockPos { x: *x, y: *y, z: *z })
+                .is_some_and(|s| s.starts_with(Blocks::REDSTONE_PORT));
+            if !there {
+                PORTS.lock().unwrap().remove(&(dim.clone(), *x, *y, *z));
+            }
+            there
+        })
+        .collect()
+}
+
+/// Redstone into the cables, before the ALUs step: what reaches a port this
+/// tick is in its network for them this tick.
+pub fn tick_inputs(srv: &dyn yog_api::Server) {
+    for ((dim, x, y, z), output) in ports(srv) {
         let pos = BlockPos { x, y, z };
-        if srv.get_block_state(&dim, pos).is_none_or(|s| !s.starts_with(Blocks::REDSTONE_PORT)) {
-            PORTS.lock().unwrap().remove(&(dim, x, y, z));
-            continue;
-        }
         if output {
             let _ = yog_pipes::emit(ANALOG.to_string(), pipe_pos(&dim, pos), SIDE_CHANNEL, 0);
-            let level = yog_pipes::level(ANALOG.to_string(), pipe_pos(&dim, pos), SIDE_CHANNEL).unwrap_or(0);
-            srv.set_redstone_output(&dim, pos, level);
         } else {
             let power = srv.redstone_power(&dim, pos).unwrap_or(0);
             let _ = yog_pipes::emit(ANALOG.to_string(), pipe_pos(&dim, pos), SIDE_CHANNEL, power);
+        }
+    }
+}
+
+/// Cable levels out as redstone, after the ALUs stepped: what they put out
+/// this tick leaves this tick.
+pub fn tick_outputs(srv: &dyn yog_api::Server) {
+    for ((dim, x, y, z), output) in ports(srv) {
+        if output {
+            let pos = BlockPos { x, y, z };
+            let level = yog_pipes::level(ANALOG.to_string(), pipe_pos(&dim, pos), SIDE_CHANNEL).unwrap_or(0);
+            srv.set_redstone_output(&dim, pos, level);
         }
     }
 }

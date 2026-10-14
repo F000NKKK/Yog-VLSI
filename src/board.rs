@@ -203,19 +203,10 @@ impl Board {
         }
     }
 
-    /// One server tick: chips step, then every wire carries its source's
-    /// level to its sink (a chip takes it in on its next step).
-    fn tick(&mut self, srv: &dyn yog_api::Server, alu: &AluId) {
+    /// What every source drives now: the inputs coming into the ALU's sides
+    /// and the chips' output ports.
+    fn sources(&self, srv: &dyn yog_api::Server, alu: &AluId) -> HashMap<Pin, u8> {
         let max = self.saved.tier.max_chips();
-        for chip in self.chips.iter_mut().take(max).flatten() {
-            chip.owed += chip.meta.tier.tick_rate() as f32 / SERVER_TICKS_PER_SECOND as f32;
-            while chip.owed >= 1.0 {
-                chip.vm.step();
-                chip.owed -= 1.0;
-            }
-        }
-
-        // Sources.
         let mut levels = HashMap::new();
         for side in SIDES {
             if !self.side_is_output(side) {
@@ -229,29 +220,51 @@ impl Board {
                 levels.insert(Pin::new(Node::Chip(slot as u8), &port.label), chip.vm.get_port_output(port.x, port.y, port.z));
             }
         }
+        levels
+    }
 
-        // Sinks.
-        let incoming = |to: &Pin| {
-            self.saved.wires.iter().find(|w| &w.to == to).and_then(|w| levels.get(&w.from)).copied().unwrap_or(0)
+    /// One server tick: every wire carries its source's level into the
+    /// chips, the chips step with it, and what they put out leaves by the
+    /// output sides the same tick — a signal crosses an ALU in the chips'
+    /// own steps, no tick lost waiting on either side of them.
+    fn tick(&mut self, srv: &dyn yog_api::Server, alu: &AluId) {
+        let max = self.saved.tier.max_chips();
+        let incoming = |wires: &[Wire], levels: &HashMap<Pin, u8>, to: &Pin| {
+            wires.iter().find(|w| &w.to == to).and_then(|w| levels.get(&w.from)).copied().unwrap_or(0)
         };
-        let mut driven = Vec::new();
-        for side in SIDES {
-            if self.side_is_output(side) {
-                let level = incoming(&Pin::new(Node::Out, side));
-                cables::side_output(srv, &alu.dimension, alu.xyz(), side, level);
-                driven.push((Pin::new(Node::Out, side), level));
-            }
-        }
+
+        // In: the sides' inputs and the other chips' outputs, into each chip.
+        let before = self.sources(srv, alu);
         let mut inputs = Vec::new();
         for (slot, chip) in self.chips.iter().enumerate().take(max) {
             let Some(chip) = chip else { continue };
             for port in chip.circuit.ports.iter().filter(|p| p.dir.inputs()) {
-                inputs.push((slot, port.x, port.y, port.z, incoming(&Pin::new(Node::Chip(slot as u8), &port.label))));
+                inputs.push((slot, port.x, port.y, port.z, incoming(&self.saved.wires, &before, &Pin::new(Node::Chip(slot as u8), &port.label))));
             }
         }
         for (slot, x, y, z, level) in inputs {
             if let Some(chip) = &mut self.chips[slot] {
                 chip.vm.set_port_input(x, y, z, level);
+            }
+        }
+
+        // The chips step at their tiers' rates.
+        for chip in self.chips.iter_mut().take(max).flatten() {
+            chip.owed += chip.meta.tier.tick_rate() as f32 / SERVER_TICKS_PER_SECOND as f32;
+            while chip.owed >= 1.0 {
+                chip.vm.step();
+                chip.owed -= 1.0;
+            }
+        }
+
+        // Out: what they put out now, through the output sides.
+        let mut levels = self.sources(srv, alu);
+        let mut driven = Vec::new();
+        for side in SIDES {
+            if self.side_is_output(side) {
+                let level = incoming(&self.saved.wires, &levels, &Pin::new(Node::Out, side));
+                cables::side_output(srv, &alu.dimension, alu.xyz(), side, level);
+                driven.push((Pin::new(Node::Out, side), level));
             }
         }
         levels.extend(driven);

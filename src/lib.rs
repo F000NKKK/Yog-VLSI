@@ -70,9 +70,12 @@ impl Mod for YogVlsi {
         commands::register(registry);
         cables::register(registry);
 
+        // Redstone in, the ALUs step, redstone out — a signal crosses
+        // ports, cables and ALUs in one tick; only the chips' steps take time.
         registry.on_tick(|srv| {
+            cables::tick_inputs(srv);
             board::tick(srv);
-            cables::tick(srv);
+            cables::tick_outputs(srv);
             workbench::tick(srv);
         });
 
