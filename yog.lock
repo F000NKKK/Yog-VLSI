@@ -1024,9 +1024,9 @@ dependencies = [
 
 [[package]]
 name = "yog_pipes_exports"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7564ceb4aa4e2202277cb43376e5d736e7949c468ffc4cc0d2cb928825a46c32"
+checksum = "1a5f2d2b75b7b465a78cccd607aed9ee9cf8a3439911bb85a416a112b2c8103c"
 dependencies = [
  "rkyv",
  "yog-api",
