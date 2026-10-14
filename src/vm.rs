@@ -204,6 +204,8 @@ pub struct Cell {
     pub port_in: u8,
     /// Observers: what they watched looked like last step.
     watched: u32,
+    /// Wire: the directions it powers this step (bits of [`Facing::ALL`]).
+    points: u8,
 }
 
 const AIR: Cell = Cell::new(BlockType::Air);
@@ -218,7 +220,7 @@ impl Cell {
             BlockType::PressurePlate { power } | BlockType::TargetBlock { power } | BlockType::Source { power } => power,
             _ => 0,
         };
-        Cell { block, power, strong: 0, weak: 0, timer: 0, port_in: 0, watched: 0 }
+        Cell { block, power, strong: 0, weak: 0, timer: 0, port_in: 0, watched: 0, points: 0 }
     }
 
     fn is_solid(&self) -> bool {
@@ -557,6 +559,7 @@ impl RedstoneVM {
 
     pub fn step(&mut self) {
         self.tick += 1;
+        self.shape_wire();
         self.strong_power();
         self.settle_wire();
         self.wire_power();
@@ -600,22 +603,45 @@ impl RedstoneVM {
         self.next(n, Facing::Down).is_wire()
     }
 
-    /// Wire `i` powers the block in direction `d`: always the one below;
-    /// sideways where it points (a lone dot points everywhere, a dot turned
-    /// one way runs straight through).
-    fn wire_points(&self, i: u32, d: Facing) -> bool {
-        match d {
-            Facing::Down => true,
-            Facing::Up => false,
-            _ => {
-                let turns: Vec<Facing> = Facing::HORIZONTAL.into_iter().filter(|&h| self.wire_turns(i, h)).collect();
-                match turns.len() {
-                    0 => true,
-                    1 => turns[0] == d || turns[0] == d.opposite(),
-                    _ => turns.contains(&d),
-                }
+    /// The directions wire `i` powers (bits of [`Facing::ALL`]): always
+    /// the block below; sideways where it points (a lone dot points
+    /// everywhere, a dot turned one way runs straight through).
+    fn wire_shape(&self, i: u32) -> u8 {
+        let bit = |d: Facing| 1u8 << Facing::ALL.iter().position(|&f| f == d).unwrap_or(0);
+        let mut turns = 0u8;
+        let mut count = 0;
+        for h in Facing::HORIZONTAL {
+            if self.wire_turns(i, h) {
+                turns |= bit(h);
+                count += 1;
             }
         }
+        let sides = match count {
+            0 => Facing::HORIZONTAL.iter().fold(0, |m, &h| m | bit(h)),
+            1 => Facing::HORIZONTAL
+                .iter()
+                .filter(|&&h| turns & (bit(h) | bit(h.opposite())) != 0)
+                .fold(0, |m, &h| m | bit(h)),
+            _ => turns,
+        };
+        sides | bit(Facing::Down)
+    }
+
+    /// 0. Every wire's shape, for this step.
+    fn shape_wire(&mut self) {
+        for k in 0..self.active.len() {
+            let i = self.active[k];
+            if self.get(i).is_wire() {
+                let shape = self.wire_shape(i);
+                self.get_mut(i).points = shape;
+            }
+        }
+    }
+
+    /// Wire `i` powers the block in direction `d` (this step's shape).
+    fn wire_points(&self, i: u32, d: Facing) -> bool {
+        let bit = Facing::ALL.iter().position(|&f| f == d).unwrap_or(0);
+        self.get(i).points & (1 << bit) != 0
     }
 
     /// The power cell `i`'s neighbour in direction `d` gives it: a
