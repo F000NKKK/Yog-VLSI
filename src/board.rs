@@ -10,6 +10,10 @@
 //! - **Chip** — one per occupied chip slot: its input pins (sinks) and
 //!   output pins (sources) as the ports were named in the editor; a
 //!   bidirectional pin is both.
+//! - **Bus** — one per side a digital cable reaches: its channels (`1`…,
+//!   as many as the ALU's tier sees), each both a source (what's on the
+//!   bus) and a sink (what this ALU drives onto it). The node shows as many
+//!   rows as the player pulled it open to.
 //!
 //! A wire runs from a source to a sink. A source may feed any number of
 //! sinks; a sink takes one wire. Chip → chip wires stay inside the ALU;
@@ -68,6 +72,8 @@ pub enum Node {
     In,
     Out,
     Chip(u8),
+    /// The bus on side [`SIDES`]`[i]`.
+    Bus(u8),
 }
 
 /// A pin: a side of `In`/`Out` (`"N"`, …) or a chip's port label.
@@ -96,10 +102,16 @@ struct Saved {
     wires: Vec<Wire>,
     /// Where the player put each chip slot's node.
     layout: Vec<(u8, (f32, f32))>,
-    /// Where the player put the In and Out panels.
+    /// Where the player put the In and Out panels (and the buses).
     #[serde(default)]
     panels: Vec<(Node, (f32, f32))>,
+    /// How many channel rows each bus node shows, by side.
+    #[serde(default)]
+    bus_rows: Vec<(u8, u16)>,
 }
+
+/// Rows a bus node shows until it's pulled open.
+const BUS_ROWS: u16 = 4;
 
 /// A chip sitting in a slot.
 struct Installed {
@@ -117,15 +129,21 @@ struct Board {
     levels: HashMap<Pin, u8>,
     /// The name of the Redstone Port on each side's cable.
     side_names: HashMap<String, String>,
+    /// Which sides a digital cable reaches.
+    buses: [bool; 6],
+    /// What this ALU last drove onto each bus channel `(side, channel)`.
+    bus_driven: HashMap<(u8, u8), u8>,
 }
 
 impl Board {
     fn new(tier: Tier) -> Self {
         Board {
-            saved: Saved { tier, wires: Vec::new(), layout: Vec::new(), panels: Vec::new() },
+            saved: Saved { tier, wires: Vec::new(), layout: Vec::new(), panels: Vec::new(), bus_rows: Vec::new() },
             chips: (0..CHIP_SLOTS).map(|_| None).collect(),
             levels: HashMap::new(),
             side_names: HashMap::new(),
+            buses: [false; 6],
+            bus_driven: HashMap::new(),
         }
     }
 
@@ -145,11 +163,27 @@ impl Board {
         self.active(slot)?.meta.ports.iter().find(|p| p.label == name).map(|p| p.dir)
     }
 
+    /// How many channels of a bus this ALU's tier sees.
+    fn bus_channels(&self) -> u16 {
+        (self.saved.tier.digital_channels() as u16 * 4).min(cables::BUS_CHANNELS)
+    }
+
+    /// The channel (0-based) a pin of bus `side` names, if the bus is there and the tier sees it.
+    fn bus_channel(&self, side: u8, name: &str) -> Option<u8> {
+        let n: u16 = name.parse().ok()?;
+        (self.buses.get(side as usize) == Some(&true) && (1..=self.bus_channels()).contains(&n)).then(|| (n - 1) as u8)
+    }
+
+    fn bus_rows(&self, side: u8) -> u16 {
+        self.saved.bus_rows.iter().find(|(s, _)| *s == side).map_or(BUS_ROWS, |(_, r)| *r).clamp(1, self.bus_channels())
+    }
+
     fn is_source(&self, pin: &Pin) -> bool {
         match pin.node {
             Node::In => SIDES.contains(&pin.name.as_str()) && !self.side_is_output(&pin.name),
             Node::Out => false,
             Node::Chip(slot) => self.chip_pin(slot, &pin.name).is_some_and(PortMode::outputs),
+            Node::Bus(side) => self.bus_channel(side, &pin.name).is_some(),
         }
     }
 
@@ -158,6 +192,7 @@ impl Board {
             Node::In => false,
             Node::Out => SIDES.contains(&pin.name.as_str()),
             Node::Chip(slot) => self.chip_pin(slot, &pin.name).is_some_and(PortMode::inputs),
+            Node::Bus(side) => self.bus_channel(side, &pin.name).is_some(),
         }
     }
 
@@ -185,6 +220,10 @@ impl Board {
                 self.saved.panels.retain(|(n, _)| *n != node);
                 self.saved.panels.push((node, (x, y)));
             }
+            Request::BusRows { side, rows, .. } => {
+                self.saved.bus_rows.retain(|(s, _)| *s != side);
+                self.saved.bus_rows.push((side, rows.max(1)));
+            }
         }
         Ok(())
     }
@@ -210,8 +249,15 @@ impl Board {
         }
     }
 
-    /// What every source drives now: the inputs coming into the ALU's sides
-    /// and the chips' output ports.
+    /// Which sides a digital cable reaches now.
+    fn sync_buses(&mut self, srv: &dyn yog_api::Server, alu: &AluId) {
+        for (i, side) in SIDES.iter().enumerate() {
+            self.buses[i] = cables::side_bus(srv, &alu.dimension, alu.xyz(), side);
+        }
+    }
+
+    /// What every source drives now: the inputs coming into the ALU's sides,
+    /// the chips' output ports and the bus channels shown or wired.
     fn sources(&self, srv: &dyn yog_api::Server, alu: &AluId) -> HashMap<Pin, u8> {
         let max = self.saved.tier.max_chips();
         let mut levels = HashMap::new();
@@ -225,6 +271,15 @@ impl Board {
             let Some(chip) = chip else { continue };
             for port in chip.circuit.ports.iter().filter(|p| p.dir.outputs()) {
                 levels.insert(Pin::new(Node::Chip(slot as u8), &port.label), chip.vm.get_port_output(port.x, port.y, port.z));
+            }
+        }
+        for (i, side) in SIDES.iter().enumerate().filter(|(i, _)| self.buses[*i]) {
+            let shown = (1..=self.bus_rows(i as u8)).map(|n| n.to_string());
+            let wired = self.saved.wires.iter().filter(|w| w.from.node == Node::Bus(i as u8)).map(|w| w.from.name.clone());
+            for name in shown.chain(wired) {
+                if let Some(ch) = self.bus_channel(i as u8, &name) {
+                    levels.insert(Pin::new(Node::Bus(i as u8), name), cables::bus_level(&alu.dimension, alu.xyz(), side, ch));
+                }
             }
         }
         levels
@@ -274,6 +329,25 @@ impl Board {
                 driven.push((Pin::new(Node::Out, side), level));
             }
         }
+        // And onto the buses: what's wired into their channels; a channel
+        // nothing drives any more goes back to 0.
+        let mut now: HashMap<(u8, u8), u8> = HashMap::new();
+        for w in self.saved.wires.iter() {
+            if let Node::Bus(side) = w.to.node
+                && let Some(ch) = self.bus_channel(side, &w.to.name)
+            {
+                now.insert((side, ch), levels.get(&w.from).copied().unwrap_or(0));
+            }
+        }
+        for (&(side, ch), &level) in &now {
+            if self.bus_driven.get(&(side, ch)) != Some(&level) {
+                cables::bus_drive(&alu.dimension, alu.xyz(), SIDES[side as usize], ch, level);
+            }
+        }
+        for &(side, ch) in self.bus_driven.keys().filter(|k| !now.contains_key(k)) {
+            cables::bus_drive(&alu.dimension, alu.xyz(), SIDES[side as usize], ch, 0);
+        }
+        self.bus_driven = now;
         levels.extend(driven);
         self.levels = levels;
     }
@@ -305,6 +379,10 @@ impl Board {
                     output: self.side_is_output(side),
                 })
                 .collect(),
+            buses: (0..SIDES.len() as u8)
+                .filter(|&i| self.buses[i as usize])
+                .map(|i| BusView { index: i, side: SIDES[i as usize].to_string(), channels: self.bus_channels(), rows: self.bus_rows(i) })
+                .collect(),
             wires: self.saved.wires.clone(),
             layout: self.saved.layout.iter().map(|&(s, p)| (Node::Chip(s), p)).chain(self.saved.panels.iter().copied()).collect(),
             levels: self.levels.iter().map(|(p, l)| (p.clone(), *l)).collect(),
@@ -332,12 +410,23 @@ pub struct SideView {
     pub output: bool,
 }
 
+/// A bus node: the side it's on, how many channels the tier sees, how
+/// many rows it shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BusView {
+    pub index: u8,
+    pub side: String,
+    pub channels: u16,
+    pub rows: u16,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BoardView {
     pub alu: AluId,
     pub tier: Tier,
     pub chips: Vec<ChipView>,
     pub sides: Vec<SideView>,
+    pub buses: Vec<BusView>,
     pub wires: Vec<Wire>,
     /// Where the player put the nodes (chips, the In and Out panels).
     pub layout: Vec<(Node, (f32, f32))>,
@@ -350,12 +439,18 @@ pub enum Request {
     Disconnect { alu: AluId, to: Pin },
     Clear { alu: AluId },
     Move { alu: AluId, node: Node, x: f32, y: f32 },
+    /// Pulls a bus node open to `rows` channels (or closes it to them).
+    BusRows { alu: AluId, side: u8, rows: u16 },
 }
 
 impl Request {
     fn alu(&self) -> &AluId {
         match self {
-            Request::Connect { alu, .. } | Request::Disconnect { alu, .. } | Request::Clear { alu } | Request::Move { alu, .. } => alu,
+            Request::Connect { alu, .. }
+            | Request::Disconnect { alu, .. }
+            | Request::Clear { alu }
+            | Request::Move { alu, .. }
+            | Request::BusRows { alu, .. } => alu,
         }
     }
 }
@@ -387,6 +482,7 @@ pub fn tick(srv: &dyn yog_api::Server) {
         for (alu, board) in boards.iter_mut() {
             if let Some(names) = &names {
                 board.sync_chips(srv, alu);
+                board.sync_buses(srv, alu);
                 board.side_names = SIDES
                     .iter()
                     .filter_map(|&side| Some((side.to_string(), cables::side_port_name(srv, alu, side, names)?)))
