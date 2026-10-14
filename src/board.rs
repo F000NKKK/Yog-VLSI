@@ -32,7 +32,7 @@ use yog_api::{BlockPos, EventPhase, Registry, Server, Storage};
 use crate::cables;
 use crate::chip::{ChipMeta, CircuitData};
 use crate::tier::Tier;
-use crate::vm::{PortMode, RedstoneVM};
+use crate::vm::{NestedPin, PortMode, RedstoneVM};
 
 /// The six sides, in the order the graph lists them.
 pub const SIDES: [&str; 6] = ["N", "S", "E", "W", "U", "D"];
@@ -239,7 +239,9 @@ impl Board {
                 Some(meta) => {
                     let circuit = CircuitData::load_for_chip(&srv.game_dir(), &meta.id)
                         .unwrap_or_else(|| CircuitData::empty(meta.tier));
-                    let vm = circuit.vm();
+                    // Its ALUs run inside it, their chips' circuits from the store.
+                    let game_dir = srv.game_dir();
+                    let vm = circuit.vm_with(&|id| CircuitData::load_for_chip(&game_dir, id), 1);
                     *entry = Some(Installed { meta, circuit, vm });
                 }
                 None => *entry = None,
@@ -461,6 +463,52 @@ pub fn send(request: &Request) {
 // ── The server side ──────────────────────────────────────────────────────────
 
 static BOARDS: LazyLock<Mutex<HashMap<AluId, Board>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn side_index(name: &str) -> Option<u8> {
+    SIDES.iter().position(|s| *s == name).map(|i| i as u8)
+}
+
+/// A board pin as a nested ALU's (`None` for a bus: no cables inside a chip).
+fn nested_pin(pin: &Pin) -> Option<NestedPin> {
+    Some(match pin.node {
+        Node::In => NestedPin::In(side_index(&pin.name)?),
+        Node::Out => NestedPin::Out(side_index(&pin.name)?),
+        Node::Chip(slot) => NestedPin::Chip(slot, pin.name.clone()),
+        Node::Bus(_) => return None,
+    })
+}
+
+/// The wires of the ALU at `alu`, as an ALU inside a chip keeps them (a
+/// design is saved with it in it).
+pub fn nested_wires(alu: &AluId) -> Vec<(NestedPin, NestedPin)> {
+    BOARDS
+        .lock()
+        .unwrap()
+        .get(alu)
+        .map(|b| b.saved.wires.iter().filter_map(|w| Some((nested_pin(&w.from)?, nested_pin(&w.to)?))).collect())
+        .unwrap_or_default()
+}
+
+/// Gives the ALU at `alu` the board `wires` (a design with an ALU in it
+/// opened in the editor).
+pub fn restore(alu: AluId, tier: Tier, wires: &[(NestedPin, NestedPin)]) {
+    let pin = |p: &NestedPin| match p {
+        NestedPin::In(i) => Pin::new(Node::In, SIDES[*i as usize % 6]),
+        NestedPin::Out(i) => Pin::new(Node::Out, SIDES[*i as usize % 6]),
+        NestedPin::Chip(slot, name) => Pin::new(Node::Chip(*slot), name.as_str()),
+    };
+    let mut board = Board::new(tier);
+    board.saved.wires = wires.iter().map(|(f, t)| Wire { from: pin(f), to: pin(t) }).collect();
+    BOARDS.lock().unwrap().insert(alu, board);
+}
+
+/// Forgets the boards of the ALUs inside `lo`..`hi` of `dimension` (an
+/// editor field going).
+pub fn forget_in(dimension: &str, lo: BlockPos, hi: BlockPos) {
+    BOARDS.lock().unwrap().retain(|a, _| {
+        !(a.dimension == dimension && (lo.x..=hi.x).contains(&a.x) && (lo.y..=hi.y).contains(&a.y) && (lo.z..=hi.z).contains(&a.z))
+    });
+}
 /// Who has which ALU open, and what they were last sent.
 static WATCHERS: LazyLock<Mutex<HashMap<String, (AluId, Option<BoardView>)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -583,7 +631,7 @@ mod tests {
     fn chip(slot: u8, ports: &[(&str, PortMode)]) -> (u8, Installed) {
         let ports: Vec<Port> =
             ports.iter().enumerate().map(|(i, (l, d))| Port { label: l.to_string(), x: i as u32, y: 0, z: 0, dir: *d }).collect();
-        let circuit = CircuitData { size: 16, blocks: Vec::new(), ports: ports.clone() };
+        let circuit = CircuitData { size: 16, blocks: Vec::new(), ports: ports.clone(), alus: Vec::new() };
         let meta = ChipMeta { id: format!("c{slot}"), tier: Tier::ALL[0], name: "Chip".into(), ports };
         (slot, Installed { vm: circuit.vm(), circuit, meta })
     }

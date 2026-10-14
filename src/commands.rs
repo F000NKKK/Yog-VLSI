@@ -123,6 +123,7 @@ fn create_test_chip(tier: Tier, srv: &dyn yog_api::Server) -> ChipMeta {
         size,
         blocks,
         ports: vec![port("IN", 0, PortMode::Input), port("OUT", size - 1, PortMode::Output)],
+        alus: Vec::new(),
     };
     let id = crate::chip::new_id();
     circuit.save_for_chip(&srv.game_dir(), &id);

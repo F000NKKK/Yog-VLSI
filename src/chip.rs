@@ -8,7 +8,7 @@ use crate::nbt;
 use crate::res::Strings;
 use crate::tier::Tier;
 use crate::port;
-use crate::vm::{BlockType, ComparatorMode, Facing, PortMode, RedstoneVM};
+use crate::vm::{BlockType, ComparatorMode, Facing, NestedAlu, NestedChip, NestedPin, NestedPort, PortMode, RedstoneVM};
 use crate::MOD_ID;
 
 /// NBT tag of a fabricated chip's [`ChipMeta`].
@@ -236,6 +236,7 @@ impl CircuitBlock {
                 || p.contains("rail")
                 || p.contains("carpet")
                 || p == "barrier" => BlockType::Transparent,
+            _ if Tier::from_alu_block(id).is_some() => BlockType::Alu,
             _ => port::dir_for_block(id).map_or(BlockType::Solid, BlockType::Port),
         }
     }
@@ -248,6 +249,24 @@ pub struct CircuitData {
     pub size: u32,
     pub blocks: Vec<CircuitBlock>,
     pub ports: Vec<Port>,
+    /// The ALUs in it, with their chips and boards: they run inside it.
+    #[serde(default)]
+    pub alus: Vec<SavedAlu>,
+}
+
+/// How deep ALUs nest: an ALU in a chip in an ALU in a chip … stops here.
+pub const MAX_NESTING: u32 = 4;
+
+/// An ALU in a circuit, as it was in the editor: where, its tier, the chips
+/// in its slots and its board's wires (between its sides and its chips' pins).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedAlu {
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
+    pub tier: Tier,
+    pub chips: Vec<(u8, ChipMeta)>,
+    pub wires: Vec<(NestedPin, NestedPin)>,
 }
 
 impl CircuitData {
@@ -273,6 +292,35 @@ impl CircuitData {
     pub fn vm(&self) -> RedstoneVM {
         let mut vm = RedstoneVM::new(self.size);
         self.load_into(&mut vm);
+        vm
+    }
+
+    /// [`Self::vm`] with its ALUs running inside it: their chips' circuits
+    /// from `load` (by chip id), nested down to [`MAX_NESTING`] (`depth`:
+    /// how deep this circuit already is). An ALU's tier powers its first
+    /// slots, as in the world; each chip keeps its own tier's speed.
+    pub fn vm_with(&self, load: &dyn Fn(&str) -> Option<CircuitData>, depth: u32) -> RedstoneVM {
+        let mut vm = self.vm();
+        if depth >= MAX_NESTING {
+            return vm;
+        }
+        for a in &self.alus {
+            let chips = a
+                .chips
+                .iter()
+                .filter(|(slot, _)| (*slot as usize) < a.tier.max_chips())
+                .filter_map(|(slot, meta)| {
+                    let circuit = load(&meta.id)?;
+                    let ports = meta
+                        .ports
+                        .iter()
+                        .map(|p| NestedPort { label: p.label.clone(), x: p.x, y: p.y, z: p.z, mode: p.dir })
+                        .collect();
+                    Some(NestedChip::new(*slot, ports, meta.tier.steps_per_tick(), circuit.vm_with(load, depth + 1)))
+                })
+                .collect();
+            vm.set_nested(a.x, a.y, a.z, NestedAlu { chips, wires: a.wires.clone() });
+        }
         vm
     }
 
@@ -343,6 +391,7 @@ mod tests {
             size: 16,
             blocks: vec![CircuitBlock { x: 0, y: 0, z: 0, state: "minecraft:repeater[delay=2]".into(), items: Vec::new() }],
             ports: meta().ports,
+            alus: Vec::new(),
         };
         let bp = Blueprint { name: "Adder".into(), tier: Tier::Iron, circuit: c };
         assert_eq!(Blueprint::from_nbt(&bp.to_nbt()), Some(bp));
