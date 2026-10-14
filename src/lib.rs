@@ -31,7 +31,7 @@ impl Mod for YogVlsi {
         // Dedicated pocket dimension for the circuit editor (see `editor.rs`) —
         // replaces the old "reserved lane far out in the Overworld" hack now that
         // the loader can declare real custom dimensions. Void terrain: the editor
-        // lays its own bedrock floor + glass walls per session, so the generator
+        // lays its own floor and barrier box per session, so the generator
         // itself has nothing to do.
         registry.register_dimension(
             &YogDimensionDef::new(editor::DIMENSION_ID).dimension_type(
@@ -59,7 +59,10 @@ impl Mod for YogVlsi {
         network::register(registry);
         commands::register(registry);
 
-        registry.on_tick(|srv| { alu::tick_all(srv); });
+        registry.on_tick(|srv| {
+            alu::tick_all(srv);
+            workbench::tick(srv);
+        });
 
         // Persistence
         registry.on_server_started(|srv| {
