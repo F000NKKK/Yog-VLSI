@@ -3,11 +3,11 @@
 mod alu;
 mod chip;
 mod commands;
-mod designs;
 mod editor;
 mod nbt;
 mod network;
 mod port;
+mod resources;
 pub mod tier;
 pub mod vm;
 mod workbench;

@@ -1,30 +1,19 @@
-//! Client → server networking for GUI button actions.
+//! Client ↔ server networking of the ALU editor (the workbench has its own,
+//! in `workbench.rs`).
 //!
-//! `register_ui` click handlers run entirely client-side (they get raw
-//! `"click:X:Y"` strings, no `&dyn Server`), so any GUI button that needs to
-//! mutate server-authoritative state (fabricate a chip, save a circuit, …)
-//! has to serialize a request and send it over a packet channel instead of
-//! calling into `commands`/`designs`/`editor` directly.
+//! A screen's commands run client-side, so anything that changes
+//! server-authoritative state (installing a chip, …) goes to the server as
+//! a request over a packet channel.
 //!
 //! Payload format is a plain `\x1f`-separated string (consistent with the
 //! rest of this mod's preference for simple text over a binary codec).
 
 use yog_api::{Registry, Server};
 
-pub const WORKBENCH_CHANNEL: &str = "yog-vlsi:wb_action";
 pub const ALU_CHANNEL: &str = "yog-vlsi:alu_action";
 pub const OPEN_UI_CHANNEL: &str = "yog-vlsi:open_ui";
 
 const SEP: char = '\u{1f}';
-
-/// Send a workbench GUI action to the server. Call only from client-side
-/// code (e.g. a `register_ui` click handler).
-pub fn send_workbench_action(parts: &[&str]) {
-    if let Some(srv) = yog_api::server() {
-        let payload = parts.join(&SEP.to_string());
-        srv.send_to_server(WORKBENCH_CHANNEL, payload.as_bytes());
-    }
-}
 
 /// Send an ALU GUI action to the server.
 pub fn send_alu_action(parts: &[&str]) {
@@ -58,41 +47,6 @@ pub fn register(registry: &mut Registry) {
     registry.on_client_packet(OPEN_UI_CHANNEL, |ev, _srv| {
         let ui_id = String::from_utf8_lossy(&ev.payload).into_owned();
         yog_api::open_ui(&ui_id, true, false);
-    });
-
-    registry.on_packet(WORKBENCH_CHANNEL, |ev, srv| {
-        let parts = split(&ev.payload);
-        let player = ev.player.clone();
-        let reply = match parts.first().map(String::as_str) {
-            Some("edit") if parts.len() >= 3 => {
-                let (name, dim) = (&parts[1], &parts[2]);
-                let game_dir = srv.game_dir();
-                let list = crate::designs::list_designs(&game_dir, &player);
-                let at = yog_api::player::Player::new(srv, &player).position().unwrap_or((0.0, 64.0, 0.0));
-                match list.iter().find(|d| &d.name == name) {
-                    Some(meta) => match crate::designs::load_design(&game_dir, &player, &meta.id) {
-                        Some(entry) => {
-                            crate::editor::enter(srv, &player, &meta.name, meta.tier, Some(meta.id.clone()), Some(entry.circuit), dim, at);
-                            format!("§aOpened editor for '{}'.", name)
-                        }
-                        None => "§cFailed to load design data.".into(),
-                    },
-                    None => format!("§cDesign '{}' not found.", name),
-                }
-            }
-            Some("fabricate") if parts.len() >= 3 => {
-                let name = &parts[1];
-                match crate::tier::Tier::parse(&parts[2]) {
-                    Some(tier) => crate::commands::do_fabricate(srv, &player, "", name, tier),
-                    None => "§cUnknown tier.".into(),
-                }
-            }
-            Some("export_bp") if parts.len() >= 2 => {
-                crate::commands::do_export_blueprint(srv, &player, &parts[1])
-            }
-            _ => return,
-        };
-        srv.send_actionbar(&player, &reply);
     });
 
     registry.on_packet(ALU_CHANNEL, |ev, srv| {
