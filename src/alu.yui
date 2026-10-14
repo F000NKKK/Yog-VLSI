@@ -11,8 +11,8 @@
     <Screen.Resources>
         <Style x:Key="Info"
                target="Label"
-               w="9"
-               h="9"
+               w="11"
+               h="11"
                align="center"
                text="i"
                color="#FFFFFF"
@@ -26,7 +26,7 @@
             <Label x:Name="help" style="@Info" tooltip="@Strings.screen.alu.help" />
             <Button x:Name="clear"
                     w="96"
-                    h="12"
+                    h="14"
                     text="@Strings.screen.alu.clear_links"
                     enabled="{x:Bind has_wires()}"
                     command="{x:Bind clear()}" />
