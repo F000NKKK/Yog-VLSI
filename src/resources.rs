@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn cost_in_resources() {
-        let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into() };
+        let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new() };
         // 4 dust → 1 redstone; a repeater → 3 redstone, 3 stone, ¼ log.
         let c = cost(&vec![block("minecraft:redstone_wire"); 4]);
         assert_eq!(c, [1, 0, 0, 0, 0, 0]);

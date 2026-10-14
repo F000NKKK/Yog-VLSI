@@ -11,14 +11,15 @@
 //! inventory if that one was taken out meanwhile).
 //!
 //! Saving reads the whole cube in one `scan_region` call, with every
-//! block's full state (a repeater's delay and facing, …).
+//! block's full state (a repeater's delay and facing, …), and what the
+//! containers in it hold.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 use yog_api::{BlockPos, EventPhase, Registry};
 
-use crate::chip::{Blueprint, CircuitBlock, CircuitData, Port};
+use crate::chip::{Blueprint, CircuitBlock, CircuitData, Port, container_slots};
 use crate::content::Items;
 use crate::port;
 use crate::tier::Tier;
@@ -122,7 +123,11 @@ pub fn enter(
     // first, the next block set beside it would knock it off.
     let (hanging, standing): (Vec<_>, Vec<_>) = blueprint.circuit.blocks.iter().partition(|b| needs_support(b.id()));
     for block in standing.into_iter().chain(hanging) {
-        srv.set_block_state(DIMENSION_ID, at(block.x, block.y, block.z), &block.state);
+        let pos = at(block.x, block.y, block.z);
+        srv.set_block_state(DIMENSION_ID, pos, &block.state);
+        for (slot, item, count) in &block.items {
+            srv.set_inventory_slot(DIMENSION_ID, pos, *slot as u32, item, *count as u32, "");
+        }
     }
     for p in &blueprint.circuit.ports {
         srv.set_block_state(DIMENSION_ID, at(p.x, p.y, p.z), port::block_for_dir(p.dir));
@@ -177,7 +182,13 @@ pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
             ports.push(Port { label, x, y, z, dir });
             continue;
         }
-        blocks.push(CircuitBlock { x, y, z, state });
+        let items = (0..container_slots(id))
+            .filter_map(|slot| {
+                let (item, count, _) = srv.get_inventory_slot(DIMENSION_ID, p, slot as u32)?;
+                Some((slot, item, count.min(255) as u8))
+            })
+            .collect();
+        blocks.push(CircuitBlock { x, y, z, state, items });
     }
     let blueprint = Blueprint {
         name: session.name.clone(),

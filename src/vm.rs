@@ -40,13 +40,29 @@
 //!    after, so the order cells are visited in doesn't matter, and every
 //!    component has its one step of delay.
 //!
+//! ## Moving blocks and items
+//!
+//! - **Pistons** extend while powered (from any side but their front, or —
+//!   quasi-connectivity — through the block above them), pushing up to 12
+//!   blocks; slime and honey drag what touches them (but not each other);
+//!   redstone parts in the way break; obsidian, containers, extended
+//!   pistons and ports don't move. Sticky pistons pull one block back.
+//! - **Containers** hold items. Hoppers push one item a time out of their
+//!   spout and pull one from the container above, every 4 steps, unless
+//!   powered; droppers and dispensers drop one item from a random slot
+//!   into the container in front (or out of the world) two steps after
+//!   being powered. A comparator reads a container's fill behind it, or
+//!   behind the solid block behind it.
+//!
 //! Self-contained (std + serde only) so `benches/` can build it alone.
+
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
 // ── Block types ───────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BlockType {
     Air,
 
@@ -72,17 +88,39 @@ pub enum BlockType {
     /// Detector rail, trapped chest, …: a constant source.
     Source { power: u8 },
 
+    /// Movable, doesn't conduct, drags what touches it along.
+    Slime,
+    Honey,
+    /// A full block pistons can't move (obsidian, bedrock, …).
+    Immovable,
+    Piston { facing: Facing, sticky: bool, extended: bool },
+    PistonHead { facing: Facing, sticky: bool },
+    /// Holds `slots` items (in [`RedstoneVM`]'s inventories); `solid`
+    /// conducts power; `partner`: the other half of a double chest.
+    Container { slots: u8, solid: bool, partner: Option<Facing> },
+    /// `facing`: its spout.
+    Hopper { facing: Facing },
+    /// A dropper or dispenser; `triggered` while powered.
+    Dropper { facing: Facing, triggered: bool },
+
     /// A VLSI port block.
     Port(PortMode),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a piston does to a block in its way.
+enum Push {
+    Move,
+    Break,
+    Stuck,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComparatorMode {
     Compare,
     Subtract,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Facing {
     North,
     South,
@@ -104,6 +142,17 @@ impl Facing {
             Facing::West => Facing::East,
             Facing::Up => Facing::Down,
             Facing::Down => Facing::Up,
+        }
+    }
+
+    /// A quarter turn clockwise seen from above (up and down stay).
+    pub fn clockwise(self) -> Facing {
+        match self {
+            Facing::North => Facing::East,
+            Facing::East => Facing::South,
+            Facing::South => Facing::West,
+            Facing::West => Facing::North,
+            other => other,
         }
     }
 
@@ -173,7 +222,46 @@ impl Cell {
     }
 
     fn is_solid(&self) -> bool {
-        matches!(self.block, BlockType::Solid | BlockType::RedstoneLamp)
+        matches!(
+            self.block,
+            BlockType::Solid
+                | BlockType::RedstoneLamp
+                | BlockType::Immovable
+                | BlockType::Container { solid: true, .. }
+                | BlockType::Dropper { .. }
+        )
+    }
+
+    fn is_air(&self) -> bool {
+        self.block == BlockType::Air
+    }
+
+    fn holds_items(&self) -> bool {
+        matches!(self.block, BlockType::Container { .. } | BlockType::Hopper { .. } | BlockType::Dropper { .. })
+    }
+
+    fn push(&self) -> Push {
+        match self.block {
+            BlockType::Immovable
+            | BlockType::PistonHead { .. }
+            | BlockType::Piston { extended: true, .. }
+            | BlockType::Container { .. }
+            | BlockType::Hopper { .. }
+            | BlockType::Dropper { .. }
+            | BlockType::Port(_) => Push::Stuck,
+            BlockType::RedstoneWire
+            | BlockType::RedstoneTorch { .. }
+            | BlockType::Repeater { .. }
+            | BlockType::Comparator { .. }
+            | BlockType::Lever { .. }
+            | BlockType::Button { .. }
+            | BlockType::PressurePlate { .. } => Push::Break,
+            _ => Push::Move,
+        }
+    }
+
+    fn is_sticky(&self) -> bool {
+        matches!(self.block, BlockType::Slime | BlockType::Honey)
     }
 
     fn is_wire(&self) -> bool {
@@ -223,11 +311,10 @@ impl Cell {
 
     /// What an observer sees of this cell.
     fn looks(&self) -> u32 {
-        let id = std::mem::discriminant(&self.block);
         let mut h = std::hash::DefaultHasher::new();
-        std::hash::Hash::hash(&id, &mut h);
+        std::hash::Hash::hash(&self.block, &mut h);
         let shown = match self.block {
-            BlockType::Solid | BlockType::Transparent | BlockType::Air => 0,
+            BlockType::Solid | BlockType::Transparent | BlockType::Air | BlockType::Immovable => 0,
             _ => self.power as u64,
         };
         (std::hash::Hasher::finish(&h) as u32) ^ (shown as u32) << 24
@@ -246,6 +333,31 @@ pub struct RedstoneVM {
     /// Indices of every non-air cell, ascending (= y, z, x order).
     active: Vec<u32>,
     pub tick: u64,
+    /// The items of every container, by cell: (item, count) per slot.
+    inventories: HashMap<u32, Vec<(u16, u8)>>,
+    /// Item ids, indexed by the numbers in `inventories`.
+    items: Vec<String>,
+    rng: u64,
+}
+
+/// One slot's item: (index into `items`, count); count 0 = empty.
+type Slot = (u16, u8);
+
+/// How many of an item stack in one slot.
+fn max_stack(item: &str) -> u8 {
+    let path = item.strip_prefix("minecraft:").unwrap_or(item);
+    const SIXTEEN: [&str; 7] = ["ender_pearl", "snowball", "egg", "_sign", "_banner", "honey_bottle", "armor_stand"];
+    const ONE: [&str; 16] = [
+        "sword", "pickaxe", "_axe", "shovel", "_hoe", "helmet", "chestplate", "leggings", "boots", "potion",
+        "shulker_box", "minecart", "boat", "_bed", "saddle", "totem_of_undying",
+    ];
+    if path == "bucket" || SIXTEEN.iter().any(|p| path.ends_with(p)) {
+        16
+    } else if path.ends_with("_bucket") || ONE.iter().any(|p| path.contains(p)) {
+        1
+    } else {
+        64
+    }
 }
 
 impl RedstoneVM {
@@ -253,7 +365,16 @@ impl RedstoneVM {
     /// every tier's is one).
     pub fn new(size: u32) -> Self {
         let size = size.max(1).next_power_of_two();
-        RedstoneVM { size, shift: size.trailing_zeros(), layers: vec![None; size as usize], active: Vec::new(), tick: 0 }
+        RedstoneVM {
+            size,
+            shift: size.trailing_zeros(),
+            layers: vec![None; size as usize],
+            active: Vec::new(),
+            tick: 0,
+            inventories: HashMap::new(),
+            items: Vec::new(),
+            rng: 0x9E37_79B9_7F4A_7C15,
+        }
     }
 
     #[inline]
@@ -336,8 +457,24 @@ impl RedstoneVM {
             return;
         }
         let i = self.idx(x, y, z);
+        self.put(i, Cell::new(block));
+        let slots = match block {
+            BlockType::Container { slots, .. } => slots,
+            BlockType::Hopper { .. } => 5,
+            BlockType::Dropper { .. } => 9,
+            _ => 0,
+        };
+        if slots > 0 {
+            self.inventories.insert(i, vec![(0, 0); slots as usize]);
+        } else {
+            self.inventories.remove(&i);
+        }
+    }
+
+    /// Writes `cell` at `i` (air removes it).
+    fn put(&mut self, i: u32, cell: Cell) {
         let found = self.active.binary_search(&i);
-        if block == BlockType::Air {
+        if cell.is_air() {
             if let Ok(at) = found {
                 self.active.remove(at);
                 *self.get_mut(i) = AIR;
@@ -348,8 +485,43 @@ impl RedstoneVM {
             self.active.insert(at, i);
         }
         let w = self.layer_len() as usize;
-        let cells = self.layers[y as usize].get_or_insert_with(|| vec![AIR; w].into_boxed_slice());
-        cells[i as usize % w] = Cell::new(block);
+        let y = (i >> (2 * self.shift)) as usize;
+        let cells = self.layers[y].get_or_insert_with(|| vec![AIR; w].into_boxed_slice());
+        cells[i as usize % w] = cell;
+    }
+
+    /// Fills the container at `(x, y, z)`: (slot, item id, count).
+    pub fn set_items(&mut self, x: u32, y: u32, z: u32, items: &[(u8, String, u8)]) {
+        if !self.in_bounds(x as i32, y as i32, z as i32) {
+            return;
+        }
+        let i = self.idx(x, y, z);
+        let ids: Vec<u16> = items.iter().map(|(_, item, _)| self.item_index(item)).collect();
+        let Some(inv) = self.inventories.get_mut(&i) else { return };
+        for ((slot, _, count), id) in items.iter().zip(ids) {
+            if let Some(s) = inv.get_mut(*slot as usize) {
+                *s = (id, *count);
+            }
+        }
+    }
+
+    /// The items in the container at `(x, y, z)`: (slot, item id, count).
+    pub fn items_at(&self, x: u32, y: u32, z: u32) -> Vec<(u8, String, u8)> {
+        let i = self.idx(x, y, z);
+        self.inventories.get(&i).into_iter().flatten().enumerate()
+            .filter(|(_, (_, n))| *n > 0)
+            .map(|(slot, (id, n))| (slot as u8, self.items[*id as usize].clone(), *n))
+            .collect()
+    }
+
+    fn item_index(&mut self, item: &str) -> u16 {
+        match self.items.iter().position(|i| i == item) {
+            Some(p) => p as u16,
+            None => {
+                self.items.push(item.to_string());
+                (self.items.len() - 1) as u16
+            }
+        }
     }
 
     /// Drives `power` into the Input/Bidirectional port at `(x, y, z)`.
@@ -390,6 +562,7 @@ impl RedstoneVM {
         self.wire_power();
         self.read_power();
         self.settle_components();
+        self.move_items();
     }
 
     // ── Wire ──────────────────────────────────────────────────────────────
@@ -569,6 +742,7 @@ impl RedstoneVM {
 
     /// 5. Every component decides its next output.
     fn settle_components(&mut self) {
+        let mut pistons = Vec::new();
         let changes: Vec<(u32, Cell)> = self
             .active
             .iter()
@@ -581,7 +755,7 @@ impl RedstoneVM {
                     }
                     BlockType::Repeater { delay_ticks, facing } => self.next_repeater(i, cell, delay_ticks.max(1), facing),
                     BlockType::Comparator { mode, facing } => {
-                        let back = self.input_from(i, facing, true);
+                        let back = self.comparator_back(i, facing);
                         let side = facing.sides().into_iter().map(|d| self.side_input(i, d)).max().unwrap_or(0);
                         let power = match mode {
                             ComparatorMode::Compare if back >= side => back,
@@ -595,6 +769,20 @@ impl RedstoneVM {
                         let changed = looks != cell.watched && self.tick > 1;
                         Cell { power: if changed && cell.power == 0 { 15 } else { 0 }, watched: looks, ..cell }
                     }
+                    BlockType::Piston { facing, extended, .. } => {
+                        if self.piston_powered(i, facing) != extended {
+                            pistons.push(i);
+                        }
+                        return None;
+                    }
+                    BlockType::Dropper { facing, triggered } => {
+                        let powered = self.piston_powered(i, facing) || self.received(i, true) > 0;
+                        let mut next = Cell { block: BlockType::Dropper { facing, triggered: powered }, ..cell };
+                        if powered && !triggered {
+                            next.timer = 2;
+                        }
+                        next
+                    }
                     _ => return None,
                 };
                 (next.block != cell.block || next.power != cell.power || next.timer != cell.timer || next.watched != cell.watched)
@@ -603,6 +791,250 @@ impl RedstoneVM {
             .collect();
         for (i, next) in changes {
             *self.get_mut(i) = next;
+        }
+        for i in pistons {
+            if let BlockType::Piston { facing, sticky, extended } = self.get(i).block {
+                if extended {
+                    self.retract(i, facing, sticky);
+                } else {
+                    self.extend(i, facing, sticky);
+                }
+            }
+        }
+    }
+
+    // ── Pistons ───────────────────────────────────────────────────────────
+
+    /// Powered from any side but its front, or through the block above it.
+    fn piston_powered(&self, i: u32, facing: Facing) -> bool {
+        let direct = Facing::ALL.into_iter().filter(|&d| d != facing).any(|d| self.input_from(i, d, true) > 0);
+        direct
+            || self.at(i, Facing::Up).is_some_and(|up| {
+                Facing::ALL.into_iter().filter(|&d| d != Facing::Down).any(|d| self.input_from(up, d, true) > 0)
+            })
+    }
+
+    /// What moving the block at `start` in direction `dir` takes along
+    /// (`None`: it can't move). `piston`: the piston doing it, which never
+    /// moves itself.
+    fn plan_move(&self, start: u32, dir: Facing, piston: u32) -> Option<(Vec<u32>, Vec<u32>)> {
+        let mut moved = Vec::new();
+        let mut seen = HashSet::new();
+        let mut broken = Vec::new();
+        // (cell, forced): forced cells are in the way and must go; the
+        // others are only dragged by slime or honey.
+        let mut queue = VecDeque::from([(start, true)]);
+        while let Some((p, forced)) = queue.pop_front() {
+            let c = *self.get(p);
+            if c.is_air() || seen.contains(&p) {
+                continue;
+            }
+            if p == piston {
+                if forced {
+                    return None;
+                }
+                continue;
+            }
+            match c.push() {
+                Push::Stuck if forced => return None,
+                Push::Stuck => continue,
+                Push::Break => {
+                    if forced && !broken.contains(&p) {
+                        broken.push(p);
+                    }
+                    continue;
+                }
+                Push::Move => {}
+            }
+            seen.insert(p);
+            moved.push(p);
+            if moved.len() > 12 {
+                return None;
+            }
+            queue.push_back((self.at(p, dir)?, true));
+            if c.is_sticky() {
+                for d in Facing::ALL {
+                    let Some(n) = self.at(p, d) else { continue };
+                    let nc = self.get(n);
+                    let other_glue = nc.is_sticky() && nc.block != c.block;
+                    if !nc.is_air() && !other_glue {
+                        queue.push_back((n, false));
+                    }
+                }
+            }
+        }
+        Some((moved, broken))
+    }
+
+    /// Moves what `plan_move` found one block in `dir`.
+    fn do_move(&mut self, moved: &[u32], broken: &[u32], dir: Facing) {
+        for &p in broken {
+            self.put(p, AIR);
+        }
+        let cells: Vec<(u32, Cell)> = moved.iter().map(|&p| (p, *self.get(p))).collect();
+        for &(p, _) in &cells {
+            self.put(p, AIR);
+        }
+        for (p, cell) in cells {
+            if let Some(to) = self.at(p, dir) {
+                self.put(to, cell);
+            }
+        }
+    }
+
+    fn extend(&mut self, i: u32, facing: Facing, sticky: bool) {
+        let Some(front) = self.at(i, facing) else { return };
+        let Some((moved, broken)) = self.plan_move(front, facing, i) else { return };
+        self.do_move(&moved, &broken, facing);
+        self.put(front, Cell::new(BlockType::PistonHead { facing, sticky }));
+        self.get_mut(i).block = BlockType::Piston { facing, sticky, extended: true };
+    }
+
+    fn retract(&mut self, i: u32, facing: Facing, sticky: bool) {
+        self.get_mut(i).block = BlockType::Piston { facing, sticky, extended: false };
+        let Some(head) = self.at(i, facing) else { return };
+        if matches!(self.get(head).block, BlockType::PistonHead { .. }) {
+            self.put(head, AIR);
+        }
+        if !sticky {
+            return;
+        }
+        let Some(pulled) = self.at(head, facing) else { return };
+        if matches!(self.get(pulled).push(), Push::Move)
+            && let Some((moved, broken)) = self.plan_move(pulled, facing.opposite(), i)
+        {
+            self.do_move(&moved, &broken, facing.opposite());
+        }
+    }
+
+    // ── Items ─────────────────────────────────────────────────────────────
+
+    /// The cells whose slots make up the container at `i` (a double chest
+    /// is two).
+    fn container(&self, i: u32) -> Vec<u32> {
+        let mut cells = vec![i];
+        if let BlockType::Container { partner: Some(d), .. } = self.get(i).block
+            && let Some(p) = self.at(i, d)
+            && matches!(self.get(p).block, BlockType::Container { partner: Some(back), .. } if back == d.opposite())
+        {
+            cells.push(p);
+        }
+        cells
+    }
+
+    /// How full the container at `i` is, as a comparator reads it.
+    fn fill(&self, i: u32) -> u8 {
+        let (mut sum, mut slots, mut any) = (0.0f32, 0usize, false);
+        for c in self.container(i) {
+            for &(id, n) in self.inventories.get(&c).into_iter().flatten() {
+                slots += 1;
+                if n > 0 {
+                    any = true;
+                    sum += n as f32 / max_stack(&self.items[id as usize]) as f32;
+                }
+            }
+        }
+        if !any || slots == 0 { 0 } else { (1.0 + sum / slots as f32 * 14.0).floor() as u8 }
+    }
+
+    /// A comparator's back: a container's fill, through one solid block
+    /// too; else the power coming in.
+    fn comparator_back(&self, i: u32, facing: Facing) -> u8 {
+        let power = self.input_from(i, facing, true);
+        let Some(b) = self.at(i, facing) else { return power };
+        let back = self.get(b);
+        if back.holds_items() {
+            return self.fill(b);
+        }
+        if back.is_solid()
+            && power < 15
+            && let Some(b2) = self.at(b, facing)
+            && self.get(b2).holds_items()
+        {
+            return power.max(self.fill(b2));
+        }
+        power
+    }
+
+    /// Takes one item out of the first non-empty slot of `from` (or a
+    /// random one) that `to` takes; `to = None` throws it away.
+    fn transfer(&mut self, from: u32, to: Option<u32>, random: bool) -> bool {
+        let Some(inv) = self.inventories.get(&from) else { return false };
+        let mut full: Vec<usize> = inv.iter().enumerate().filter(|(_, s)| s.1 > 0).map(|(k, _)| k).collect();
+        if random && !full.is_empty() {
+            self.rng = self.rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let pick = (self.rng >> 33) as usize % full.len();
+            full = vec![full[pick]];
+        }
+        for slot in full {
+            let item = self.inventories[&from][slot].0;
+            let ok = match to {
+                Some(to) => self.insert(to, item),
+                None => true,
+            };
+            if ok {
+                let s = &mut self.inventories.get_mut(&from).unwrap()[slot];
+                s.1 -= 1;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Puts one `item` into the container at `to`.
+    fn insert(&mut self, to: u32, item: u16) -> bool {
+        let max = max_stack(&self.items[item as usize]);
+        let cells = self.container(to);
+        for pass in 0..2 {
+            for &c in &cells {
+                let Some(inv) = self.inventories.get_mut(&c) else { continue };
+                let found = inv.iter_mut().find(|s: &&mut Slot| {
+                    if pass == 0 { s.1 > 0 && s.0 == item && s.1 < max } else { s.1 == 0 }
+                });
+                if let Some(s) = found {
+                    *s = (item, s.1 + 1);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Hoppers move an item every 4 steps unless powered; droppers drop
+    /// theirs.
+    fn move_items(&mut self) {
+        for k in 0..self.active.len() {
+            let Some(&i) = self.active.get(k) else { break };
+            let cell = *self.get(i);
+            match cell.block {
+                BlockType::Hopper { facing } => {
+                    if cell.timer > 0 {
+                        self.get_mut(i).timer -= 1;
+                        if cell.timer > 1 {
+                            continue;
+                        }
+                    }
+                    if self.received(i, true) > 0 {
+                        continue;
+                    }
+                    let out = self.at(i, facing).filter(|&t| self.get(t).holds_items());
+                    let mut moved = out.is_some_and(|t| self.transfer(i, Some(t), false));
+                    if let Some(up) = self.at(i, Facing::Up).filter(|&u| self.get(u).holds_items()) {
+                        moved |= self.transfer(up, Some(i), false);
+                    }
+                    if moved {
+                        self.get_mut(i).timer = 4;
+                    }
+                }
+                BlockType::Dropper { facing, .. } if cell.timer > 0 => {
+                    self.get_mut(i).timer -= 1;
+                    if cell.timer == 1 {
+                        let to = self.at(i, facing).filter(|&t| self.get(t).holds_items());
+                        self.transfer(i, to, true);
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -890,6 +1322,117 @@ mod tests {
             })
             .collect();
         assert_eq!(out, [0, 15, 0, 0]);
+    }
+
+    fn piston(facing: Facing, sticky: bool) -> BlockType {
+        BlockType::Piston { facing, sticky, extended: false }
+    }
+
+    #[test]
+    fn piston_pushes_and_breaks() {
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(1, 0, 0, piston(Facing::East, false));
+        vm.set_block(2, 0, 0, BlockType::Solid);
+        vm.set_block(3, 0, 0, BlockType::RedstoneBlock);
+        vm.set_block(4, 0, 0, BlockType::RedstoneWire);
+        vm.set_block(0, 0, 0, LEVER_ON);
+        vm.step();
+        assert!(matches!(vm.cell(1, 0, 0).block, BlockType::Piston { extended: true, .. }));
+        assert!(matches!(vm.cell(2, 0, 0).block, BlockType::PistonHead { .. }));
+        assert_eq!(vm.cell(3, 0, 0).block, BlockType::Solid);
+        assert_eq!(vm.cell(4, 0, 0).block, BlockType::RedstoneBlock, "the wire broke");
+
+        vm.set_block(0, 0, 0, BlockType::Lever { on: false, attach: Facing::Down });
+        vm.step();
+        assert!(matches!(vm.cell(1, 0, 0).block, BlockType::Piston { extended: false, .. }));
+        assert_eq!(vm.cell(2, 0, 0).block, BlockType::Air, "a plain piston leaves it");
+    }
+
+    #[test]
+    fn piston_stops_at_obsidian_and_twelve_blocks() {
+        let mut vm = RedstoneVM::new(32);
+        vm.set_block(1, 0, 0, piston(Facing::East, false));
+        vm.set_block(2, 0, 0, BlockType::Solid);
+        vm.set_block(3, 0, 0, BlockType::Immovable);
+        vm.set_block(0, 0, 0, LEVER_ON);
+        vm.step();
+        assert!(matches!(vm.cell(1, 0, 0).block, BlockType::Piston { extended: false, .. }));
+
+        let mut vm = RedstoneVM::new(32);
+        vm.set_block(1, 0, 0, piston(Facing::East, false));
+        for x in 2..15 {
+            vm.set_block(x, 0, 0, BlockType::Solid);
+        }
+        vm.set_block(0, 0, 0, LEVER_ON);
+        vm.step();
+        assert!(matches!(vm.cell(1, 0, 0).block, BlockType::Piston { extended: false, .. }), "13 is too many");
+    }
+
+    #[test]
+    fn sticky_piston_pulls_and_slime_drags() {
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(1, 0, 1, piston(Facing::East, true));
+        vm.set_block(2, 0, 1, BlockType::Slime);
+        vm.set_block(2, 0, 2, BlockType::Solid);
+        vm.set_block(0, 0, 1, LEVER_ON);
+        vm.step();
+        assert_eq!(vm.cell(3, 0, 1).block, BlockType::Slime);
+        assert_eq!(vm.cell(3, 0, 2).block, BlockType::Solid, "dragged by the slime");
+        vm.set_block(0, 0, 1, BlockType::Lever { on: false, attach: Facing::Down });
+        vm.step();
+        assert_eq!(vm.cell(2, 0, 1).block, BlockType::Slime, "pulled back");
+        assert_eq!(vm.cell(2, 0, 2).block, BlockType::Solid);
+    }
+
+    #[test]
+    fn quasi_connectivity() {
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(1, 0, 0, piston(Facing::East, false));
+        // Powering the space above it.
+        vm.set_block(0, 1, 0, LEVER_ON);
+        vm.step();
+        assert!(matches!(vm.cell(1, 0, 0).block, BlockType::Piston { extended: true, .. }));
+    }
+
+    #[test]
+    fn hopper_moves_items_and_comparator_reads_them() {
+        let mut vm = RedstoneVM::new(16);
+        let chest = BlockType::Container { slots: 27, solid: false, partner: None };
+        vm.set_block(1, 1, 0, chest);
+        vm.set_items(1, 1, 0, &[(0, "minecraft:stone".into(), 64)]);
+        vm.set_block(1, 0, 0, BlockType::Hopper { facing: Facing::East });
+        vm.set_block(2, 0, 0, BlockType::Hopper { facing: Facing::Down });
+        // A comparator reading the second hopper, facing it (west).
+        vm.set_block(3, 0, 0, BlockType::Comparator { mode: ComparatorMode::Compare, facing: Facing::West });
+        // Pulled in step 1, passed on 4 steps later.
+        for _ in 0..5 {
+            vm.step();
+        }
+        assert_eq!(vm.items_at(1, 1, 0), [(0, "minecraft:stone".into(), 62)]);
+        assert_eq!(vm.items_at(2, 0, 0), [(0, "minecraft:stone".into(), 1)], "{:?}", vm.items_at(1, 0, 0));
+        vm.step();
+        assert_eq!(vm.cell(3, 0, 0).power, 1);
+
+        // Powered, a hopper stops.
+        vm.set_block(1, 0, 1, BlockType::RedstoneBlock);
+        let before = vm.items_at(1, 1, 0);
+        for _ in 0..10 {
+            vm.step();
+        }
+        assert_eq!(vm.items_at(1, 1, 0), before);
+    }
+
+    #[test]
+    fn dropper_drops_on_a_rising_edge() {
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(1, 0, 0, BlockType::Dropper { facing: Facing::East, triggered: false });
+        vm.set_items(1, 0, 0, &[(0, "minecraft:stone".into(), 2)]);
+        vm.set_block(2, 0, 0, BlockType::Container { slots: 27, solid: false, partner: None });
+        vm.set_block(0, 0, 0, LEVER_ON);
+        for _ in 0..6 {
+            vm.step();
+        }
+        assert_eq!(vm.items_at(2, 0, 0), [(0, "minecraft:stone".into(), 1)], "once while held on");
     }
 
     #[test]

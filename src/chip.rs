@@ -110,6 +110,22 @@ pub struct CircuitBlock {
     pub z: u32,
     /// Full block state, `minecraft:repeater[delay=2,facing=north,…]`.
     pub state: String,
+    /// A container's items: (slot, item id, count).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<(u8, String, u8)>,
+}
+
+/// How many slots a container block has (0: not a container).
+pub fn container_slots(id: &str) -> u8 {
+    let path = id.strip_prefix("minecraft:").unwrap_or(id);
+    match path {
+        "chest" | "trapped_chest" | "barrel" => 27,
+        p if p.ends_with("shulker_box") => 27,
+        "hopper" | "brewing_stand" => 5,
+        "dropper" | "dispenser" => 9,
+        "furnace" | "blast_furnace" | "smoker" => 3,
+        _ => 0,
+    }
 }
 
 impl CircuitBlock {
@@ -180,6 +196,33 @@ impl CircuitBlock {
             p if p.ends_with("weighted_pressure_plate") => BlockType::PressurePlate { power: self.power_prop() },
             p if p.ends_with("_pressure_plate") => BlockType::PressurePlate { power: if powered { 15 } else { 0 } },
             "observer" => BlockType::Observer { facing: self.facing() },
+            "piston" | "sticky_piston" => BlockType::Piston {
+                facing: self.facing(),
+                sticky: path == "sticky_piston",
+                extended: self.is("extended", "true"),
+            },
+            "piston_head" => BlockType::PistonHead { facing: self.facing(), sticky: self.is("type", "sticky") },
+            "moving_piston" => BlockType::Air,
+            "slime_block" => BlockType::Slime,
+            "honey_block" => BlockType::Honey,
+            "obsidian" | "crying_obsidian" | "bedrock" | "barrier" | "reinforced_deepslate" | "respawn_anchor"
+            | "enchanting_table" | "ender_chest" | "end_portal_frame" => BlockType::Immovable,
+            "hopper" => BlockType::Hopper { facing: self.facing() },
+            "dropper" | "dispenser" => BlockType::Dropper { facing: self.facing(), triggered: self.is("triggered", "true") },
+            "chest" | "trapped_chest" => BlockType::Container {
+                slots: 27,
+                solid: false,
+                partner: match self.prop("type") {
+                    Some("left") => Some(self.facing().clockwise()),
+                    Some("right") => Some(self.facing().clockwise().opposite()),
+                    _ => None,
+                },
+            },
+            p if container_slots(id) > 0 => BlockType::Container {
+                slots: container_slots(id),
+                solid: !p.ends_with("shulker_box") && p != "brewing_stand",
+                partner: None,
+            },
             "target" => BlockType::TargetBlock { power: self.power_prop() },
             "detector_rail" => BlockType::Source { power: if powered { 15 } else { 0 } },
             "daylight_detector" => BlockType::Source { power: self.power_prop() },
@@ -212,10 +255,14 @@ impl CircuitData {
         CircuitData { size: tier.world_size(), ..Default::default() }
     }
 
-    /// Places the circuit — its blocks and ports — into `vm`.
+    /// Places the circuit — its blocks, their items and its ports — into
+    /// `vm`.
     pub fn load_into(&self, vm: &mut RedstoneVM) {
         for block in &self.blocks {
             vm.set_block(block.x, block.y, block.z, block.block_type());
+            if !block.items.is_empty() {
+                vm.set_items(block.x, block.y, block.z, &block.items);
+            }
         }
         for port in &self.ports {
             vm.set_block(port.x, port.y, port.z, BlockType::Port(port.dir));
@@ -294,7 +341,7 @@ mod tests {
     fn blueprint_nbt_round_trip() {
         let c = CircuitData {
             size: 16,
-            blocks: vec![CircuitBlock { x: 0, y: 0, z: 0, state: "minecraft:repeater[delay=2]".into() }],
+            blocks: vec![CircuitBlock { x: 0, y: 0, z: 0, state: "minecraft:repeater[delay=2]".into(), items: Vec::new() }],
             ports: meta().ports,
         };
         let bp = Blueprint { name: "Adder".into(), tier: Tier::Iron, circuit: c };
@@ -303,7 +350,7 @@ mod tests {
 
     #[test]
     fn block_states_parse() {
-        let b = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into() };
+        let b = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new() };
         assert_eq!(b("minecraft:repeater[delay=3,facing=east,locked=false]").block_type(),
             BlockType::Repeater { delay_ticks: 3, facing: Facing::East });
         assert_eq!(b("minecraft:lever[face=wall,facing=east,powered=true]").block_type(),
@@ -315,7 +362,13 @@ mod tests {
         assert_eq!(b("minecraft:polished_blackstone_button[face=ceiling,facing=north,powered=false]").block_type(),
             BlockType::Button { pressed: false, attach: Facing::Up });
         assert_eq!(b("minecraft:glass").block_type(), BlockType::Transparent);
-        assert_eq!(b("minecraft:lime_shulker_box").block_type(), BlockType::Solid);
+        assert_eq!(b("minecraft:lime_shulker_box").block_type(), BlockType::Container { slots: 27, solid: false, partner: None });
+        assert_eq!(b("minecraft:chest[facing=north,type=left,waterlogged=false]").block_type(),
+            BlockType::Container { slots: 27, solid: false, partner: Some(Facing::East) });
+        assert_eq!(b("minecraft:sticky_piston[extended=false,facing=up]").block_type(),
+            BlockType::Piston { facing: Facing::Up, sticky: true, extended: false });
+        assert_eq!(b("minecraft:obsidian").block_type(), BlockType::Immovable);
+        assert_eq!(b("minecraft:stone").block_type(), BlockType::Solid);
         assert_eq!(b("minecraft:stone").block_type(), BlockType::Solid);
         assert_eq!(b(port::PORT_OUTPUT).block_type(), BlockType::Port(PortMode::Output));
     }
