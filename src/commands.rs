@@ -111,7 +111,6 @@ pub fn register(registry: &mut Registry) {
             "§6Yog VLSI §7— Very Large Scale Integration\n\
              §7Designs live on Blueprints: put one in a VLSI Workbench.\n\
              §7/vlsi save                 §f— save the circuit you're editing and return\n\
-             §7/vlsi port <name>          §f— name the port you last right-clicked\n\
              §7/vlsi alu install          §f— install the held chip into an ALU\n\
              §7/vlsi alu list             §f— list an ALU's chips\n\
              §7/vlsi chip <tier>          §f— give a blank chip\n\

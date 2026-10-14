@@ -70,6 +70,9 @@
   "screen.workbench.resources": "Resources",
   "screen.workbench.edit": "Design",
   "screen.workbench.fabricate": "Fabricate",
+  "screen.port.title": "Port",
+  "screen.port.name_placeholder": "Pin name",
+  "screen.port.done": "Done",
   "screen.alu.title": {
     "value": "ALU ({tier}) — chips {chips}/{max}, links {links}, {channels} channels",
     "comment": "ALU screen header"

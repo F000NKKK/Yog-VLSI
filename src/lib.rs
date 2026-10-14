@@ -55,7 +55,7 @@ impl Mod for YogVlsi {
 
         workbench::setup(registry);
         alu::setup(registry);
-        port::register(registry);
+        port::setup(registry);
         editor::register(registry);
         network::register(registry);
         commands::register(registry);
@@ -72,11 +72,13 @@ impl Mod for YogVlsi {
             workbench::load_resources(srv);
             alu::load_state(srv);
             cables::load(srv);
+            port::load(srv);
         });
         registry.on_server_stopping(|srv| {
             workbench::save_resources(srv);
             alu::save_state(srv);
             cables::save(srv);
+            port::save(srv);
         });
 
         info!("[yog-vlsi] ready.");
