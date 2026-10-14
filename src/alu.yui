@@ -25,7 +25,7 @@
             <Label flex="1" text="{x:Bind title()}" no_wrap="true" ellipsis="true" />
             <Label x:Name="help" style="@Info" tooltip="@Strings.screen.alu.help" />
             <Button x:Name="clear"
-                    w="80"
+                    w="96"
                     h="12"
                     text="@Strings.screen.alu.clear_links"
                     enabled="{x:Bind has_wires()}"
