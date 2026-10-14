@@ -255,7 +255,10 @@ fn layout(view: &BoardView, moved: &HashMap<Node, (f32, f32)>, w: f32, h: f32, c
         view.sides.iter().map(|s| width_of(&side_text(s))).chain([width_of(&title)]).fold(SIDE_MIN_W, |a, b| a.max(b + 8.0))
     };
     let (in_w, out_w) = (panel_w(Node::In), panel_w(Node::Out));
-    for (node, default_x, pw) in [(Node::In, 2.0, in_w), (Node::Out, (w / z.max(0.01)).max(in_w + out_w + 8.0) - out_w - 2.0, out_w)] {
+    // The width laid out in: the box's (at this zoom), and at least room
+    // for a column of chips between the panels.
+    let room = (w / z.max(0.01)).max(in_w + out_w + CHIP_W + 2.0 * GAP + 4.0);
+    for (node, default_x, pw) in [(Node::In, 2.0, in_w), (Node::Out, room - out_w - 2.0, out_w)] {
         let (x, y) = placed(node).unwrap_or((default_x, 2.0));
         let mut labels = Vec::new();
         for (row, side) in view.sides.iter().enumerate() {
@@ -285,7 +288,6 @@ fn layout(view: &BoardView, moved: &HashMap<Node, (f32, f32)>, w: f32, h: f32, c
     }
 
     // The chips, in columns between them unless moved.
-    let room = (w / z.max(0.01)).max(in_w + out_w + 8.0);
     let (x0, x1) = (in_w + 2.0 + GAP, room - out_w - 2.0 - GAP);
     let cols = (((x1 - x0 + GAP) / (CHIP_W + GAP)).floor() as usize).max(1);
     let mut col_y = vec![2.0f32; cols];
@@ -644,10 +646,10 @@ mod tests {
         assert_eq!(side.x, -498.0, "the panels move with the view");
         // A panel is as wide as its longest name.
         let mut named = view();
-        named.sides[0].name = Some("A very long port name".into());
+        named.sides[0].name = Some("A very long port name, longer than the title".into());
         let l = layout(&named, &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
         let inp = l.nodes.iter().find(|n| n.node == Node::In).unwrap();
-        assert_eq!(inp.w, "N A very long port name".len() as f32 * 6.0 + 8.0);
+        assert_eq!(inp.w, "N A very long port name, longer than the title".len() as f32 * 6.0 + 8.0);
     }
 
     #[test]
