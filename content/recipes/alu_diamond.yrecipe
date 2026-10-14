@@ -6,10 +6,10 @@
     "GDG"
   ],
   "key": {
-    "G": "minecraft:diamond",
-    "C": "minecraft:copper_ingot",
-    "R": "minecraft:repeater",
-    "D": "minecraft:diamond_block"
+    "G": "@item:minecraft:diamond",
+    "C": "@item:minecraft:copper_ingot",
+    "R": "@item:minecraft:repeater",
+    "D": "@item:minecraft:diamond_block"
   },
-  "result": "yog-vlsi:alu_diamond"
+  "result": "@item:yog-vlsi:alu_diamond"
 }

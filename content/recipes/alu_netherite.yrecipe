@@ -6,10 +6,10 @@
     "GDG"
   ],
   "key": {
-    "G": "minecraft:netherite_ingot",
-    "C": "minecraft:copper_ingot",
-    "R": "minecraft:repeater",
-    "D": "minecraft:diamond_block"
+    "G": "@item:minecraft:netherite_ingot",
+    "C": "@item:minecraft:copper_ingot",
+    "R": "@item:minecraft:repeater",
+    "D": "@item:minecraft:diamond_block"
   },
-  "result": "yog-vlsi:alu_netherite"
+  "result": "@item:yog-vlsi:alu_netherite"
 }

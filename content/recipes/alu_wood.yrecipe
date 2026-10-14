@@ -6,10 +6,10 @@
     "GDG"
   ],
   "key": {
-    "G": "minecraft:oak_planks",
-    "C": "minecraft:copper_ingot",
-    "R": "minecraft:repeater",
-    "D": "minecraft:redstone_block"
+    "G": "@item:minecraft:oak_planks",
+    "C": "@item:minecraft:copper_ingot",
+    "R": "@item:minecraft:repeater",
+    "D": "@item:minecraft:redstone_block"
   },
-  "result": "yog-vlsi:alu_wood"
+  "result": "@item:yog-vlsi:alu_wood"
 }

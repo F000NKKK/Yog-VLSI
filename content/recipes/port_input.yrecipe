@@ -6,9 +6,9 @@
     " R "
   ],
   "key": {
-    "R": "minecraft:redstone",
-    "S": "minecraft:stone"
+    "R": "@item:minecraft:redstone",
+    "S": "@item:minecraft:stone"
   },
-  "result": "yog-vlsi:port_input",
+  "result": "@item:yog-vlsi:port_input",
   "count": 2
 }

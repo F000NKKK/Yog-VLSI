@@ -6,10 +6,10 @@
     "GDG"
   ],
   "key": {
-    "G": "minecraft:cobblestone",
-    "C": "minecraft:copper_ingot",
-    "R": "minecraft:repeater",
-    "D": "minecraft:redstone_block"
+    "G": "@item:minecraft:cobblestone",
+    "C": "@item:minecraft:copper_ingot",
+    "R": "@item:minecraft:repeater",
+    "D": "@item:minecraft:redstone_block"
   },
-  "result": "yog-vlsi:alu_stone"
+  "result": "@item:yog-vlsi:alu_stone"
 }

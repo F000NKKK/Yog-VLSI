@@ -6,8 +6,8 @@
     "SSS"
   ],
   "key": {
-    "S": "minecraft:smooth_stone",
-    "R": "minecraft:redstone"
+    "S": "@item:minecraft:smooth_stone",
+    "R": "@item:minecraft:redstone"
   },
-  "result": "yog-vlsi:redstone_port"
+  "result": "@item:yog-vlsi:redstone_port"
 }

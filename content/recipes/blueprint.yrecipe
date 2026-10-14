@@ -6,8 +6,8 @@
     "PPP"
   ],
   "key": {
-    "P": "minecraft:paper",
-    "I": "minecraft:iron_ingot"
+    "P": "@item:minecraft:paper",
+    "I": "@item:minecraft:iron_ingot"
   },
-  "result": "yog-vlsi:blueprint"
+  "result": "@item:yog-vlsi:blueprint"
 }
