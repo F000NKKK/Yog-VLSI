@@ -1,22 +1,22 @@
 //! Virtual circuit editor.
 //!
 //! Runs in a dedicated pocket dimension (`DIMENSION_ID`, declared in
-//! `lib.rs`). Each player gets a lane of their own: a flat build platform
-//! (y = EDITOR_Y) the size of the chip's tier, inside a closed box of
-//! barriers. The box and the floor can't be broken — not even in creative.
+//! `lib.rs`). Each player gets a lane of their own: a cube the size of the
+//! chip's tier on every side (a tier-256 chip: 256³), wrapped in a shell of
+//! barriers one block thick — 258³ in all. The shell can't be broken, not
+//! even in creative.
 //!
 //! The design comes from a Blueprint in a workbench's blueprint slot and
 //! goes back onto it on `/vlsi save` (onto a new Blueprint in the player's
 //! inventory if that one was taken out meanwhile).
 //!
-//! Block state (facing, delay, powered, …) can't be read back from the
-//! world yet — the loader's `get_block` only returns the id — so saving
-//! captures block identity only (a loader limitation, not a bug here).
+//! Saving reads the whole cube in one `scan_region` call, with every
+//! block's full state (a repeater's delay and facing, …).
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use yog_api::{BlockPos, EventPhase, Registry, World};
+use yog_api::{BlockPos, EventPhase, Registry};
 
 use crate::chip::{Blueprint, CircuitBlock, CircuitData, Port};
 use crate::content::Items;
@@ -29,12 +29,9 @@ pub const DIMENSION_ID: &str = "yog-vlsi:editor";
 /// Id of the (void) chunk generator backing [`DIMENSION_ID`].
 pub const GENERATOR_ID: &str = "yog-vlsi:editor_terrain";
 
-/// Y level of the build platform inside every editor lane.
+/// Y of the cube's bottom layer inside every editor lane.
 const EDITOR_Y: i32 = 10;
-/// Height of the box's room above the platform.
-const ROOM_HEIGHT: i32 = 8;
-/// What the floor and the box are made of.
-const FLOOR: &str = "minecraft:bedrock";
+/// What the shell is made of: transparent, solid, unbreakable here.
 const WALL: &str = "minecraft:barrier";
 /// Lane 0's corner; each further lane is offset along X.
 const BASE_X: i32 = 0;
@@ -74,26 +71,33 @@ fn lane_for(player_name: &str) -> u32 {
     *lanes.entry(player_name.to_string()).or_insert(next)
 }
 
-/// Lays the lane's floor and its barrier box, and clears the platform.
-fn build_room(world: &World, origin_x: i32, origin_z: i32, size: i32) {
-    let top = EDITOR_Y + ROOM_HEIGHT;
-    for x in -1..=size {
-        for z in -1..=size {
-            let (wx, wz) = (origin_x + x, origin_z + z);
-            let edge = x == -1 || z == -1 || x == size || z == size;
-            world.set_block(BlockPos { x: wx, y: EDITOR_Y - 1, z: wz }, FLOOR);
-            world.set_block(BlockPos { x: wx, y: top, z: wz }, WALL);
-            for y in EDITOR_Y..top {
-                let block = if edge {
-                    WALL
-                } else if y == EDITOR_Y {
-                    "minecraft:air"
-                } else {
-                    continue;
-                };
-                world.set_block(BlockPos { x: wx, y, z: wz }, block);
-            }
-        }
+/// The cube's corners (inside the shell).
+fn interior(origin_x: i32, origin_z: i32, size: i32) -> (BlockPos, BlockPos) {
+    (
+        BlockPos { x: origin_x, y: EDITOR_Y, z: origin_z },
+        BlockPos { x: origin_x + size - 1, y: EDITOR_Y + size - 1, z: origin_z + size - 1 },
+    )
+}
+
+/// Wraps the lane's cube in its barrier shell and empties it.
+fn build_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i32) {
+    let (lo, hi) = interior(origin_x, origin_z, size);
+    let (x0, y0, z0, x1, y1, z1) = (lo.x - 1, lo.y - 1, lo.z - 1, hi.x + 1, hi.y + 1, hi.z + 1);
+    let at = |x, y, z| BlockPos { x, y, z };
+    // Six faces, not the whole cube: 6 × 258² blocks rather than 258³.
+    for (from, to) in [
+        (at(x0, y0, z0), at(x1, y0, z1)),
+        (at(x0, y1, z0), at(x1, y1, z1)),
+        (at(x0, y0, z0), at(x0, y1, z1)),
+        (at(x1, y0, z0), at(x1, y1, z1)),
+        (at(x0, y0, z0), at(x1, y1, z0)),
+        (at(x0, y0, z1), at(x1, y1, z1)),
+    ] {
+        srv.fill_region(DIMENSION_ID, from, to, WALL);
+    }
+    // What a previous design left inside.
+    for (pos, _) in srv.scan_region(DIMENSION_ID, lo, hi) {
+        srv.set_block_state(DIMENSION_ID, pos, "minecraft:air");
     }
 }
 
@@ -111,16 +115,15 @@ pub fn enter(
     let origin_x = BASE_X + lane as i32 * LANE_SPACING;
     let origin_z = BASE_Z;
     let size = blueprint.tier.world_size();
-    let world = World::new(srv, DIMENSION_ID);
-    build_room(&world, origin_x, origin_z, size as i32);
+    build_room(srv, origin_x, origin_z, size as i32);
 
-    let at = |x: u32, z: u32| BlockPos { x: origin_x + x as i32, y: EDITOR_Y, z: origin_z + z as i32 };
+    let at = |x: u32, y: u32, z: u32| BlockPos { x: origin_x + x as i32, y: EDITOR_Y + y as i32, z: origin_z + z as i32 };
     for block in &blueprint.circuit.blocks {
-        world.set_block(at(block.x, block.z), block.id());
+        srv.set_block_state(DIMENSION_ID, at(block.x, block.y, block.z), &block.state);
     }
     for p in &blueprint.circuit.ports {
-        world.set_block(at(p.x, p.z), port::block_for_dir(p.dir));
-        port::write_label(srv, DIMENSION_ID, at(p.x, p.z), &p.label);
+        srv.set_block_state(DIMENSION_ID, at(p.x, p.y, p.z), port::block_for_dir(p.dir));
+        port::write_label(srv, DIMENSION_ID, at(p.x, p.y, p.z), &p.label);
     }
 
     let (cx, cz) = ((origin_x + size as i32 / 2) as f64, (origin_z + size as i32 / 2) as f64);
@@ -160,23 +163,18 @@ pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
         return "§cYou are not editing a VLSI circuit right now.".into();
     };
 
-    let world = World::new(srv, DIMENSION_ID);
     let mut blocks = Vec::new();
     let mut ports = Vec::new();
-    for x in 0..session.size {
-        for z in 0..session.size {
-            let p = BlockPos { x: session.origin_x + x as i32, y: EDITOR_Y, z: session.origin_z + z as i32 };
-            let Some(block_id) = world.get_block(p) else { continue };
-            if block_id == "minecraft:air" || block_id == WALL {
-                continue;
-            }
-            if let Some(dir) = port::dir_for_block(&block_id) {
-                let label = port::read_label(srv, DIMENSION_ID, p).unwrap_or_else(|| format!("Port {}", ports.len()));
-                ports.push(Port { label, x, y: 0, z, dir });
-                continue;
-            }
-            blocks.push(CircuitBlock { x, y: 0, z, state: block_id });
+    let (lo, hi) = interior(session.origin_x, session.origin_z, session.size as i32);
+    for (p, state) in srv.scan_region(DIMENSION_ID, lo, hi) {
+        let (x, y, z) = ((p.x - lo.x) as u32, (p.y - lo.y) as u32, (p.z - lo.z) as u32);
+        let id = state.split('[').next().unwrap_or(&state);
+        if let Some(dir) = port::dir_for_block(id) {
+            let label = port::read_label(srv, DIMENSION_ID, p).unwrap_or_else(|| format!("Port {}", ports.len()));
+            ports.push(Port { label, x, y, z, dir });
+            continue;
         }
+        blocks.push(CircuitBlock { x, y, z, state });
     }
     let blueprint = Blueprint {
         name: session.name.clone(),
@@ -217,9 +215,9 @@ pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
     }
 }
 
-/// Whether a block in the editor dimension is part of a lane's box or floor.
-fn is_structure(block_id: &str, pos: BlockPos) -> bool {
-    block_id == WALL || (block_id == FLOOR && pos.y == EDITOR_Y - 1)
+/// Whether a block in the editor dimension is part of a lane's shell.
+fn is_structure(block_id: &str) -> bool {
+    block_id == WALL
 }
 
 pub fn register(registry: &mut Registry) {
@@ -231,8 +229,8 @@ pub fn register(registry: &mut Registry) {
         Some(save(srv, &ctx.source))
     });
 
-    // The box and the floor stay — even for creative players.
+    // The shell stays — even for creative players.
     registry.on_block_break(|e, phase, _srv| {
-        !(phase == EventPhase::Pre && e.dimension == DIMENSION_ID && is_structure(&e.block_id, e.pos))
+        !(phase == EventPhase::Pre && e.dimension == DIMENSION_ID && is_structure(&e.block_id))
     });
 }
