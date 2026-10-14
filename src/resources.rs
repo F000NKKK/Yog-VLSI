@@ -292,9 +292,9 @@ mod tests {
     fn cost_in_resources() {
         let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into() };
         // 4 dust → 1 redstone; a repeater → 3 redstone, 3 stone, ¼ log.
-        let c = cost(&[block("minecraft:redstone_wire"); 4]);
+        let c = cost(&vec![block("minecraft:redstone_wire"); 4]);
         assert_eq!(c, [1, 0, 0, 0, 0, 0]);
-        let c = cost(&[block("minecraft:repeater[delay=1]"); 4]);
+        let c = cost(&vec![block("minecraft:repeater[delay=1]"); 4]);
         assert_eq!(c[Resource::Redstone.index()], 3);
         assert_eq!(c[Resource::Stone.index()], 3);
         assert_eq!(c[Resource::Wood.index()], 1);
