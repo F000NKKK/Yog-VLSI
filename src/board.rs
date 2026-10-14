@@ -311,6 +311,7 @@ impl Board {
         // The chips settle with them: as many steps as they need, up to
         // their tier's — they answer this tick.
         for chip in self.chips.iter_mut().take(max).flatten() {
+            chip.vm.new_tick();
             chip.vm.settle(chip.meta.tier.steps_per_tick());
         }
 

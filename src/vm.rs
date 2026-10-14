@@ -587,6 +587,17 @@ impl RedstoneVM {
             .collect()
     }
 
+    /// A new server tick: every nested ALU's chips get their tier's steps
+    /// again (all the way down).
+    pub fn new_tick(&mut self) {
+        for alu in self.nested.values_mut() {
+            for c in &mut alu.chips {
+                c.left = c.budget;
+                c.vm.new_tick();
+            }
+        }
+    }
+
     /// Steps until the circuit settles — a step changes nothing — or for
     /// `budget` steps; how many it took. A circuit answers its inputs in
     /// the steps it needs, not one a server tick.
@@ -1209,13 +1220,25 @@ pub struct NestedPort {
     pub mode: PortMode,
 }
 
-/// A chip in a nested ALU: its ports, its circuit, the most steps it takes
-/// to settle each time the ALU runs (its tier's).
+/// A chip in a nested ALU: its ports, its circuit, and the steps its tier
+/// gives it each server tick. However many steps the circuit around it
+/// takes in a tick, it takes no more than its own — a slow chip stays slow
+/// inside a fast one, a fast one isn't sped up by it.
 pub struct NestedChip {
     pub slot: u8,
     pub ports: Vec<NestedPort>,
     pub budget: u32,
     pub vm: RedstoneVM,
+    /// Steps it has left this tick.
+    left: u32,
+    /// Settled with these inputs: nothing to do until they change.
+    settled_on: Option<Vec<u8>>,
+}
+
+impl NestedChip {
+    pub fn new(slot: u8, ports: Vec<NestedPort>, budget: u32, vm: RedstoneVM) -> Self {
+        NestedChip { slot, ports, budget, vm, left: budget, settled_on: None }
+    }
 }
 
 /// An ALU inside a circuit: its chips and the wires of its board, run each
@@ -1244,11 +1267,26 @@ impl NestedAlu {
             wires.iter().find(|(_, t)| t == to).and_then(|(f, _)| levels.get(f)).copied().unwrap_or(0)
         };
         for c in &mut self.chips {
-            for p in c.ports.iter().filter(|p| p.mode.inputs()) {
-                let level = into(&self.wires, &levels, &NestedPin::Chip(c.slot, p.label.clone()));
+            let ins: Vec<u8> = c
+                .ports
+                .iter()
+                .filter(|p| p.mode.inputs())
+                .map(|p| into(&self.wires, &levels, &NestedPin::Chip(c.slot, p.label.clone())))
+                .collect();
+            if c.settled_on.as_ref() == Some(&ins) {
+                continue;
+            }
+            for (p, &level) in c.ports.iter().filter(|p| p.mode.inputs()).zip(&ins) {
                 c.vm.set_port_input(p.x, p.y, p.z, level);
             }
-            c.vm.settle(c.budget);
+            // Out of steps this tick: it waits for the next, as it would in the world.
+            if c.left == 0 {
+                continue;
+            }
+            let used = c.vm.settle(c.left);
+            let settled = used < c.left;
+            c.left -= used;
+            c.settled_on = settled.then_some(ins);
         }
         outputs(&self.chips, &mut levels);
         std::array::from_fn(|f| into(&self.wires, &levels, &NestedPin::Out(f as u8)))
