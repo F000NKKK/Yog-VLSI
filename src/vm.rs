@@ -557,6 +557,39 @@ impl RedstoneVM {
             .collect()
     }
 
+    /// Steps until the circuit settles — a step changes nothing — or for
+    /// `budget` steps; how many it took. A circuit answers its inputs in
+    /// the steps it needs, not one a server tick.
+    pub fn settle(&mut self, budget: u32) -> u32 {
+        let mut before = self.state();
+        for n in 1..=budget {
+            self.step();
+            let now = self.state();
+            if now == before {
+                return n;
+            }
+            before = now;
+        }
+        budget
+    }
+
+    /// A fingerprint of every cell's state (block, levels, timers).
+    fn state(&self) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut mix = |v: u64| {
+            h ^= v;
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        };
+        for &i in &self.active {
+            let c = self.get(i);
+            let mut bh = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hash::hash(&c.block, &mut bh);
+            mix(std::hash::Hasher::finish(&bh));
+            mix(u64::from(c.power) | u64::from(c.strong) << 8 | u64::from(c.weak) << 16 | u64::from(c.timer) << 24 | u64::from(i) << 32);
+        }
+        h
+    }
+
     pub fn step(&mut self) {
         self.tick += 1;
         self.shape_wire();
@@ -1483,5 +1516,22 @@ mod tests {
         }
         assert!(vm.active.windows(2).all(|w| w[0] < w[1]));
         assert_eq!(vm.pos(vm.active[4]), (15, 15, 15));
+    }
+
+    #[test]
+    fn a_not_gate_answers_in_one_settle_and_a_quiet_circuit_stops_early() {
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(0, 0, 0, BlockType::Port(PortMode::Input));
+        vm.set_block(1, 0, 0, BlockType::RedstoneWire);
+        vm.set_block(2, 0, 0, BlockType::Solid);
+        vm.set_block(3, 0, 0, BlockType::RedstoneTorch { lit: true, attach: Facing::West });
+        vm.set_block(4, 0, 0, BlockType::Port(PortMode::Output));
+        vm.settle(8);
+        assert_eq!(vm.get_port_output(4, 0, 0), 15);
+        vm.set_port_input(0, 0, 0, 15);
+        let steps = vm.settle(8);
+        assert_eq!(vm.get_port_output(4, 0, 0), 0, "answered the same tick");
+        assert!(steps < 8, "stopped once nothing changed ({steps})");
+        assert_eq!(vm.settle(8), 1, "nothing to do: one look");
     }
 }

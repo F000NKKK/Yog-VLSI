@@ -76,7 +76,7 @@ impl Mod for YogVlsi {
                     })
                     .collect();
                 let ports = if ports.is_empty() { res::Strings::chip_no_ports() } else { res::Strings::chip_ports(ports.join(", ")) };
-                Some((Some(meta.name), vec![res::Strings::chip_info(meta.tier.name(), meta.tier.tick_rate()), ports]))
+                Some((Some(meta.name), vec![res::Strings::chip_info(meta.tier.name(), meta.tier.steps_per_tick()), ports]))
             });
         }
         workbench::setup(registry);

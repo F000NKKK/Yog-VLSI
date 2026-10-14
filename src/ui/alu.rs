@@ -273,9 +273,10 @@ fn layout(
         view.sides.iter().map(|s| width_of(&side_text(s))).chain([width_of(&title)]).fold(SIDE_MIN_W, |a, b| a.max(b + 8.0))
     };
     let (in_w, out_w) = (panel_w(Node::In), panel_w(Node::Out));
-    // The width laid out in: the box's (at this zoom), and at least room
-    // for a column of chips between the panels.
-    let room = (w / z.max(0.01)).max(in_w + out_w + CHIP_W + 2.0 * GAP + 4.0);
+    // The width laid out in: the box's (at zoom 1 — the default places
+    // don't move as the view zooms), and at least room for a column of
+    // chips between the panels.
+    let room = w.max(in_w + out_w + CHIP_W + 2.0 * GAP + 4.0);
     for (node, default_x, pw) in [(Node::In, 2.0, in_w), (Node::Out, room - out_w - 2.0, out_w)] {
         let (x, y) = placed(node).unwrap_or((default_x, 2.0));
         let mut labels = Vec::new();
@@ -446,10 +447,31 @@ impl Clip<'_> {
         }
     }
 
+    /// Text cut to the box: the characters that fit whole across it (a
+    /// line half out keeps what shows); a line not all in it up and down
+    /// isn't drawn.
     fn text(&self, text: &str, x: f32, y: f32, scale: f32, color: u32) {
-        let w = self.d2.text_width(text, "") * scale;
-        if x >= self.x0 - 0.5 && y >= self.y0 - 0.5 && x + w <= self.x1 + 0.5 && y + 8.0 * scale <= self.y1 + 0.5 {
-            self.d2.text_scaled(text, "", x, y, scale, color, false);
+        if y < self.y0 - 0.5 || y + 8.0 * scale > self.y1 + 0.5 {
+            return;
+        }
+        let width = |t: &str| self.d2.text_width(t, "") * scale;
+        let (mut start, mut x) = (0, x);
+        let chars: Vec<(usize, char)> = text.char_indices().collect();
+        // Drop what's left of the box.
+        while x < self.x0 - 0.5 && start < chars.len() {
+            let (i, c) = chars[start];
+            x += width(&text[i..i + c.len_utf8()]);
+            start += 1;
+        }
+        let mut end = chars.len();
+        let from = chars.get(start).map_or(text.len(), |(i, _)| *i);
+        // And what's right of it.
+        while end > start && x + width(&text[from..chars.get(end).map_or(text.len(), |(i, _)| *i)]) > self.x1 + 0.5 {
+            end -= 1;
+        }
+        if end > start {
+            let to = chars.get(end).map_or(text.len(), |(i, _)| *i);
+            self.d2.text_scaled(&text[from..to], "", x, y, scale, color, false);
         }
     }
 }
@@ -772,6 +794,16 @@ mod tests {
         // Pulled open: more rows.
         let l = layout(&view(), &HashMap::new(), &HashMap::from([(2, 10)]), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
         assert!(l.pin(&Pin::new(Node::Bus(2), "10"), true).is_some());
+    }
+
+    #[test]
+    fn zooming_leaves_every_node_where_it_is_in_the_world() {
+        let at = |zoom| {
+            let l = layout(&view(), &HashMap::new(), &HashMap::new(), 360.0, 140.0, Camera { zoom, pan: (0.0, 0.0) }, &|t| t.len() as f32 * 6.0);
+            l.nodes.iter().map(|n| (n.node, n.x / zoom, n.y / zoom)).collect::<Vec<_>>()
+        };
+        assert_eq!(at(1.0), at(2.0));
+        assert_eq!(at(1.0), at(0.5));
     }
 
     #[test]

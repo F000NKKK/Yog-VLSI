@@ -16,9 +16,6 @@ pub enum Tier {
     Netherite,
 }
 
-/// Server ticks per second; VM steps are scheduled against it.
-pub const SERVER_TICKS_PER_SECOND: u32 = 20;
-
 impl Tier {
     pub const ALL: [Tier; 6] = [
         Tier::Wood,
@@ -29,15 +26,17 @@ impl Tier {
         Tier::Netherite,
     ];
 
-    /// VM steps per second (vanilla redstone is 20).
-    pub fn tick_rate(self) -> u32 {
+    /// The most VM steps a chip takes in one server tick to settle: a
+    /// circuit answers its inputs the tick they change, in as many steps
+    /// as it needs up to this (a clock in it runs this fast).
+    pub fn steps_per_tick(self) -> u32 {
         match self {
-            Tier::Wood => 5,
-            Tier::Stone => 10,
-            Tier::Gold => 20,
-            Tier::Iron => 25,
-            Tier::Diamond => 30,
-            Tier::Netherite => 40,
+            Tier::Wood => 8,
+            Tier::Stone => 16,
+            Tier::Gold => 32,
+            Tier::Iron => 48,
+            Tier::Diamond => 64,
+            Tier::Netherite => 128,
         }
     }
 
@@ -156,7 +155,7 @@ mod tests {
     #[test]
     fn tiers_grow() {
         for pair in Tier::ALL.windows(2) {
-            assert!(pair[0].tick_rate() < pair[1].tick_rate());
+            assert!(pair[0].steps_per_tick() < pair[1].steps_per_tick());
             assert!(pair[0].world_size() <= pair[1].world_size());
             assert!(pair[0].max_chips() < pair[1].max_chips());
         }

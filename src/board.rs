@@ -31,7 +31,7 @@ use yog_api::{BlockPos, EventPhase, Registry, Server, Storage};
 
 use crate::cables;
 use crate::chip::{ChipMeta, CircuitData};
-use crate::tier::{SERVER_TICKS_PER_SECOND, Tier};
+use crate::tier::Tier;
 use crate::vm::{PortMode, RedstoneVM};
 
 /// The six sides, in the order the graph lists them.
@@ -118,8 +118,6 @@ struct Installed {
     meta: ChipMeta,
     circuit: CircuitData,
     vm: RedstoneVM,
-    /// Steps owed (a tier steps `tick_rate` times a second).
-    owed: f32,
 }
 
 struct Board {
@@ -242,7 +240,7 @@ impl Board {
                     let circuit = CircuitData::load_for_chip(&srv.game_dir(), &meta.id)
                         .unwrap_or_else(|| CircuitData::empty(meta.tier));
                     let vm = circuit.vm();
-                    *entry = Some(Installed { meta, circuit, vm, owed: 0.0 });
+                    *entry = Some(Installed { meta, circuit, vm });
                 }
                 None => *entry = None,
             }
@@ -310,13 +308,10 @@ impl Board {
             }
         }
 
-        // The chips step at their tiers' rates.
+        // The chips settle with them: as many steps as they need, up to
+        // their tier's — they answer this tick.
         for chip in self.chips.iter_mut().take(max).flatten() {
-            chip.owed += chip.meta.tier.tick_rate() as f32 / SERVER_TICKS_PER_SECOND as f32;
-            while chip.owed >= 1.0 {
-                chip.vm.step();
-                chip.owed -= 1.0;
-            }
+            chip.vm.settle(chip.meta.tier.steps_per_tick());
         }
 
         // Out: what they put out now, through the output sides.
@@ -589,7 +584,7 @@ mod tests {
             ports.iter().enumerate().map(|(i, (l, d))| Port { label: l.to_string(), x: i as u32, y: 0, z: 0, dir: *d }).collect();
         let circuit = CircuitData { size: 16, blocks: Vec::new(), ports: ports.clone() };
         let meta = ChipMeta { id: format!("c{slot}"), tier: Tier::ALL[0], name: "Chip".into(), ports };
-        (slot, Installed { vm: circuit.vm(), circuit, meta, owed: 0.0 })
+        (slot, Installed { vm: circuit.vm(), circuit, meta })
     }
 
     fn board() -> Board {
