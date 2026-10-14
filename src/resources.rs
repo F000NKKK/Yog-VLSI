@@ -96,8 +96,8 @@ pub fn compact(n: u64) -> String {
 
 /// The share of a block's crafting cost fabricating it costs — and again
 /// for every level an ALU nests it deeper (a chip in an ALU in the design
-/// costs an eighth of an eighth).
-pub const PRINT_SHARE: f64 = 1.0 / 8.0;
+/// costs half of a half).
+pub const PRINT_SHARE: f64 = 1.0 / 2.0;
 
 /// What crafting `blocks` takes, in resources (unrounded).
 fn craft(blocks: &[CircuitBlock]) -> [f64; 6] {
@@ -347,22 +347,22 @@ mod tests {
     #[test]
     fn cost_in_resources() {
         let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new() };
-        // An eighth of crafting, rounded up: 8 dust → 1 redstone; 4
-        // repeaters (3 redstone, 3 stone, ¼ log each) → 2, 2, 1.
+        // Half of crafting, rounded up: 8 dust → 4 redstone; 4 repeaters
+        // (3 redstone, 3 stone, ¼ log each) → 6, 6, 1.
         let c = cost(&vec![block("minecraft:redstone_wire"); 8]);
-        assert_eq!(c, [1, 0, 0, 0, 0, 0]);
+        assert_eq!(c, [4, 0, 0, 0, 0, 0]);
         let c = cost(&vec![block("minecraft:repeater[delay=1]"); 4]);
-        assert_eq!(c[Resource::Redstone.index()], 2);
-        assert_eq!(c[Resource::Stone.index()], 2);
+        assert_eq!(c[Resource::Redstone.index()], 6);
+        assert_eq!(c[Resource::Stone.index()], 6);
         assert_eq!(c[Resource::Wood.index()], 1);
     }
 
     #[test]
-    fn a_chip_in_an_alu_in_the_design_costs_another_eighth() {
+    fn a_chip_in_an_alu_in_the_design_costs_another_half() {
         use crate::chip::{ChipMeta, CircuitData, SavedAlu};
         use crate::tier::Tier;
         let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new() };
-        // The inner chip: 64 dust — 8 redstone printed alone, 1 inside an ALU.
+        // The inner chip: 64 dust — 32 redstone printed alone, 16 inside an ALU.
         let inner = CircuitData { size: 16, blocks: vec![block("minecraft:redstone_wire"); 64], ..Default::default() };
         let meta = ChipMeta { id: "inner".into(), tier: Tier::Wood, name: "x".into(), ports: Vec::new() };
         let outer = CircuitData {
@@ -372,8 +372,8 @@ mod tests {
             alus: vec![SavedAlu { x: 0, y: 0, z: 0, tier: Tier::Wood, chips: vec![(0, meta)], wires: Vec::new() }],
         };
         let load = |id: &str| (id == "inner").then(|| inner.clone());
-        assert_eq!(circuit_cost(&inner, &load)[Resource::Redstone.index()], 8);
-        // 8 dust → 1, and the inner 64 → 64 / 64 = 1: 2.
-        assert_eq!(circuit_cost(&outer, &load)[Resource::Redstone.index()], 2);
+        assert_eq!(circuit_cost(&inner, &load)[Resource::Redstone.index()], 32);
+        // 8 dust → 4, and the inner 64 → 64 / 4 = 16: 20.
+        assert_eq!(circuit_cost(&outer, &load)[Resource::Redstone.index()], 20);
     }
 }
