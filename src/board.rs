@@ -96,6 +96,9 @@ struct Saved {
     wires: Vec<Wire>,
     /// Where the player put each chip slot's node.
     layout: Vec<(u8, (f32, f32))>,
+    /// Where the player put the In and Out panels.
+    #[serde(default)]
+    panels: Vec<(Node, (f32, f32))>,
 }
 
 /// A chip sitting in a slot.
@@ -119,7 +122,7 @@ struct Board {
 impl Board {
     fn new(tier: Tier) -> Self {
         Board {
-            saved: Saved { tier, wires: Vec::new(), layout: Vec::new() },
+            saved: Saved { tier, wires: Vec::new(), layout: Vec::new(), panels: Vec::new() },
             chips: (0..CHIP_SLOTS).map(|_| None).collect(),
             levels: HashMap::new(),
             side_names: HashMap::new(),
@@ -174,9 +177,13 @@ impl Board {
             }
             Request::Disconnect { to, .. } => self.saved.wires.retain(|w| w.to != to),
             Request::Clear { .. } => self.saved.wires.clear(),
-            Request::Move { slot, x, y, .. } => {
+            Request::Move { node: Node::Chip(slot), x, y, .. } => {
                 self.saved.layout.retain(|(s, _)| *s != slot);
                 self.saved.layout.push((slot, (x, y)));
+            }
+            Request::Move { node, x, y, .. } => {
+                self.saved.panels.retain(|(n, _)| *n != node);
+                self.saved.panels.push((node, (x, y)));
             }
         }
         Ok(())
@@ -299,7 +306,7 @@ impl Board {
                 })
                 .collect(),
             wires: self.saved.wires.clone(),
-            layout: self.saved.layout.clone(),
+            layout: self.saved.layout.iter().map(|&(s, p)| (Node::Chip(s), p)).chain(self.saved.panels.iter().copied()).collect(),
             levels: self.levels.iter().map(|(p, l)| (p.clone(), *l)).collect(),
         }
     }
@@ -332,7 +339,8 @@ pub struct BoardView {
     pub chips: Vec<ChipView>,
     pub sides: Vec<SideView>,
     pub wires: Vec<Wire>,
-    pub layout: Vec<(u8, (f32, f32))>,
+    /// Where the player put the nodes (chips, the In and Out panels).
+    pub layout: Vec<(Node, (f32, f32))>,
     pub levels: Vec<(Pin, u8)>,
 }
 
@@ -341,7 +349,7 @@ pub enum Request {
     Connect { alu: AluId, from: Pin, to: Pin },
     Disconnect { alu: AluId, to: Pin },
     Clear { alu: AluId },
-    Move { alu: AluId, slot: u8, x: f32, y: f32 },
+    Move { alu: AluId, node: Node, x: f32, y: f32 },
 }
 
 impl Request {

@@ -10,8 +10,8 @@
 //! - drag a wire off the input pin it ends at to move it to another pin,
 //!   or into empty space to remove it;
 //! - drag a chip by its title to move it;
-//! - drag empty space to move the view, turn the wheel to zoom it (the
-//!   ALU's sides stay at the edges).
+//! - drag empty space to move the view, turn the wheel to zoom it; the In
+//!   and Out panels move by their titles too, as wide as their names.
 
 yog_api::ui_include!("ui/alu");
 
@@ -67,7 +67,8 @@ impl AluVm {
 const SURFACE_ID: &str = "yog-vlsi:alu_graph";
 const ROW: f32 = 10.0;
 const HEAD: f32 = 12.0;
-const SIDE_W: f32 = 62.0;
+/// The narrowest an In/Out panel gets (it widens to its ports' names).
+const SIDE_MIN_W: f32 = 40.0;
 const CHIP_W: f32 = 100.0;
 const GAP: f32 = 10.0;
 /// How near a pin the pointer has to be to take it.
@@ -167,10 +168,10 @@ impl Layout {
             .min_by(|a, b| (a.x - x).abs().total_cmp(&(b.x - x).abs()))
     }
 
-    /// The chip whose title bar is at `(x, y)`.
+    /// The node whose title bar is at `(x, y)` (the topmost).
     fn header(&self, x: f32, y: f32) -> Option<&NodeAt> {
         self.nodes.iter().rev().find(|n| {
-            matches!(n.node, Node::Chip(_)) && x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.head
+            x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.head
         })
     }
 }
@@ -182,8 +183,9 @@ enum Drag {
     FromSource { from: Pin, lifted: Option<Pin> },
     /// A wire from a sink, looking for its source.
     FromSink { to: Pin },
-    /// A chip being moved; the pointer's offset in its title bar.
-    Node { slot: u8, dx: f32, dy: f32 },
+    /// A node (a chip, the In or Out panel) being moved; the pointer's
+    /// offset in its title bar.
+    Node { node: Node, dx: f32, dy: f32 },
     /// The view being moved: where the pointer and the view were at the start.
     Pan { from: (f32, f32), pan: (f32, f32) },
 }
@@ -193,8 +195,8 @@ struct Graph {
     layout: Layout,
     drag: Drag,
     pointer: (f32, f32),
-    /// Chip positions moved here but not yet echoed back by the server.
-    moved: HashMap<u8, (f32, f32)>,
+    /// Node positions moved here but not yet echoed back by the server.
+    moved: HashMap<Node, (f32, f32)>,
     camera: Camera,
 }
 
@@ -223,9 +225,10 @@ fn level_color(level: u8) -> u32 {
     0xFF00_0000 | mix(16) | mix(8) | mix(0)
 }
 
-/// Lays the graph out in a `w`×`h` box — the ALU's sides at its edges, the
-/// chips where `cam` shows them; `width_of` measures text.
-fn layout(view: &BoardView, moved: &HashMap<u8, (f32, f32)>, w: f32, h: f32, cam: Camera, width_of: &dyn Fn(&str) -> f32) -> Layout {
+/// Lays the graph out in a `w`×`h` box, every node where `cam` shows it —
+/// where the player put it, else the In panel on the left, the Out panel
+/// on the right and the chips in columns between; `width_of` measures text.
+fn layout(view: &BoardView, moved: &HashMap<Node, (f32, f32)>, w: f32, h: f32, cam: Camera, width_of: &dyn Fn(&str) -> f32) -> Layout {
     let _ = h;
     let mut out = Layout::default();
     let fit = |s: &str, room: f32| -> String {
@@ -238,44 +241,59 @@ fn layout(view: &BoardView, moved: &HashMap<u8, (f32, f32)>, w: f32, h: f32, cam
         }
         format!("{t}…")
     };
+    let z = cam.zoom;
+    let at = |wx: f32, wy: f32| cam.to_local((wx, wy));
+    let placed = |node: Node| moved.get(&node).copied().or_else(|| view.layout.iter().find(|(n, _)| *n == node).map(|(_, p)| *p));
 
-    // The ALU's sides: In on the left, Out on the right.
-    for (node, x) in [(Node::In, 2.0), (Node::Out, w - SIDE_W - 2.0)] {
+    // The ALU's sides: In (its sources) and Out (its sinks), each as wide as its names.
+    let side_text = |side: &crate::board::SideView| match &side.name {
+        Some(name) => format!("{} {name}", side.side),
+        None => side.side.clone(),
+    };
+    let panel_w = |node: Node| {
+        let title = if node == Node::In { Strings::screen_alu_inputs() } else { Strings::screen_alu_outputs() };
+        view.sides.iter().map(|s| width_of(&side_text(s))).chain([width_of(&title)]).fold(SIDE_MIN_W, |a, b| a.max(b + 8.0))
+    };
+    let (in_w, out_w) = (panel_w(Node::In), panel_w(Node::Out));
+    for (node, default_x, pw) in [(Node::In, 2.0, in_w), (Node::Out, (w / z.max(0.01)).max(in_w + out_w + 8.0) - out_w - 2.0, out_w)] {
+        let (x, y) = placed(node).unwrap_or((default_x, 2.0));
         let mut labels = Vec::new();
         for (row, side) in view.sides.iter().enumerate() {
-            let y = 2.0 + HEAD + row as f32 * ROW;
+            let ry = y + HEAD + row as f32 * ROW;
             let source = node == Node::In;
             let usable = !source || !side.output;
-            let text = match &side.name {
-                Some(name) => format!("{} {name}", side.side),
-                None => side.side.clone(),
-            };
-            let text = fit(&text, SIDE_W - 8.0);
-            let tx = if source { x + 3.0 } else { x + SIDE_W - 3.0 - width_of(&text) };
-            labels.push((text, tx, y + 1.0, if usable { TEXT } else { TEXT_DIM }));
-            out.pins.push(PinAt {
-                pin: Pin::new(node, &side.side),
-                x: if source { x + SIDE_W } else { x },
-                y: y + ROW / 2.0,
-                reach_y: ROW / 2.0,
-                source,
-                usable,
-            });
+            let text = side_text(side);
+            let (tx, ty) = at(if source { x + 3.0 } else { x + pw - 3.0 - width_of(&text) }, ry + 1.0);
+            labels.push((text, tx, ty, if usable { TEXT } else { TEXT_DIM }));
+            let (px, py) = at(if source { x + pw } else { x }, ry + ROW / 2.0);
+            out.pins.push(PinAt { pin: Pin::new(node, &side.side), x: px, y: py, reach_y: ROW * z / 2.0, source, usable });
         }
         let title = if node == Node::In { Strings::screen_alu_inputs() } else { Strings::screen_alu_outputs() };
-        out.nodes.push(NodeAt { node, x, y: 2.0, w: SIDE_W, h: HEAD + 6.0 * ROW + 2.0, head: HEAD, scale: 1.0, title, awake: true, labels });
+        let (nx, ny) = at(x, y);
+        out.nodes.push(NodeAt {
+            node,
+            x: nx,
+            y: ny,
+            w: pw * z,
+            h: (HEAD + view.sides.len() as f32 * ROW + 2.0) * z,
+            head: HEAD * z,
+            scale: z,
+            title,
+            awake: true,
+            labels,
+        });
     }
 
     // The chips, in columns between them unless moved.
-    let (x0, x1) = (SIDE_W + 2.0 + GAP, w - SIDE_W - 2.0 - GAP);
+    let room = (w / z.max(0.01)).max(in_w + out_w + 8.0);
+    let (x0, x1) = (in_w + 2.0 + GAP, room - out_w - 2.0 - GAP);
     let cols = (((x1 - x0 + GAP) / (CHIP_W + GAP)).floor() as usize).max(1);
     let mut col_y = vec![2.0f32; cols];
     for (i, chip) in view.chips.iter().enumerate() {
         let ins: Vec<_> = chip.pins.iter().filter(|(_, m)| m.inputs()).collect();
         let outs: Vec<_> = chip.pins.iter().filter(|(_, m)| m.outputs()).collect();
         let nh = HEAD + ins.len().max(outs.len()).max(1) as f32 * ROW + 2.0;
-        let saved = view.layout.iter().find(|(s, _)| *s == chip.slot).map(|(_, p)| *p);
-        let (x, y) = match moved.get(&chip.slot).copied().or(saved) {
+        let (x, y) = match placed(Node::Chip(chip.slot)) {
             Some(p) => p,
             None => {
                 let col = i % cols;
@@ -285,8 +303,6 @@ fn layout(view: &BoardView, moved: &HashMap<u8, (f32, f32)>, w: f32, h: f32, cam
             }
         };
         // Laid out in the world, drawn where the camera shows it.
-        let z = cam.zoom;
-        let at = |wx: f32, wy: f32| cam.to_local((wx, wy));
         let mut labels = Vec::new();
         for (row, (name, _)) in ins.iter().enumerate() {
             let ry = y + HEAD + row as f32 * ROW;
@@ -411,10 +427,8 @@ impl Surface for GraphSurface {
                 d2.text(&level.to_string(), x + 3.0, y - 8.0, 0xFFFFD0D0, false);
             }
         };
-        let is_side = |n: &Node| matches!(n, Node::In | Node::Out);
-
-        // The chips, under everything.
-        for n in g.layout.nodes.iter().filter(|n| !is_side(&n.node)) {
+        // The nodes, under the wires.
+        for n in &g.layout.nodes {
             node(n);
         }
 
@@ -427,15 +441,7 @@ impl Surface for GraphSurface {
             let level = levels.get(from).copied().unwrap_or(0);
             trace(&d2, at(a.x, a.y), at(b.x, b.y), level_color(level));
         }
-        for p in g.layout.pins.iter().filter(|p| !is_side(&p.pin.node)) {
-            pin(p);
-        }
-
-        // The ALU's sides, on top: they stay at the edges.
-        for n in g.layout.nodes.iter().filter(|n| is_side(&n.node)) {
-            node(n);
-        }
-        for p in g.layout.pins.iter().filter(|p| is_side(&p.pin.node)) {
+        for p in &g.layout.pins {
             pin(p);
         }
 
@@ -485,10 +491,7 @@ impl Surface for GraphSurface {
                     },
                     Some(_) => Drag::None,
                     None => match g.layout.header(x, y) {
-                        Some(n) => match n.node {
-                            Node::Chip(slot) => Drag::Node { slot, dx: x - n.x, dy: y - n.y },
-                            _ => Drag::None,
-                        },
+                        Some(n) => Drag::Node { node: n.node, dx: x - n.x, dy: y - n.y },
                         // Empty space: the view moves.
                         None => Drag::Pan { from: (x, y), pan: g.camera.pan },
                     },
@@ -498,9 +501,9 @@ impl Surface for GraphSurface {
             Pointer::Drag { x, y } | Pointer::Move { x, y } => {
                 g.pointer = (x, y);
                 match g.drag {
-                    Drag::Node { slot, dx, dy } => {
+                    Drag::Node { node, dx, dy } => {
                         let world = g.camera.to_world((x - dx, y - dy));
-                        g.moved.insert(slot, world);
+                        g.moved.insert(node, world);
                     }
                     Drag::Pan { from, pan } => g.camera.pan = (pan.0 + x - from.0, pan.1 + y - from.1),
                     _ => {}
@@ -520,8 +523,8 @@ impl Surface for GraphSurface {
                     Drag::FromSink { to } => {
                         target.filter(|t| t.source).map(|t| Request::Connect { alu, from: t.pin, to })
                     }
-                    Drag::Node { slot, .. } => {
-                        g.moved.get(&slot).map(|&(x, y)| Request::Move { alu, slot, x: x.round(), y: y.round() })
+                    Drag::Node { node, .. } => {
+                        g.moved.get(&node).map(|&(x, y)| Request::Move { alu, node, x: x.round(), y: y.round() })
                     }
                     Drag::Pan { .. } | Drag::None => None,
                 };
@@ -565,7 +568,7 @@ pub fn setup(registry: &mut Registry) {
         {
             let mut g = GRAPH.lock().unwrap();
             // The server has the moves it was sent.
-            g.moved.retain(|slot, p| !view.layout.iter().any(|(s, q)| s == slot && q == p));
+            g.moved.retain(|node, p| !view.layout.iter().any(|(n, q)| n == node && q == p));
             if g.view.as_ref().is_some_and(|v| v.alu != view.alu) {
                 g.moved.clear();
             }
@@ -611,8 +614,9 @@ mod tests {
         // In:E is an output side now: drawn, not usable.
         assert!(!l.pin(&Pin::new(Node::In, "E"), true).unwrap().usable);
         assert!(l.pin(&Pin::new(Node::Out, "E"), false).unwrap().usable);
-        // Nothing overlaps the side columns.
-        assert!(chip.x >= SIDE_W + 2.0 && chip.x + CHIP_W <= 360.0 - SIDE_W - 2.0);
+        // Nothing overlaps the panels.
+        let (inp, outp) = (l.nodes.iter().find(|n| n.node == Node::In).unwrap(), l.nodes.iter().find(|n| n.node == Node::Out).unwrap());
+        assert!(chip.x >= inp.x + inp.w && chip.x + CHIP_W <= outp.x);
     }
 
     #[test]
@@ -637,7 +641,13 @@ mod tests {
         let chip = l.nodes.iter().find(|n| n.node == Node::Chip(0)).unwrap();
         assert!(chip.x < 0.0, "panned out of the box, not held in it");
         let side = l.nodes.iter().find(|n| n.node == Node::In).unwrap();
-        assert_eq!(side.x, 2.0, "the sides stay at the edges");
+        assert_eq!(side.x, -498.0, "the panels move with the view");
+        // A panel is as wide as its longest name.
+        let mut named = view();
+        named.sides[0].name = Some("A very long port name".into());
+        let l = layout(&named, &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
+        let inp = l.nodes.iter().find(|n| n.node == Node::In).unwrap();
+        assert_eq!(inp.w, "N A very long port name".len() as f32 * 6.0 + 8.0);
     }
 
     #[test]
