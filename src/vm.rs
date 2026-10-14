@@ -1,39 +1,46 @@
 //! Rust redstone VM: the simulation behind every installed microchip
-//! (DESIGN.md §5).
+//! (DESIGN.md §5). It follows vanilla's rules, so a circuit runs in a chip
+//! the way it ran in the editor.
 //!
 //! A chip's virtual world is a `size`³ grid. Only the cells that hold a
 //! block take part in a step: they are kept in [`RedstoneVM::active`] in
-//! grid order (y, then z, then x — the order the original full-grid scans
-//! visited them in), and grid layers are only allocated once something is
-//! placed in them, so an empty Netherite chip costs nothing and a one-layer
-//! circuit costs one layer.
+//! grid order (y, then z, then x), and grid layers are only allocated once
+//! something is placed in them, so an empty Netherite chip costs nothing.
 //!
-//! A step (one redstone tick):
-//! 1. wires lose their power and blocks their weak power;
-//! 2. every source (levers, lit torches, repeaters and comparators that are
-//!    on, input ports, …) spreads its level through wires, one less per
-//!    wire, weakly powering the solid blocks it touches (and the block under
-//!    each wire);
-//! 3. output ports read the strongest signal next to them;
-//! 4. solid blocks next to an active repeater, torch or comparator become
-//!    strongly powered;
-//! 5. components look at what's around them now and set their output for
-//!    the next step: torches invert the block they hang on, repeaters
-//!    latch their input after `delay` steps, comparators compare or
-//!    subtract, observers end their pulse.
+//! ## Power, as vanilla has it
 //!
-//! Components settling at the end of a step is what gives them their one
-//! tick of delay.
+//! - A **component** (lever, torch, repeater, …) gives *weak* power to some
+//!   neighbours and *strong* power to some (a torch: weak to every side but
+//!   the block it hangs on, strong to the block above it; a repeater: both,
+//!   only out of its front).
+//! - A **solid block** is *strongly powered* by the strong power going into
+//!   it, and *powered* by that or by wire leading into it (wire on top of
+//!   it, or pointing at it). Components read *powered* blocks; wire reads
+//!   only *strongly powered* ones — which is why wire doesn't run on through
+//!   a block.
+//! - **Wire** takes the strongest power around it (wire not counting) and
+//!   passes it on along the dust, one less per block, also up and down one
+//!   block where nothing solid cuts it.
+//!
+//! `facing` is the block state's own: a repeater or comparator *faces its
+//! input* (`repeater[facing=east]` reads from the east, outputs west), an
+//! observer faces what it watches and outputs out of its back, a wall torch
+//! faces away from its wall.
+//!
+//! ## A step (one redstone tick)
+//!
+//! 1. solid blocks take the strong power of the components around them;
+//! 2. wire levels settle (strongest first);
+//! 3. solid blocks add the power of the wire leading into them;
+//! 4. lamps and output ports read their surroundings;
+//! 5. components decide their next output from what's around them now —
+//!    torches invert, repeaters latch after `delay` steps (stretching short
+//!    pulses, held by a locking side), comparators compare or subtract,
+//!    observers pulse when what they watch changed. Decided first, applied
+//!    after, so the order cells are visited in doesn't matter, and every
+//!    component has its one step of delay.
 //!
 //! Self-contained (std + serde only) so `benches/` can build it alone.
-//!
-//! Supported blocks: redstone wire, torches, repeaters, comparators, levers,
-//! buttons, pressure plates, pistons (sticky + normal), observers, note
-//! blocks, lamps, redstone blocks, target blocks, hoppers, droppers,
-//! dispensers, chests, trapped chests, shulker boxes, slime blocks, honey
-//! blocks, solid/conductor blocks, glass, and I/O ports.
-
-use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,60 +50,29 @@ use serde::{Deserialize, Serialize};
 pub enum BlockType {
     Air,
 
-    // Solid / decorative
+    /// Any full block: conducts power.
     Solid,
-    Glass,
+    /// Doesn't conduct (glass, leaves, slabs, …).
+    Transparent,
 
-    // Redstone components
     RedstoneWire,
-    RedstoneTorch { lit: bool },
-    RedstoneWallTorch { lit: bool, facing: Facing },
-    Repeater { delay_ticks: u8, facing: Facing, locked: bool },
+    /// `attach`: the direction of the block it hangs on (`Down` standing).
+    RedstoneTorch { lit: bool, attach: Facing },
+    Repeater { delay_ticks: u8, facing: Facing },
     Comparator { mode: ComparatorMode, facing: Facing },
     RedstoneLamp,
     RedstoneBlock,
-    Lever { on: bool },
-    StoneButton { pressed: bool, facing: Facing },
-    WoodButton { pressed: bool, facing: Facing },
-    StonePressurePlate { pressed: bool },
-    WoodPressurePlate { pressed: bool },
-    LightWeightedPressurePlate { power: u8 },
-    HeavyWeightedPressurePlate { power: u8 },
-    Observer { facing: Facing, powered: bool },
-    NoteBlock,
+    /// `attach`: the direction of the block it's mounted on.
+    Lever { on: bool, attach: Facing },
+    Button { pressed: bool, attach: Facing },
+    /// Any pressure plate, at the power it gives.
+    PressurePlate { power: u8 },
+    Observer { facing: Facing },
     TargetBlock { power: u8 },
-    Piston { extended: bool, facing: Facing },
-    StickyPiston { extended: bool, facing: Facing },
+    /// Detector rail, trapped chest, …: a constant source.
+    Source { power: u8 },
 
-    // Containers (inventory not simulated, but they conduct/block redstone)
-    Chest,
-    TrappedChest,
-    EnderChest,
-    ShulkerBox,
-    Barrel,
-    Hopper { facing: Facing, enabled: bool },
-    Dropper { facing: Facing, triggered: bool },
-    Dispenser { facing: Facing, triggered: bool },
-    Furnace { lit: bool },
-    BlastFurnace { lit: bool },
-    Smoker { lit: bool },
-    BrewingStand,
-
-    // Movement / utility
-    SlimeBlock,
-    HoneyBlock,
-    Tnt { unstable: bool },
-    IronDoor { open: bool, facing: Facing, half: DoorHalf },
-    WoodDoor { open: bool, facing: Facing, half: DoorHalf },
-    IronTrapdoor { open: bool, facing: Facing, half: DoorHalf },
-    WoodTrapdoor { open: bool, facing: Facing, half: DoorHalf },
-    FenceGate { open: bool, facing: Facing },
-    Rail,
-    PoweredRail { powered: bool },
-    DetectorRail { powered: bool },
-    ActivatorRail { powered: bool },
-
-    // I/O ports (the VLSI port blocks)
+    /// A VLSI port block.
     Port(PortMode),
 }
 
@@ -104,12 +80,6 @@ pub enum BlockType {
 pub enum ComparatorMode {
     Compare,
     Subtract,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DoorHalf {
-    Upper,
-    Lower,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,15 +93,8 @@ pub enum Facing {
 }
 
 impl Facing {
-    pub fn horizontal_offset(self) -> (i32, i32) {
-        match self {
-            Facing::North => (0, -1),
-            Facing::South => (0, 1),
-            Facing::East => (1, 0),
-            Facing::West => (-1, 0),
-            _ => (0, 0),
-        }
-    }
+    pub const ALL: [Facing; 6] = [Facing::North, Facing::South, Facing::East, Facing::West, Facing::Up, Facing::Down];
+    pub const HORIZONTAL: [Facing; 4] = [Facing::North, Facing::South, Facing::East, Facing::West];
 
     pub fn opposite(self) -> Facing {
         match self {
@@ -141,6 +104,14 @@ impl Facing {
             Facing::West => Facing::East,
             Facing::Up => Facing::Down,
             Facing::Down => Facing::Up,
+        }
+    }
+
+    /// The two horizontal directions square to this one.
+    fn sides(self) -> [Facing; 2] {
+        match self {
+            Facing::North | Facing::South => [Facing::East, Facing::West],
+            _ => [Facing::North, Facing::South],
         }
     }
 
@@ -165,105 +136,101 @@ pub enum PortMode {
     Bidirectional,
 }
 
-/// The four horizontal neighbours.
-const SIDES: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
-
 // ── Cell ──────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy)]
 pub struct Cell {
     pub block: BlockType,
+    /// Wire: its level. Components and ports: what they put out. Lamps: lit
+    /// (15) or not.
     pub power: u8,
-    pub strongly_powered: bool,
-    pub weakly_powered: bool,
-    pub repeater_timer: u8,
+    /// Solid blocks: strongly powered at this level (what wire reads).
+    pub strong: u8,
+    /// Solid blocks: powered at this level, wire included (what components
+    /// read).
+    pub weak: u8,
+    /// Repeaters: steps until a scheduled switch (0 = none).
+    pub timer: u8,
     /// Value driven into an Input/Bidirectional port from outside the chip.
     pub port_in: u8,
+    /// Observers: what they watched looked like last step.
+    watched: u32,
 }
 
 const AIR: Cell = Cell::new(BlockType::Air);
 
 impl Cell {
     pub const fn new(block: BlockType) -> Self {
-        Cell {
-            block,
-            power: 0,
-            strongly_powered: false,
-            weakly_powered: false,
-            repeater_timer: 0,
-            port_in: 0,
-        }
+        let power = match block {
+            BlockType::RedstoneTorch { lit: true, .. }
+            | BlockType::Lever { on: true, .. }
+            | BlockType::Button { pressed: true, .. }
+            | BlockType::RedstoneBlock => 15,
+            BlockType::PressurePlate { power } | BlockType::TargetBlock { power } | BlockType::Source { power } => power,
+            _ => 0,
+        };
+        Cell { block, power, strong: 0, weak: 0, timer: 0, port_in: 0, watched: 0 }
     }
 
     fn is_solid(&self) -> bool {
-        matches!(
-            self.block,
-            BlockType::Solid
-                | BlockType::RedstoneLamp
-                | BlockType::RedstoneBlock
-                | BlockType::NoteBlock
-                | BlockType::TargetBlock { .. }
-                | BlockType::Piston { .. }
-                | BlockType::StickyPiston { .. }
-                | BlockType::Chest
-                | BlockType::TrappedChest
-                | BlockType::EnderChest
-                | BlockType::ShulkerBox
-                | BlockType::Barrel
-                | BlockType::Hopper { .. }
-                | BlockType::Dropper { .. }
-                | BlockType::Dispenser { .. }
-                | BlockType::Furnace { .. }
-                | BlockType::BlastFurnace { .. }
-                | BlockType::Smoker { .. }
-                | BlockType::BrewingStand
-                | BlockType::Observer { .. }
-                | BlockType::SlimeBlock
-                | BlockType::HoneyBlock
-                | BlockType::IronDoor { .. }
-                | BlockType::WoodDoor { .. }
-                | BlockType::IronTrapdoor { .. }
-                | BlockType::WoodTrapdoor { .. }
-                | BlockType::FenceGate { .. }
-        )
+        matches!(self.block, BlockType::Solid | BlockType::RedstoneLamp)
     }
 
-    /// Power level a source outputs.
-    fn source_power(&self) -> u8 {
-        match self.block {
-            BlockType::RedstoneTorch { lit: true }
-            | BlockType::RedstoneWallTorch { lit: true, .. }
-            | BlockType::Lever { on: true }
-            | BlockType::StoneButton { pressed: true, .. }
-            | BlockType::WoodButton { pressed: true, .. }
-            | BlockType::RedstoneBlock
-            | BlockType::Observer { powered: true, .. }
-            | BlockType::DetectorRail { powered: true } => 15,
-            BlockType::Repeater { .. } | BlockType::Comparator { .. } => self.power,
-            BlockType::TargetBlock { power }
-            | BlockType::LightWeightedPressurePlate { power }
-            | BlockType::HeavyWeightedPressurePlate { power } => power,
-            // Simplified: as if one player had it open.
-            BlockType::TrappedChest => 1,
-            BlockType::Port(PortMode::Input | PortMode::Bidirectional) => self.port_in,
-            _ => 0,
-        }
-    }
-
-    /// The level a neighbour reads from this cell: its power, its output
-    /// as a source, or 15 when strongly powered.
-    fn signal(&self) -> u8 {
-        let strong = if self.strongly_powered { 15 } else { 0 };
-        self.power.max(self.source_power()).max(strong)
-    }
-
-    /// Powered in any way (for torches and repeaters reading their input).
-    fn is_powered(&self) -> bool {
-        self.signal() > 0 || self.weakly_powered
+    fn is_wire(&self) -> bool {
+        self.block == BlockType::RedstoneWire
     }
 
     fn is_output_port(&self) -> bool {
         matches!(self.block, BlockType::Port(PortMode::Output | PortMode::Bidirectional))
+    }
+
+    /// Wire next to it turns toward it (`toward`: from the wire to it).
+    fn wire_connects(&self, toward: Facing) -> bool {
+        match self.block {
+            BlockType::Repeater { facing, .. } => facing == toward || facing == toward.opposite(),
+            BlockType::Observer { facing } => facing == toward,
+            BlockType::RedstoneTorch { .. }
+            | BlockType::Comparator { .. }
+            | BlockType::RedstoneBlock
+            | BlockType::Lever { .. }
+            | BlockType::Button { .. }
+            | BlockType::PressurePlate { .. }
+            | BlockType::TargetBlock { .. }
+            | BlockType::Source { .. }
+            | BlockType::Port(_) => true,
+            _ => false,
+        }
+    }
+
+    /// The (weak, strong) power this component gives the neighbour in
+    /// direction `to`. Not for wire or solid blocks.
+    fn emits(&self, to: Facing) -> (u8, u8) {
+        let p = self.power;
+        match self.block {
+            BlockType::RedstoneBlock | BlockType::TargetBlock { .. } | BlockType::Source { .. } => (p, 0),
+            BlockType::Lever { attach, .. } | BlockType::Button { attach, .. } => (p, if to == attach { p } else { 0 }),
+            BlockType::PressurePlate { .. } => (p, if to == Facing::Down { p } else { 0 }),
+            BlockType::RedstoneTorch { attach, .. } => {
+                (if to == attach { 0 } else { p }, if to == Facing::Up { p } else { 0 })
+            }
+            BlockType::Repeater { facing, .. } | BlockType::Comparator { facing, .. } | BlockType::Observer { facing } => {
+                if to == facing.opposite() { (p, p) } else { (0, 0) }
+            }
+            BlockType::Port(PortMode::Input | PortMode::Bidirectional) => (self.port_in, 0),
+            _ => (0, 0),
+        }
+    }
+
+    /// What an observer sees of this cell.
+    fn looks(&self) -> u32 {
+        let id = std::mem::discriminant(&self.block);
+        let mut h = std::hash::DefaultHasher::new();
+        std::hash::Hash::hash(&id, &mut h);
+        let shown = match self.block {
+            BlockType::Solid | BlockType::Transparent | BlockType::Air => 0,
+            _ => self.power as u64,
+        };
+        (std::hash::Hasher::finish(&h) as u32) ^ (shown as u32) << 24
     }
 }
 
@@ -286,13 +253,7 @@ impl RedstoneVM {
     /// every tier's is one).
     pub fn new(size: u32) -> Self {
         let size = size.max(1).next_power_of_two();
-        RedstoneVM {
-            size,
-            shift: size.trailing_zeros(),
-            layers: vec![None; size as usize],
-            active: Vec::new(),
-            tick: 0,
-        }
+        RedstoneVM { size, shift: size.trailing_zeros(), layers: vec![None; size as usize], active: Vec::new(), tick: 0 }
     }
 
     #[inline]
@@ -317,26 +278,20 @@ impl RedstoneVM {
         (0..s).contains(&x) && (0..s).contains(&y) && (0..s).contains(&z)
     }
 
-    /// The horizontal neighbour `(dx, dz)` of cell `i`, if inside the world.
+    /// The neighbour of cell `i` in direction `d`, if inside the world.
     #[inline]
-    fn side(&self, i: u32, (dx, dz): (i32, i32)) -> Option<u32> {
-        let mask = self.size - 1;
-        let x = (i & mask).wrapping_add_signed(dx);
-        let z = ((i >> self.shift) & mask).wrapping_add_signed(dz);
-        (x <= mask && z <= mask).then(|| (i & !(mask | mask << self.shift)) | x | z << self.shift)
-    }
-
-    /// The cell below `i`, if any.
-    #[inline]
-    fn below(&self, i: u32) -> Option<u32> {
-        i.checked_sub(self.layer_len())
-    }
-
-    /// The cell above `i`, if any.
-    #[inline]
-    fn above(&self, i: u32) -> Option<u32> {
-        let up = i + self.layer_len();
-        (up >> (2 * self.shift) < self.size).then_some(up)
+    fn at(&self, i: u32, d: Facing) -> Option<u32> {
+        let (x, y, z) = self.pos(i);
+        let (x, y, z) = (x as i32, y as i32, z as i32);
+        let (x, y, z) = match d {
+            Facing::North => (x, y, z - 1),
+            Facing::South => (x, y, z + 1),
+            Facing::East => (x + 1, y, z),
+            Facing::West => (x - 1, y, z),
+            Facing::Up => (x, y + 1, z),
+            Facing::Down => (x, y - 1, z),
+        };
+        self.in_bounds(x, y, z).then(|| self.idx(x as u32, y as u32, z as u32))
     }
 
     #[inline]
@@ -345,6 +300,12 @@ impl RedstoneVM {
             Some(cells) => &cells[(i & (self.layer_len() - 1)) as usize],
             None => &AIR,
         }
+    }
+
+    /// The cell next to `i` in direction `d` (air outside the world).
+    #[inline]
+    fn next(&self, i: u32, d: Facing) -> &Cell {
+        self.at(i, d).map_or(&AIR, |n| self.get(n))
     }
 
     /// Mutable access to a cell that holds a block (its layer exists).
@@ -397,13 +358,8 @@ impl RedstoneVM {
             return;
         }
         let i = self.idx(x, y, z);
-        if !matches!(self.get(i).block, BlockType::Port(PortMode::Input | PortMode::Bidirectional)) {
-            return;
-        }
-        let cell = self.get_mut(i);
-        cell.port_in = power.min(15);
-        if cell.block == BlockType::Port(PortMode::Input) {
-            cell.power = cell.port_in;
+        if matches!(self.get(i).block, BlockType::Port(PortMode::Input | PortMode::Bidirectional)) {
+            self.get_mut(i).port_in = power.min(15);
         }
     }
 
@@ -417,223 +373,6 @@ impl RedstoneVM {
         if cell.is_output_port() { cell.power } else { 0 }
     }
 
-    pub fn step(&mut self) {
-        self.tick += 1;
-        self.reset_power();
-        self.propagate_power();
-        self.update_output_ports();
-        self.update_solid_powering();
-        self.settle_components();
-    }
-
-    fn reset_power(&mut self) {
-        for k in 0..self.active.len() {
-            let i = self.active[k];
-            let cell = self.get_mut(i);
-            if cell.block == BlockType::RedstoneWire {
-                cell.power = 0;
-            }
-            cell.weakly_powered = false;
-        }
-    }
-
-    /// Weakly powers the solid block at `i` and its solid horizontal
-    /// neighbours.
-    fn power_solid_cluster(&mut self, i: u32) {
-        self.get_mut(i).weakly_powered = true;
-        for d in SIDES {
-            if let Some(n) = self.side(i, d) {
-                if self.get(n).is_solid() {
-                    self.get_mut(n).weakly_powered = true;
-                }
-            }
-        }
-    }
-
-    fn propagate_power(&mut self) {
-        let mut queue: VecDeque<(u32, u8)> = self
-            .active
-            .iter()
-            .filter_map(|&i| {
-                let src = self.get(i).source_power();
-                (src > 0).then_some((i, src))
-            })
-            .collect();
-
-        while let Some((i, power)) = queue.pop_front() {
-            if self.get(i).block == BlockType::RedstoneWire {
-                if let Some(b) = self.below(i) {
-                    if self.get(b).is_solid() {
-                        self.power_solid_cluster(b);
-                    }
-                }
-            }
-            if power <= 1 {
-                continue;
-            }
-            let next = power - 1;
-            for d in SIDES {
-                let Some(n) = self.side(i, d) else { continue };
-                let neighbour = *self.get(n);
-                if neighbour.block == BlockType::RedstoneWire {
-                    if neighbour.power < next {
-                        self.get_mut(n).power = next;
-                        queue.push_back((n, next));
-                    }
-                } else if neighbour.is_solid() {
-                    self.power_solid_cluster(n);
-                }
-            }
-        }
-    }
-
-    /// Output and bidirectional ports read the strongest signal next to
-    /// them; a bidirectional port also keeps what is driven into it.
-    fn update_output_ports(&mut self) {
-        for k in 0..self.active.len() {
-            let i = self.active[k];
-            let cell = *self.get(i);
-            if !cell.is_output_port() {
-                continue;
-            }
-            let neighbours = SIDES.iter().filter_map(|&d| self.side(i, d)).chain(self.below(i)).chain(self.above(i));
-            let level = neighbours
-                .map(|n| self.get(n))
-                .filter(|c| !c.is_output_port())
-                .map(|c| if c.block == BlockType::RedstoneWire { c.power } else { c.source_power() })
-                .fold(cell.port_in, u8::max);
-            self.get_mut(i).power = level;
-        }
-    }
-
-    fn update_solid_powering(&mut self) {
-        let strong: Vec<(u32, bool)> = self
-            .active
-            .iter()
-            .filter(|&&i| self.get(i).is_solid())
-            .map(|&i| {
-                let strong = SIDES.iter().filter_map(|&d| self.side(i, d)).any(|n| {
-                    let c = self.get(n);
-                    matches!(
-                        c.block,
-                        BlockType::Repeater { .. }
-                            | BlockType::RedstoneTorch { lit: true }
-                            | BlockType::RedstoneWallTorch { lit: true, .. }
-                            | BlockType::Comparator { .. }
-                    ) && c.power > 0
-                });
-                (i, strong)
-            })
-            .collect();
-        for (i, strong) in strong {
-            self.get_mut(i).strongly_powered = strong;
-        }
-    }
-
-    /// Every component decides its output for the next step from what's
-    /// around it now. Decided first, applied after, so the order components
-    /// are visited in doesn't matter.
-    fn settle_components(&mut self) {
-        let changes: Vec<(u32, Cell)> = self
-            .active
-            .iter()
-            .filter_map(|&i| {
-                let cell = self.get(i);
-                let next = match cell.block {
-                    BlockType::RedstoneTorch { .. } | BlockType::RedstoneWallTorch { .. } => self.next_torch(i),
-                    BlockType::Repeater { .. } => self.next_repeater(i),
-                    BlockType::Comparator { .. } => self.next_comparator(i),
-                    BlockType::Observer { facing, powered: true } => {
-                        Cell { block: BlockType::Observer { facing, powered: false }, ..Cell::new(cell.block) }
-                    }
-                    _ => return None,
-                };
-                (next.block != cell.block
-                    || next.power != cell.power
-                    || next.strongly_powered != cell.strongly_powered
-                    || next.repeater_timer != cell.repeater_timer)
-                    .then_some((i, next))
-            })
-            .collect();
-        for (i, next) in changes {
-            *self.get_mut(i) = next;
-        }
-        // Comparators also strongly power the solid block they face.
-        for k in 0..self.active.len() {
-            let i = self.active[k];
-            let cell = *self.get(i);
-            if let BlockType::Comparator { facing, .. } = cell.block {
-                if let Some(f) = self.side(i, facing.horizontal_offset()) {
-                    if self.get(f).is_solid() {
-                        self.get_mut(f).strongly_powered = cell.power > 0;
-                    }
-                }
-            }
-        }
-    }
-
-    /// A torch is lit unless the block it stands on (or hangs from) is
-    /// powered.
-    fn next_torch(&self, i: u32) -> Cell {
-        let mut cell = *self.get(i);
-        let attached = match cell.block {
-            BlockType::RedstoneWallTorch { facing, .. } => self.side(i, facing.opposite().horizontal_offset()),
-            _ => self.below(i),
-        };
-        let new_lit = !attached.is_some_and(|a| self.get(a).is_powered());
-        if let BlockType::RedstoneTorch { lit } | BlockType::RedstoneWallTorch { lit, .. } = &mut cell.block {
-            *lit = new_lit;
-        }
-        cell.power = if new_lit { 15 } else { 0 };
-        cell.strongly_powered = new_lit;
-        cell
-    }
-
-    /// A repeater switches to its input `delay` steps after the input
-    /// changed (a change during the delay is taken when it ends).
-    fn next_repeater(&self, i: u32) -> Cell {
-        let mut cell = *self.get(i);
-        let BlockType::Repeater { facing, delay_ticks, .. } = cell.block else { return cell };
-        let input = self.side(i, facing.opposite().horizontal_offset()).is_some_and(|n| self.get(n).is_powered());
-        let on = cell.power > 0;
-        let switch_now = if cell.repeater_timer > 0 {
-            cell.repeater_timer -= 1;
-            cell.repeater_timer == 0
-        } else if input != on {
-            cell.repeater_timer = delay_ticks.saturating_sub(1);
-            cell.repeater_timer == 0
-        } else {
-            false
-        };
-        if switch_now {
-            cell.power = if input { 15 } else { 0 };
-            cell.strongly_powered = input;
-        }
-        cell
-    }
-
-    /// A comparator outputs its back input if no side input is stronger
-    /// (compare), or the back minus the strongest side (subtract).
-    fn next_comparator(&self, i: u32) -> Cell {
-        let mut cell = *self.get(i);
-        let BlockType::Comparator { mode, facing } = cell.block else { return cell };
-        let signal = |d: Facing| self.side(i, d.horizontal_offset()).map_or(0, |n| self.get(n).signal());
-        let back = signal(facing.opposite());
-        let (left, right) = match facing {
-            Facing::North | Facing::South => (Facing::East, Facing::West),
-            _ => (Facing::North, Facing::South),
-        };
-        let side = signal(left).max(signal(right));
-        let output = match mode {
-            ComparatorMode::Compare if back >= side => back,
-            ComparatorMode::Compare => 0,
-            ComparatorMode::Subtract => back.saturating_sub(side),
-        };
-        cell.power = output;
-        cell.strongly_powered = output > 0;
-        cell
-    }
-
     /// `(x, z, power)` of every output/bidirectional port on layer `y`.
     pub fn read_outputs(&self, y: u32) -> Vec<(u32, u32, u8)> {
         self.active
@@ -643,11 +382,272 @@ impl RedstoneVM {
             .map(|(i, (x, _, z))| (x, z, self.get(i).power))
             .collect()
     }
+
+    pub fn step(&mut self) {
+        self.tick += 1;
+        self.strong_power();
+        self.settle_wire();
+        self.wire_power();
+        self.read_power();
+        self.settle_components();
+    }
+
+    // ── Wire ──────────────────────────────────────────────────────────────
+
+    /// The wire cells wire `i` passes power to and from: next to it, one up
+    /// (nothing solid above `i`) or one down (nothing solid beside it).
+    fn wire_links(&self, i: u32) -> impl Iterator<Item = u32> + '_ {
+        let open_above = !self.next(i, Facing::Up).is_solid();
+        Facing::HORIZONTAL.into_iter().filter_map(move |d| {
+            let n = self.at(i, d)?;
+            let side = self.get(n);
+            if side.is_wire() {
+                return Some(n);
+            }
+            if side.is_solid() {
+                let up = self.at(n, Facing::Up)?;
+                return (open_above && self.get(up).is_wire()).then_some(up);
+            }
+            let down = self.at(n, Facing::Down)?;
+            self.get(down).is_wire().then_some(down)
+        })
+    }
+
+    /// Wire `i` turns toward direction `d` (to wire, up or down a step, or
+    /// a component).
+    fn wire_turns(&self, i: u32, d: Facing) -> bool {
+        let Some(n) = self.at(i, d) else { return false };
+        let side = self.get(n);
+        if side.is_wire() || side.wire_connects(d) {
+            return true;
+        }
+        if side.is_solid() {
+            return !self.next(i, Facing::Up).is_solid() && self.next(n, Facing::Up).is_wire();
+        }
+        self.next(n, Facing::Down).is_wire()
+    }
+
+    /// Wire `i` powers the block in direction `d`: always the one below;
+    /// sideways where it points (a lone dot points everywhere, a dot turned
+    /// one way runs straight through).
+    fn wire_points(&self, i: u32, d: Facing) -> bool {
+        match d {
+            Facing::Down => true,
+            Facing::Up => false,
+            _ => {
+                let turns: Vec<Facing> = Facing::HORIZONTAL.into_iter().filter(|&h| self.wire_turns(i, h)).collect();
+                match turns.len() {
+                    0 => true,
+                    1 => turns[0] == d || turns[0] == d.opposite(),
+                    _ => turns.contains(&d),
+                }
+            }
+        }
+    }
+
+    /// The power cell `i`'s neighbour in direction `d` gives it: a
+    /// component's weak power, a solid block's strong one (with
+    /// `wire`: its whole power), wire's level where it points at `i`.
+    fn input_from(&self, i: u32, d: Facing, wire: bool) -> u8 {
+        let Some(n) = self.at(i, d) else { return 0 };
+        let c = self.get(n);
+        if c.is_wire() {
+            return if wire && self.wire_points(n, d.opposite()) { c.power } else { 0 };
+        }
+        if c.is_solid() {
+            return if wire { c.weak } else { c.strong };
+        }
+        c.emits(d.opposite()).0
+    }
+
+    /// The strongest power around cell `i`.
+    fn received(&self, i: u32, wire: bool) -> u8 {
+        Facing::ALL.into_iter().map(|d| self.input_from(i, d, wire)).max().unwrap_or(0)
+    }
+
+    /// 1. Solid blocks take the strong power going into them.
+    fn strong_power(&mut self) {
+        for k in 0..self.active.len() {
+            let i = self.active[k];
+            if !self.get(i).is_solid() {
+                continue;
+            }
+            let strong = Facing::ALL
+                .into_iter()
+                .filter_map(|d| {
+                    let c = self.next(i, d);
+                    (!c.is_wire() && !c.is_solid()).then(|| c.emits(d.opposite()).1)
+                })
+                .max()
+                .unwrap_or(0);
+            let cell = self.get_mut(i);
+            cell.strong = strong;
+            cell.weak = strong;
+        }
+    }
+
+    /// 2. Wire levels: what each wire gets from outside the dust, spread
+    /// along it strongest first, one less per block.
+    fn settle_wire(&mut self) {
+        let mut buckets: [Vec<u32>; 16] = Default::default();
+        for k in 0..self.active.len() {
+            let i = self.active[k];
+            if !self.get(i).is_wire() {
+                continue;
+            }
+            let level = self.received(i, false);
+            self.get_mut(i).power = level;
+            buckets[level as usize].push(i);
+        }
+        for level in (2..=15u8).rev() {
+            let wires = std::mem::take(&mut buckets[level as usize]);
+            for i in wires {
+                if self.get(i).power != level {
+                    continue;
+                }
+                let links: Vec<u32> = self.wire_links(i).collect();
+                for n in links {
+                    if self.get(n).power < level - 1 {
+                        self.get_mut(n).power = level - 1;
+                        buckets[level as usize - 1].push(n);
+                    }
+                }
+            }
+        }
+    }
+
+    /// 3. Solid blocks add the wire leading into them.
+    fn wire_power(&mut self) {
+        for k in 0..self.active.len() {
+            let i = self.active[k];
+            if !self.get(i).is_solid() {
+                continue;
+            }
+            let from_wire = Facing::ALL
+                .into_iter()
+                .filter_map(|d| {
+                    let n = self.at(i, d)?;
+                    (self.get(n).is_wire() && self.wire_points(n, d.opposite())).then(|| self.get(n).power)
+                })
+                .max()
+                .unwrap_or(0);
+            let cell = self.get_mut(i);
+            cell.weak = cell.weak.max(from_wire);
+        }
+    }
+
+    /// 4. Lamps and output ports read what's around them.
+    fn read_power(&mut self) {
+        for k in 0..self.active.len() {
+            let i = self.active[k];
+            let cell = *self.get(i);
+            let level = match cell.block {
+                BlockType::RedstoneLamp => {
+                    if self.received(i, true) > 0 { 15 } else { 0 }
+                }
+                BlockType::Port(PortMode::Output | PortMode::Bidirectional) => self.received(i, true),
+                _ => continue,
+            };
+            self.get_mut(i).power = level;
+        }
+    }
+
+    // ── Components ────────────────────────────────────────────────────────
+
+    /// The power a comparator's side reads: only wire, redstone blocks and
+    /// repeaters/comparators pointing at it count.
+    fn side_input(&self, i: u32, d: Facing) -> u8 {
+        let Some(n) = self.at(i, d) else { return 0 };
+        let c = self.get(n);
+        match c.block {
+            BlockType::RedstoneWire => c.power,
+            BlockType::RedstoneBlock => 15,
+            BlockType::Repeater { .. } | BlockType::Comparator { .. } => c.emits(d.opposite()).0,
+            _ => 0,
+        }
+    }
+
+    /// 5. Every component decides its next output.
+    fn settle_components(&mut self) {
+        let changes: Vec<(u32, Cell)> = self
+            .active
+            .iter()
+            .filter_map(|&i| {
+                let cell = *self.get(i);
+                let next = match cell.block {
+                    BlockType::RedstoneTorch { attach, .. } => {
+                        let lit = self.input_from(i, attach, true) == 0;
+                        Cell { block: BlockType::RedstoneTorch { lit, attach }, power: if lit { 15 } else { 0 }, ..cell }
+                    }
+                    BlockType::Repeater { delay_ticks, facing } => self.next_repeater(i, cell, delay_ticks.max(1), facing),
+                    BlockType::Comparator { mode, facing } => {
+                        let back = self.input_from(i, facing, true);
+                        let side = facing.sides().into_iter().map(|d| self.side_input(i, d)).max().unwrap_or(0);
+                        let power = match mode {
+                            ComparatorMode::Compare if back >= side => back,
+                            ComparatorMode::Compare => 0,
+                            ComparatorMode::Subtract => back.saturating_sub(side),
+                        };
+                        Cell { power, ..cell }
+                    }
+                    BlockType::Observer { facing } => {
+                        let looks = self.next(i, facing).looks();
+                        let changed = looks != cell.watched && self.tick > 1;
+                        Cell { power: if changed && cell.power == 0 { 15 } else { 0 }, watched: looks, ..cell }
+                    }
+                    _ => return None,
+                };
+                (next.block != cell.block || next.power != cell.power || next.timer != cell.timer || next.watched != cell.watched)
+                    .then_some((i, next))
+            })
+            .collect();
+        for (i, next) in changes {
+            *self.get_mut(i) = next;
+        }
+    }
+
+    /// A repeater takes its input `delay` steps later; once on, it stays on
+    /// at least `delay` steps. A powered repeater or comparator pointing
+    /// into its side locks it as it is.
+    fn next_repeater(&self, i: u32, mut cell: Cell, delay: u8, facing: Facing) -> Cell {
+        let locked = facing.sides().into_iter().any(|d| {
+            let c = self.next(i, d);
+            matches!(c.block, BlockType::Repeater { .. } | BlockType::Comparator { .. }) && c.emits(d.opposite()).0 > 0
+        });
+        if locked {
+            cell.timer = 0;
+            return cell;
+        }
+        let input = self.input_from(i, facing, true) > 0;
+        let on = cell.power > 0;
+        if cell.timer == 0 {
+            if input == on {
+                return cell;
+            }
+            cell.timer = delay;
+        }
+        cell.timer -= 1;
+        if cell.timer == 0 {
+            if on && !input {
+                cell.power = 0;
+            } else if !on {
+                cell.power = 15;
+                if !input {
+                    // A short pulse still comes out `delay` steps long.
+                    cell.timer = delay;
+                }
+            }
+        }
+        cell
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const LEVER_ON: BlockType = BlockType::Lever { on: true, attach: Facing::Down };
+    const TORCH: BlockType = BlockType::RedstoneTorch { lit: true, attach: Facing::Down };
 
     fn line(vm: &mut RedstoneVM, z: u32, from: u32, to: u32) {
         for x in from..to {
@@ -655,29 +655,76 @@ mod tests {
         }
     }
 
+    /// A repeater on row z = 0 sending east (it faces its input, west).
     fn repeater(delay: u8) -> BlockType {
-        BlockType::Repeater { delay_ticks: delay, facing: Facing::East, locked: false }
+        BlockType::Repeater { delay_ticks: delay, facing: Facing::West }
     }
 
     #[test]
     fn lever_powers_wire_with_decay() {
         let mut vm = RedstoneVM::new(32);
-        vm.set_block(0, 0, 0, BlockType::Lever { on: true });
+        vm.set_block(0, 0, 0, LEVER_ON);
         line(&mut vm, 0, 1, 20);
         vm.step();
-        assert_eq!(vm.cell(1, 0, 0).power, 14);
-        assert_eq!(vm.cell(14, 0, 0).power, 1);
-        assert_eq!(vm.cell(15, 0, 0).power, 0);
+        assert_eq!(vm.cell(1, 0, 0).power, 15);
+        assert_eq!(vm.cell(15, 0, 0).power, 1);
+        assert_eq!(vm.cell(16, 0, 0).power, 0);
+    }
+
+    #[test]
+    fn wire_climbs_and_descends_steps() {
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(0, 0, 0, LEVER_ON);
+        vm.set_block(1, 0, 0, BlockType::RedstoneWire);
+        vm.set_block(2, 0, 0, BlockType::Solid);
+        vm.set_block(2, 1, 0, BlockType::RedstoneWire);
+        vm.set_block(3, 0, 0, BlockType::RedstoneWire);
+        vm.step();
+        assert_eq!(vm.cell(2, 1, 0).power, 14, "up the step");
+        assert_eq!(vm.cell(3, 0, 0).power, 13, "and down again");
+
+        // A block over the lower wire cuts the step.
+        vm.set_block(1, 1, 0, BlockType::Solid);
+        vm.step();
+        assert_eq!(vm.cell(2, 1, 0).power, 0);
     }
 
     #[test]
     fn wire_powers_the_block_under_it() {
         let mut vm = RedstoneVM::new(16);
         vm.set_block(1, 0, 0, BlockType::Solid);
-        vm.set_block(0, 1, 0, BlockType::Lever { on: true });
+        vm.set_block(0, 1, 0, LEVER_ON);
         vm.set_block(1, 1, 0, BlockType::RedstoneWire);
         vm.step();
-        assert!(vm.cell(1, 0, 0).weakly_powered);
+        assert_eq!(vm.cell(1, 0, 0).weak, 15);
+        assert_eq!(vm.cell(1, 0, 0).strong, 0);
+    }
+
+    #[test]
+    fn wire_does_not_run_on_through_a_block() {
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(0, 0, 0, LEVER_ON);
+        vm.set_block(1, 0, 0, BlockType::RedstoneWire);
+        vm.set_block(2, 0, 0, BlockType::Solid);
+        vm.set_block(3, 0, 0, BlockType::RedstoneWire);
+        vm.step();
+        assert_eq!(vm.cell(2, 0, 0).weak, 15, "the wire points into it");
+        assert_eq!(vm.cell(3, 0, 0).power, 0);
+    }
+
+    #[test]
+    fn wire_only_powers_where_it_points() {
+        let mut vm = RedstoneVM::new(16);
+        // Wire running east–west past a lamp to its north.
+        vm.set_block(0, 0, 1, LEVER_ON);
+        line(&mut vm, 1, 1, 4);
+        vm.set_block(2, 0, 0, BlockType::RedstoneLamp);
+        vm.step();
+        assert_eq!(vm.cell(2, 0, 0).power, 0, "the line passes the lamp by");
+        // The line's end points on into it.
+        vm.set_block(4, 0, 1, BlockType::RedstoneLamp);
+        vm.step();
+        assert_eq!(vm.cell(4, 0, 1).power, 15);
     }
 
     #[test]
@@ -691,8 +738,8 @@ mod tests {
 
         vm.set_port_input(0, 0, 0, 15);
         vm.step();
-        assert_eq!(vm.get_port_output(5, 0, 0), 11);
-        assert_eq!(vm.read_outputs(0), vec![(5, 0, 11)]);
+        assert_eq!(vm.get_port_output(5, 0, 0), 12);
+        assert_eq!(vm.read_outputs(0), vec![(5, 0, 12)]);
 
         vm.set_port_input(0, 0, 0, 0);
         vm.step();
@@ -700,36 +747,65 @@ mod tests {
     }
 
     #[test]
-    fn bidirectional_port_reads_and_drives() {
-        let mut vm = RedstoneVM::new(16);
-        vm.set_block(0, 0, 0, BlockType::Port(PortMode::Bidirectional));
-        line(&mut vm, 0, 1, 3);
-        vm.set_port_input(0, 0, 0, 9);
-        vm.step();
-        assert_eq!(vm.cell(2, 0, 0).power, 7);
-        assert_eq!(vm.get_port_output(0, 0, 0), 9);
-    }
-
-    #[test]
     fn torch_inverts_the_block_it_stands_on() {
         let mut vm = RedstoneVM::new(16);
         vm.set_block(1, 0, 0, BlockType::Solid);
-        vm.set_block(1, 1, 0, BlockType::RedstoneTorch { lit: true });
+        vm.set_block(1, 1, 0, TORCH);
         vm.step();
-        vm.step();
-        assert!(matches!(vm.cell(1, 1, 0).block, BlockType::RedstoneTorch { lit: true }));
         assert_eq!(vm.cell(1, 1, 0).power, 15);
 
-        vm.set_block(0, 0, 0, BlockType::Lever { on: true });
+        // A lever on the block's side (a lever beside it on the floor wouldn't).
+        vm.set_block(0, 0, 0, BlockType::Lever { on: true, attach: Facing::East });
         vm.step();
-        assert!(matches!(vm.cell(1, 1, 0).block, BlockType::RedstoneTorch { lit: false }));
         assert_eq!(vm.cell(1, 1, 0).power, 0);
+        assert!(matches!(vm.cell(1, 1, 0).block, BlockType::RedstoneTorch { lit: false, .. }));
+    }
+
+    #[test]
+    fn torch_strongly_powers_the_block_above() {
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(1, 1, 0, TORCH);
+        vm.set_block(1, 2, 0, BlockType::Solid);
+        vm.set_block(2, 2, 0, BlockType::RedstoneWire);
+        vm.step();
+        assert_eq!(vm.cell(1, 2, 0).strong, 15);
+        assert_eq!(vm.cell(2, 2, 0).power, 15, "a strongly powered block feeds wire");
+    }
+
+    #[test]
+    fn wall_torch_hangs_on_its_wall() {
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(0, 0, 0, BlockType::Lever { on: true, attach: Facing::East });
+        vm.set_block(1, 0, 0, BlockType::Solid);
+        // facing=east: the wall is to its west.
+        vm.set_block(2, 0, 0, BlockType::RedstoneTorch { lit: true, attach: Facing::West });
+        vm.step();
+        assert_eq!(vm.cell(2, 0, 0).power, 0);
+    }
+
+    #[test]
+    fn repeater_faces_its_input() {
+        // facing=east: reads from the east, sends west.
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(3, 0, 0, LEVER_ON);
+        vm.set_block(2, 0, 0, BlockType::Repeater { delay_ticks: 1, facing: Facing::East });
+        vm.set_block(1, 0, 0, BlockType::RedstoneWire);
+        vm.set_block(4, 0, 0, BlockType::RedstoneWire);
+        vm.step();
+        vm.step();
+        assert_eq!(vm.cell(1, 0, 0).power, 15);
+
+        // Turned the other way it sends nothing west.
+        vm.set_block(2, 0, 0, BlockType::Repeater { delay_ticks: 1, facing: Facing::West });
+        vm.step();
+        vm.step();
+        assert_eq!(vm.cell(1, 0, 0).power, 0);
     }
 
     #[test]
     fn repeater_waits_its_delay() {
         let mut vm = RedstoneVM::new(16);
-        vm.set_block(0, 0, 0, BlockType::Lever { on: true });
+        vm.set_block(0, 0, 0, LEVER_ON);
         vm.set_block(1, 0, 0, BlockType::RedstoneWire);
         vm.set_block(2, 0, 0, repeater(3));
         line(&mut vm, 0, 3, 6);
@@ -739,24 +815,46 @@ mod tests {
                 vm.cell(3, 0, 0).power > 0
             })
             .collect();
-        // Input seen in step 1, latched at the end of step 3, on the wire in step 4.
+        // Input seen in step 1, switched at the end of step 3, on the wire in step 4.
         assert_eq!(powered_at, [false, false, false, true, true]);
-        assert_eq!(vm.cell(3, 0, 0).power, 14);
+        assert_eq!(vm.cell(3, 0, 0).power, 15);
     }
 
     #[test]
-    fn repeater_turns_off_after_its_delay() {
+    fn repeater_stretches_a_short_pulse() {
         let mut vm = RedstoneVM::new(16);
-        vm.set_block(0, 0, 0, BlockType::Lever { on: true });
-        vm.set_block(1, 0, 0, repeater(1));
-        vm.set_block(2, 0, 0, BlockType::RedstoneWire);
+        vm.set_block(0, 0, 0, LEVER_ON);
+        vm.set_block(1, 0, 0, repeater(4));
+        vm.step();
+        vm.set_block(0, 0, 0, BlockType::Lever { on: false, attach: Facing::Down });
+        let on: Vec<bool> = (0..10)
+            .map(|_| {
+                vm.step();
+                vm.cell(1, 0, 0).power > 0
+            })
+            .collect();
+        assert_eq!(on.iter().filter(|o| **o).count(), 4, "{on:?}");
+    }
+
+    #[test]
+    fn repeater_locked_by_its_side() {
+        let mut vm = RedstoneVM::new(16);
+        // The locking repeater at (1, 0, 1) sends south into the side of
+        // the one at (1, 0, 2), which sends east.
+        vm.set_block(1, 0, 0, LEVER_ON);
+        vm.set_block(1, 0, 1, BlockType::Repeater { delay_ticks: 1, facing: Facing::North });
+        vm.set_block(1, 0, 2, repeater(1));
         vm.step();
         vm.step();
-        assert_eq!(vm.cell(2, 0, 0).power, 14);
-        vm.set_block(0, 0, 0, BlockType::Lever { on: false });
-        vm.step(); // sees the lever off, switches at the end of this step
+        vm.set_block(0, 0, 2, LEVER_ON);
         vm.step();
-        assert_eq!(vm.cell(2, 0, 0).power, 0);
+        vm.step();
+        assert_eq!(vm.cell(1, 0, 2).power, 0, "locked off");
+        vm.set_block(1, 0, 0, BlockType::Lever { on: false, attach: Facing::Down });
+        vm.step();
+        vm.step();
+        vm.step();
+        assert_eq!(vm.cell(1, 0, 2).power, 15, "unlocked, it takes its input");
     }
 
     #[test]
@@ -764,25 +862,34 @@ mod tests {
         let run = |mode| {
             let mut vm = RedstoneVM::new(16);
             vm.set_block(0, 0, 1, BlockType::RedstoneBlock);
-            vm.set_block(1, 0, 1, BlockType::Comparator { mode, facing: Facing::East });
-            vm.set_block(1, 0, 0, BlockType::Port(PortMode::Input));
-            vm.set_port_input(1, 0, 0, 6);
+            vm.set_block(1, 0, 1, BlockType::Comparator { mode, facing: Facing::West });
+            vm.set_block(1, 0, 0, BlockType::RedstoneWire);
+            vm.set_block(1, 0, 0, BlockType::RedstoneWire);
+            vm.set_block(0, 0, 0, BlockType::Port(PortMode::Input));
+            vm.set_port_input(0, 0, 0, 7);
             vm.step();
             vm.cell(1, 0, 1).power
         };
         assert_eq!(run(ComparatorMode::Compare), 15);
-        assert_eq!(run(ComparatorMode::Subtract), 9);
+        assert_eq!(run(ComparatorMode::Subtract), 8);
     }
 
     #[test]
-    fn comparator_drives_wire() {
+    fn observer_pulses_once_per_change() {
         let mut vm = RedstoneVM::new(16);
-        vm.set_block(0, 0, 0, BlockType::RedstoneBlock);
-        vm.set_block(1, 0, 0, BlockType::Comparator { mode: ComparatorMode::Compare, facing: Facing::East });
-        line(&mut vm, 0, 2, 4);
+        // Watches east, outputs west.
+        vm.set_block(1, 0, 0, BlockType::Observer { facing: Facing::East });
+        vm.set_block(0, 0, 0, BlockType::RedstoneWire);
         vm.step();
         vm.step();
-        assert_eq!(vm.cell(2, 0, 0).power, 14);
+        vm.set_block(2, 0, 0, BlockType::Solid);
+        let out: Vec<u8> = (0..4)
+            .map(|_| {
+                vm.step();
+                vm.cell(0, 0, 0).power
+            })
+            .collect();
+        assert_eq!(out, [0, 15, 0, 0]);
     }
 
     #[test]

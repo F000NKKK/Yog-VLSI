@@ -27,10 +27,10 @@ fn circuit(size: u32) -> RedstoneVM {
     let mut vm = RedstoneVM::new(size);
     for z in 0..size {
         if z % 2 == 0 {
-            vm.set_block(0, 0, z, BlockType::Lever { on: true });
+            vm.set_block(0, 0, z, BlockType::Lever { on: true, attach: Facing::Down });
             for x in 1..size {
                 let block = if x % 15 == 0 {
-                    BlockType::Repeater { delay_ticks: 1, facing: Facing::East, locked: false }
+                    BlockType::Repeater { delay_ticks: 1, facing: Facing::West }
                 } else {
                     BlockType::RedstoneWire
                 };
@@ -40,7 +40,7 @@ fn circuit(size: u32) -> RedstoneVM {
             for x in 0..size {
                 vm.set_block(x, 0, z, BlockType::Solid);
                 if x % 4 == 0 {
-                    vm.set_block(x, 1, z, BlockType::RedstoneTorch { lit: true });
+                    vm.set_block(x, 1, z, BlockType::RedstoneTorch { lit: true, attach: Facing::Down });
                 }
             }
         }

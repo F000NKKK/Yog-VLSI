@@ -8,7 +8,7 @@ use crate::nbt;
 use crate::res::Strings;
 use crate::tier::Tier;
 use crate::port;
-use crate::vm::{BlockType, ComparatorMode, DoorHalf, Facing, PortMode, RedstoneVM};
+use crate::vm::{BlockType, ComparatorMode, Facing, PortMode, RedstoneVM};
 use crate::MOD_ID;
 
 /// NBT tag of a fabricated chip's [`ChipMeta`].
@@ -133,67 +133,67 @@ impl CircuitBlock {
         self.prop(key) == Some(value)
     }
 
-    /// What the VM simulates for this block; anything it doesn't know is a
-    /// plain solid block.
+    /// The block a lever or button is mounted on, from its `face` and
+    /// `facing`.
+    fn mount(&self) -> Facing {
+        match self.prop("face") {
+            Some("floor") => Facing::Down,
+            Some("ceiling") => Facing::Up,
+            _ => self.facing().opposite(),
+        }
+    }
+
+    fn facing(&self) -> Facing {
+        self.prop("facing").map(Facing::from_minecraft).unwrap_or(Facing::North)
+    }
+
+    fn power_prop(&self) -> u8 {
+        self.prop("power").and_then(|p| p.parse().ok()).unwrap_or(0)
+    }
+
+    /// What the VM simulates for this block: the redstone parts as they
+    /// are, full blocks as conductors, everything else as air-like blocks
+    /// that cut no wire and carry no power.
     pub fn block_type(&self) -> BlockType {
-        let facing = || self.prop("facing").map(Facing::from_minecraft).unwrap_or(Facing::North);
-        let powered = || self.is("powered", "true");
-        let open = || self.is("open", "true");
-        let half = || if self.is("half", "upper") || self.is("half", "top") { DoorHalf::Upper } else { DoorHalf::Lower };
-        match self.id() {
-            "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => BlockType::Air,
-            "minecraft:redstone_wire" => BlockType::RedstoneWire,
-            "minecraft:redstone_torch" => BlockType::RedstoneTorch { lit: !self.is("lit", "false") },
-            "minecraft:redstone_wall_torch" => BlockType::RedstoneWallTorch { lit: !self.is("lit", "false"), facing: facing() },
-            "minecraft:repeater" => BlockType::Repeater {
+        let powered = self.is("powered", "true");
+        let id = self.id();
+        let path = id.strip_prefix("minecraft:").unwrap_or(id);
+        match path {
+            "air" | "cave_air" | "void_air" => BlockType::Air,
+            "redstone_wire" => BlockType::RedstoneWire,
+            "redstone_torch" => BlockType::RedstoneTorch { lit: !self.is("lit", "false"), attach: Facing::Down },
+            "redstone_wall_torch" => {
+                BlockType::RedstoneTorch { lit: !self.is("lit", "false"), attach: self.facing().opposite() }
+            }
+            "repeater" => BlockType::Repeater {
                 delay_ticks: self.prop("delay").and_then(|d| d.parse().ok()).unwrap_or(1),
-                facing: facing(),
-                locked: self.is("locked", "true"),
+                facing: self.facing(),
             },
-            "minecraft:comparator" => BlockType::Comparator {
+            "comparator" => BlockType::Comparator {
                 mode: if self.is("mode", "subtract") { ComparatorMode::Subtract } else { ComparatorMode::Compare },
-                facing: facing(),
+                facing: self.facing(),
             },
-            "minecraft:redstone_lamp" => BlockType::RedstoneLamp,
-            "minecraft:redstone_block" => BlockType::RedstoneBlock,
-            "minecraft:lever" => BlockType::Lever { on: powered() },
-            "minecraft:stone_button" => BlockType::StoneButton { pressed: powered(), facing: facing() },
-            "minecraft:oak_button" => BlockType::WoodButton { pressed: powered(), facing: facing() },
-            "minecraft:stone_pressure_plate" => BlockType::StonePressurePlate { pressed: powered() },
-            "minecraft:oak_pressure_plate" => BlockType::WoodPressurePlate { pressed: powered() },
-            "minecraft:light_weighted_pressure_plate" => BlockType::LightWeightedPressurePlate { power: 0 },
-            "minecraft:heavy_weighted_pressure_plate" => BlockType::HeavyWeightedPressurePlate { power: 0 },
-            "minecraft:observer" => BlockType::Observer { facing: facing(), powered: powered() },
-            "minecraft:note_block" => BlockType::NoteBlock,
-            "minecraft:target" => BlockType::TargetBlock { power: 0 },
-            "minecraft:piston" => BlockType::Piston { extended: self.is("extended", "true"), facing: facing() },
-            "minecraft:sticky_piston" => BlockType::StickyPiston { extended: self.is("extended", "true"), facing: facing() },
-            "minecraft:chest" => BlockType::Chest,
-            "minecraft:trapped_chest" => BlockType::TrappedChest,
-            "minecraft:ender_chest" => BlockType::EnderChest,
-            id if id.ends_with("shulker_box") => BlockType::ShulkerBox,
-            "minecraft:barrel" => BlockType::Barrel,
-            "minecraft:hopper" => BlockType::Hopper { facing: facing(), enabled: !self.is("enabled", "false") },
-            "minecraft:dropper" => BlockType::Dropper { facing: facing(), triggered: self.is("triggered", "true") },
-            "minecraft:dispenser" => BlockType::Dispenser { facing: facing(), triggered: self.is("triggered", "true") },
-            "minecraft:furnace" => BlockType::Furnace { lit: self.is("lit", "true") },
-            "minecraft:blast_furnace" => BlockType::BlastFurnace { lit: self.is("lit", "true") },
-            "minecraft:smoker" => BlockType::Smoker { lit: self.is("lit", "true") },
-            "minecraft:brewing_stand" => BlockType::BrewingStand,
-            "minecraft:slime_block" => BlockType::SlimeBlock,
-            "minecraft:honey_block" => BlockType::HoneyBlock,
-            "minecraft:tnt" => BlockType::Tnt { unstable: self.is("unstable", "true") },
-            "minecraft:rail" => BlockType::Rail,
-            "minecraft:powered_rail" => BlockType::PoweredRail { powered: powered() },
-            "minecraft:detector_rail" => BlockType::DetectorRail { powered: powered() },
-            "minecraft:activator_rail" => BlockType::ActivatorRail { powered: powered() },
-            "minecraft:iron_door" => BlockType::IronDoor { open: open(), facing: facing(), half: half() },
-            "minecraft:oak_door" => BlockType::WoodDoor { open: open(), facing: facing(), half: half() },
-            "minecraft:iron_trapdoor" => BlockType::IronTrapdoor { open: open(), facing: facing(), half: half() },
-            "minecraft:oak_trapdoor" => BlockType::WoodTrapdoor { open: open(), facing: facing(), half: half() },
-            "minecraft:oak_fence_gate" => BlockType::FenceGate { open: open(), facing: facing() },
-            "minecraft:glass" => BlockType::Glass,
-            id => port::dir_for_block(id).map_or(BlockType::Solid, BlockType::Port),
+            "redstone_lamp" => BlockType::RedstoneLamp,
+            "redstone_block" => BlockType::RedstoneBlock,
+            "lever" => BlockType::Lever { on: powered, attach: self.mount() },
+            p if p.ends_with("_button") => BlockType::Button { pressed: powered, attach: self.mount() },
+            p if p.ends_with("weighted_pressure_plate") => BlockType::PressurePlate { power: self.power_prop() },
+            p if p.ends_with("_pressure_plate") => BlockType::PressurePlate { power: if powered { 15 } else { 0 } },
+            "observer" => BlockType::Observer { facing: self.facing() },
+            "target" => BlockType::TargetBlock { power: self.power_prop() },
+            "detector_rail" => BlockType::Source { power: if powered { 15 } else { 0 } },
+            "daylight_detector" => BlockType::Source { power: self.power_prop() },
+            p if p.contains("glass")
+                || p.contains("slab")
+                || p.contains("stairs")
+                || p.contains("leaves")
+                || p.contains("fence")
+                || p.contains("wall")
+                || p.contains("door")
+                || p.contains("rail")
+                || p.contains("carpet")
+                || p == "barrier" => BlockType::Transparent,
+            _ => port::dir_for_block(id).map_or(BlockType::Solid, BlockType::Port),
         }
     }
 }
@@ -305,9 +305,17 @@ mod tests {
     fn block_states_parse() {
         let b = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into() };
         assert_eq!(b("minecraft:repeater[delay=3,facing=east,locked=false]").block_type(),
-            BlockType::Repeater { delay_ticks: 3, facing: Facing::East, locked: false });
-        assert_eq!(b("minecraft:lever[powered=true]").block_type(), BlockType::Lever { on: true });
-        assert_eq!(b("minecraft:lime_shulker_box").block_type(), BlockType::ShulkerBox);
+            BlockType::Repeater { delay_ticks: 3, facing: Facing::East });
+        assert_eq!(b("minecraft:lever[face=wall,facing=east,powered=true]").block_type(),
+            BlockType::Lever { on: true, attach: Facing::West });
+        assert_eq!(b("minecraft:lever[face=floor,facing=east,powered=false]").block_type(),
+            BlockType::Lever { on: false, attach: Facing::Down });
+        assert_eq!(b("minecraft:redstone_wall_torch[facing=north,lit=true]").block_type(),
+            BlockType::RedstoneTorch { lit: true, attach: Facing::South });
+        assert_eq!(b("minecraft:polished_blackstone_button[face=ceiling,facing=north,powered=false]").block_type(),
+            BlockType::Button { pressed: false, attach: Facing::Up });
+        assert_eq!(b("minecraft:glass").block_type(), BlockType::Transparent);
+        assert_eq!(b("minecraft:lime_shulker_box").block_type(), BlockType::Solid);
         assert_eq!(b("minecraft:stone").block_type(), BlockType::Solid);
         assert_eq!(b(port::PORT_OUTPUT).block_type(), BlockType::Port(PortMode::Output));
     }
