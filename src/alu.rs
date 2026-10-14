@@ -78,6 +78,9 @@ pub struct PinRow {
 /// One chip-to-chip (or chip-to-ALU) link.
 pub struct LinkRow {
     pub text: String,
+    /// Where the link starts — its key in `LINKS`.
+    pub chip: String,
+    pub port: String,
 }
 
 #[derive(Default)]
@@ -122,6 +125,10 @@ impl AluVm {
         }
         CHIP_NAMES.lock().unwrap().get(id).cloned().unwrap_or_else(|| id[..6.min(id.len())].to_string())
     }
+    /// Whether a link starting at `chip` belongs to this ALU.
+    fn owns(&self, chip: &str) -> bool {
+        chip == ext_chip_id(self.pos) || self.chips().iter().any(|(c, _)| c == chip)
+    }
     fn is_from(&self, chip: &str, port: &str) -> bool {
         self.from.as_ref().is_some_and(|(c, p)| c == chip && p == port)
     }
@@ -132,7 +139,7 @@ impl AluVm {
             tier.name(),
             self.chips().len(),
             tier.max_chips(),
-            LINKS.lock().unwrap().len(),
+            LINKS.lock().unwrap().keys().filter(|(c, _)| self.owns(c)).count(),
             tier.digital_channels(),
         )
     }
@@ -176,21 +183,37 @@ impl AluVm {
         rows
     }
     pub fn has_links(&self) -> bool {
-        !LINKS.lock().unwrap().is_empty()
+        LINKS.lock().unwrap().keys().any(|(c, _)| self.owns(c))
     }
     pub fn links(&self) -> Vec<LinkRow> {
         LINKS
             .lock()
             .unwrap()
             .iter()
+            .filter(|((sc, _), _)| self.owns(sc))
             .take(LINKS_SHOWN)
             .map(|((sc, sp), (dc, dp))| LinkRow {
                 text: Strings::screen_alu_link_row(
                     format!("{}.{sp}", Self::chip_name(sc)),
                     format!("{}.{dp}", Self::chip_name(dc)),
                 ),
+                chip: sc.clone(),
+                port: sp.clone(),
             })
             .collect()
+    }
+    /// Removes the link starting at `chip`.`port`.
+    pub fn unlink(&mut self, chip: String, port: String) {
+        LINKS.lock().unwrap().remove(&(chip, port));
+    }
+    /// Removes every link of this ALU.
+    pub fn clear_links(&mut self) {
+        self.from = None;
+        let owned: Vec<_> = LINKS.lock().unwrap().keys().filter(|(c, _)| self.owns(c)).cloned().collect();
+        let mut links = LINKS.lock().unwrap();
+        for key in owned {
+            links.remove(&key);
+        }
     }
 
     pub fn select_ext(&mut self, side: &'static str) {

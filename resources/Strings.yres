@@ -90,6 +90,8 @@
   },
   "screen.alu.add_chip": "+ Add Chip",
   "screen.alu.auto_link": "Auto-link",
+  "screen.alu.unlink": "Unlink",
+  "screen.alu.clear_links": "Clear links",
   "screen.alu.save": "Save",
   "screen.alu.select_chip": "Select a chip to install:",
   "screen.alu.no_chips": "(no programmed chips in your inventory)",

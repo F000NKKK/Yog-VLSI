@@ -68,6 +68,8 @@
   "screen.alu.chip_row": "[{tier}] {name}",
   "screen.alu.add_chip": "+ Добавить чип",
   "screen.alu.auto_link": "Автосвязь",
+  "screen.alu.unlink": "Удалить связь",
+  "screen.alu.clear_links": "Очистить связи",
   "screen.alu.save": "Сохранить",
   "screen.alu.select_chip": "Выберите чип для установки:",
   "screen.alu.no_chips": "(в инвентаре нет запрограммированных чипов)",

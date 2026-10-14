@@ -57,7 +57,14 @@
                     <ItemsControl w="100%" items="{x:Bind links()}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="LinkRow">
-                                <Label w="100%" text="{x:Bind text}" color="#FF373737" shadow="false" ellipsis="true" />
+                                <Row w="100%" gap="2" align="center">
+                                    <Label flex="1" text="{x:Bind text}" color="#FF373737" shadow="false" ellipsis="true" />
+                                    <Button w="12"
+                                            h="12"
+                                            text="×"
+                                            tooltip="@Strings.screen.alu.unlink"
+                                            command="{x:Bind vm.unlink(chip, port)}" />
+                                </Row>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -90,6 +97,12 @@
         <Row Grid.Row="2" margin="4 0 0 0" gap="4" halign="right">
             <Button x:Name="add_chip" style="@Action" text="@Strings.screen.alu.add_chip" visible="{x:Bind editing()}" command="{x:Bind add_chip()}" />
             <Button x:Name="auto_link" style="@Action" text="@Strings.screen.alu.auto_link" visible="{x:Bind editing()}" command="{x:Bind auto_link()}" />
+            <Button x:Name="clear_links"
+                    style="@Action"
+                    text="@Strings.screen.alu.clear_links"
+                    visible="{x:Bind editing()}"
+                    enabled="{x:Bind has_links()}"
+                    command="{x:Bind clear_links()}" />
             <Button x:Name="save" style="@Action" text="@Strings.screen.alu.save" visible="{x:Bind editing()}" command="{x:Bind save()}" />
             <Button x:Name="cancel" style="@Action" text="@Strings.screen.alu.cancel" visible="{x:Bind choosing}" command="{x:Bind cancel()}" />
         </Row>
