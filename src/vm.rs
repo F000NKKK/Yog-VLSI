@@ -1694,4 +1694,63 @@ mod tests {
         assert!(steps < 8, "stopped once nothing changed ({steps})");
         assert_eq!(vm.settle(8), 1, "nothing to do: one look");
     }
+
+    /// A NOT gate: port IN at x 0 → wire → block → torch → port OUT at x 4.
+    fn not_chip(budget: u32) -> NestedChip {
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(0, 0, 0, BlockType::Port(PortMode::Input));
+        vm.set_block(1, 0, 0, BlockType::RedstoneWire);
+        vm.set_block(2, 0, 0, BlockType::Solid);
+        vm.set_block(3, 0, 0, BlockType::RedstoneTorch { lit: true, attach: Facing::West });
+        vm.set_block(4, 0, 0, BlockType::Port(PortMode::Output));
+        vm.settle(8);
+        let port = |label: &str, x, mode| NestedPort { label: label.into(), x, y: 0, z: 0, mode };
+        NestedChip::new(0, vec![port("IN", 0, PortMode::Input), port("OUT", 4, PortMode::Output)], budget, vm)
+    }
+
+    /// An outer circuit: input port, the ALU (its west face in, its east face out), output port.
+    fn outer(budget: u32) -> RedstoneVM {
+        let mut vm = RedstoneVM::new(16);
+        vm.set_block(0, 0, 0, BlockType::Port(PortMode::Input));
+        vm.set_block(1, 0, 0, BlockType::Alu);
+        vm.set_block(2, 0, 0, BlockType::Port(PortMode::Output));
+        let wires = vec![
+            (NestedPin::In(Facing::West.index() as u8), NestedPin::Chip(0, "IN".into())),
+            (NestedPin::Chip(0, "OUT".into()), NestedPin::Out(Facing::East.index() as u8)),
+        ];
+        vm.set_nested(1, 0, 0, NestedAlu { chips: vec![not_chip(budget)], wires });
+        vm.new_tick();
+        vm.settle(8);
+        vm
+    }
+
+    #[test]
+    fn an_alu_in_a_circuit_runs_its_chips_the_same_tick() {
+        let mut vm = outer(8);
+        assert_eq!(vm.get_port_output(2, 0, 0), 15, "NOT of nothing");
+        vm.set_port_input(0, 0, 0, 15);
+        vm.new_tick();
+        vm.settle(128);
+        assert_eq!(vm.get_port_output(2, 0, 0), 0, "answered this tick");
+    }
+
+    #[test]
+    fn a_nested_chip_keeps_its_own_speed_however_fast_the_circuit_around_it() {
+        // One step a tick for the inner chip; a NOT gate needs two.
+        let mut vm = outer(1);
+        vm.new_tick();
+        vm.settle(128);
+        vm.new_tick();
+        vm.settle(128);
+        let before = vm.get_port_output(2, 0, 0);
+        vm.set_port_input(0, 0, 0, if before == 15 { 15 } else { 0 });
+        vm.new_tick();
+        vm.settle(128);
+        assert_eq!(vm.get_port_output(2, 0, 0), before, "128 steps around it, still one of its own: not yet");
+        vm.new_tick();
+        vm.settle(128);
+        vm.new_tick();
+        vm.settle(128);
+        assert_ne!(vm.get_port_output(2, 0, 0), before, "its own steps, a tick at a time");
+    }
 }

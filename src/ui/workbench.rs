@@ -269,7 +269,7 @@ fn blueprint_in(srv: &dyn yog_api::Server, bench: &BenchId) -> (BlueprintView, O
                     tier: bp.tier,
                     ports: bp.circuit.ports.len(),
                     blocks: bp.circuit.blocks.len(),
-                    cost: crate::resources::cost(&bp.circuit.blocks),
+                    cost: crate::resources::circuit_cost(&bp.circuit, &|id| crate::chip::CircuitData::load_for_chip(&srv.game_dir(), id)),
                 };
                 (view, Some(bp))
             }
@@ -349,7 +349,7 @@ fn fabricate(srv: &dyn yog_api::Server, bench: &BenchId) -> String {
     if srv.get_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT).is_some() {
         return "§cTake the chip out of the chip slot first.".into();
     }
-    let cost = crate::resources::cost(&bp.circuit.blocks);
+    let cost = crate::resources::circuit_cost(&bp.circuit, &|id| crate::chip::CircuitData::load_for_chip(&srv.game_dir(), id));
     {
         let stores = STORES.lock().unwrap();
         let stored = stores.get(bench).copied().unwrap_or_default();

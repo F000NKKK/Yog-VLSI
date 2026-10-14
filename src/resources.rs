@@ -94,14 +94,48 @@ pub fn compact(n: u64) -> String {
     n.to_string()
 }
 
-/// What a circuit costs to fabricate: a quarter of its blocks' crafting
-/// cost, rounded up.
-pub fn cost(blocks: &[CircuitBlock]) -> Amounts {
+/// The share of a block's crafting cost fabricating it costs — and again
+/// for every level an ALU nests it deeper (a chip in an ALU in the design
+/// costs an eighth of an eighth).
+pub const PRINT_SHARE: f64 = 1.0 / 8.0;
+
+/// What crafting `blocks` takes, in resources (unrounded).
+fn craft(blocks: &[CircuitBlock]) -> [f64; 6] {
     let mut total = [0.0f64; 6];
     for b in blocks {
         add_block(b.id(), 1.0, &mut total);
     }
-    total.map(|units| (units / 4.0).ceil() as u64)
+    total
+}
+
+/// What fabricating `blocks` costs: [`PRINT_SHARE`] of crafting them, rounded up.
+pub fn cost(blocks: &[CircuitBlock]) -> Amounts {
+    craft(blocks).map(|units| (units * PRINT_SHARE).ceil() as u64)
+}
+
+/// What a whole circuit costs to fabricate: [`PRINT_SHARE`] of crafting
+/// its blocks, and of the circuits of the chips in its ALUs another share
+/// of that for each level down, to [`MAX_NESTING`](crate::chip::MAX_NESTING)
+/// (their circuits from `load`); rounded up once, at the end.
+pub fn circuit_cost(circuit: &crate::chip::CircuitData, load: &dyn Fn(&str) -> Option<crate::chip::CircuitData>) -> Amounts {
+    fn go(c: &crate::chip::CircuitData, load: &dyn Fn(&str) -> Option<crate::chip::CircuitData>, depth: u32, share: f64, total: &mut [f64; 6]) {
+        for (t, x) in total.iter_mut().zip(craft(&c.blocks)) {
+            *t += x * share;
+        }
+        if depth >= crate::chip::MAX_NESTING {
+            return;
+        }
+        for alu in &c.alus {
+            for (_, meta) in &alu.chips {
+                if let Some(inner) = load(&meta.id) {
+                    go(&inner, load, depth + 1, share * PRINT_SHARE, total);
+                }
+            }
+        }
+    }
+    let mut total = [0.0; 6];
+    go(circuit, load, 1, PRINT_SHARE, &mut total);
+    total.map(|units| units.ceil() as u64)
 }
 
 fn add(r: Resource, n: f64, total: &mut [f64; 6]) {
@@ -128,6 +162,28 @@ fn add_block(id: &str, n: f64, total: &mut [f64; 6]) {
         "minecraft:gold_nugget" => item("minecraft:gold_ingot", 1.0 / 9.0),
         "minecraft:copper_ingot" => item("minecraft:iron_ingot", 0.5),
         "minecraft:redstone_block" => item("minecraft:redstone", 9.0),
+        "minecraft:diamond_block" => item("minecraft:diamond", 9.0),
+        "minecraft:netherite_ingot" => {
+            item("minecraft:gold_ingot", 4.0);
+            item("minecraft:quartz", 4.0);
+        }
+        // An ALU (in a design): its recipe — four of its tier's material,
+        // four copper, a repeater, its core block.
+        id if crate::tier::Tier::from_alu_block(id).is_some() => {
+            use crate::tier::Tier::*;
+            let (material, core) = match crate::tier::Tier::from_alu_block(id).unwrap_or(Wood) {
+                Wood => ("minecraft:oak_planks", "minecraft:redstone_block"),
+                Stone => ("minecraft:cobblestone", "minecraft:redstone_block"),
+                Gold => ("minecraft:gold_ingot", "minecraft:diamond"),
+                Iron => ("minecraft:iron_ingot", "minecraft:diamond"),
+                Diamond => ("minecraft:diamond", "minecraft:diamond_block"),
+                Netherite => ("minecraft:netherite_ingot", "minecraft:diamond_block"),
+            };
+            item(material, 4.0);
+            item("minecraft:copper_ingot", 4.0);
+            item("minecraft:repeater", 1.0);
+            item(core, 1.0);
+        }
         // No resource of their own: the nearest one.
         "minecraft:glowstone_dust" | "minecraft:gunpowder" => item("minecraft:redstone", 1.0),
         "minecraft:slime_ball" | "minecraft:honey_bottle" | "minecraft:hay_block" | "minecraft:sand"
@@ -291,12 +347,33 @@ mod tests {
     #[test]
     fn cost_in_resources() {
         let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new() };
-        // 4 dust → 1 redstone; a repeater → 3 redstone, 3 stone, ¼ log.
-        let c = cost(&vec![block("minecraft:redstone_wire"); 4]);
+        // An eighth of crafting, rounded up: 8 dust → 1 redstone; 4
+        // repeaters (3 redstone, 3 stone, ¼ log each) → 2, 2, 1.
+        let c = cost(&vec![block("minecraft:redstone_wire"); 8]);
         assert_eq!(c, [1, 0, 0, 0, 0, 0]);
         let c = cost(&vec![block("minecraft:repeater[delay=1]"); 4]);
-        assert_eq!(c[Resource::Redstone.index()], 3);
-        assert_eq!(c[Resource::Stone.index()], 3);
+        assert_eq!(c[Resource::Redstone.index()], 2);
+        assert_eq!(c[Resource::Stone.index()], 2);
         assert_eq!(c[Resource::Wood.index()], 1);
+    }
+
+    #[test]
+    fn a_chip_in_an_alu_in_the_design_costs_another_eighth() {
+        use crate::chip::{ChipMeta, CircuitData, SavedAlu};
+        use crate::tier::Tier;
+        let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new() };
+        // The inner chip: 64 dust — 8 redstone printed alone, 1 inside an ALU.
+        let inner = CircuitData { size: 16, blocks: vec![block("minecraft:redstone_wire"); 64], ..Default::default() };
+        let meta = ChipMeta { id: "inner".into(), tier: Tier::Wood, name: "x".into(), ports: Vec::new() };
+        let outer = CircuitData {
+            size: 16,
+            blocks: vec![block("minecraft:redstone_wire"); 8],
+            ports: Vec::new(),
+            alus: vec![SavedAlu { x: 0, y: 0, z: 0, tier: Tier::Wood, chips: vec![(0, meta)], wires: Vec::new() }],
+        };
+        let load = |id: &str| (id == "inner").then(|| inner.clone());
+        assert_eq!(circuit_cost(&inner, &load)[Resource::Redstone.index()], 8);
+        // 8 dust → 1, and the inner 64 → 64 / 64 = 1: 2.
+        assert_eq!(circuit_cost(&outer, &load)[Resource::Redstone.index()], 2);
     }
 }
