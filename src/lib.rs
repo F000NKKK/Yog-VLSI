@@ -62,6 +62,23 @@ impl Mod for YogVlsi {
             let info = res::Strings::screen_workbench_design_tier(bp.tier.name(), bp.circuit.ports.len(), bp.circuit.blocks.len());
             Some((Some(bp.name), vec![format!("§7{info}")]))
         });
+        // A fabricated chip names its design and shows its tier, speed and ports.
+        for tier in tier::Tier::ALL {
+            registry.on_item_text(tier.chip_item(), |_, snbt| {
+                let meta = chip::ChipMeta::from_nbt(snbt)?;
+                let ports: Vec<String> = meta
+                    .ports
+                    .iter()
+                    .map(|p| match (p.dir.inputs(), p.dir.outputs()) {
+                        (true, true) => format!("↔{}", p.label),
+                        (true, false) => format!("→{}", p.label),
+                        _ => format!("{}→", p.label),
+                    })
+                    .collect();
+                let ports = if ports.is_empty() { res::Strings::chip_no_ports() } else { res::Strings::chip_ports(ports.join(", ")) };
+                Some((Some(meta.name), vec![res::Strings::chip_info(meta.tier.name(), meta.tier.tick_rate()), ports]))
+            });
+        }
         workbench::setup(registry);
         alu::setup(registry);
         board::setup(registry);

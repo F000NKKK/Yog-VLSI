@@ -39,6 +39,9 @@
     "value": "§7Place inside a chip's virtual circuit.\n§7Right-click to name it and set Input/Output/Bidirectional.",
     "comment": "Tooltip shared by the three VLSI port blocks"
   },
+  "chip.info": {"value": "§7{tier} · §b{rate} ticks/s", "comment": "A fabricated chip's tooltip: its tier and speed"},
+  "chip.ports": {"value": "§7Ports: {ports}", "comment": "A fabricated chip's tooltip: its ports (→in, out→, ↔both)"},
+  "chip.no_ports": "§7Ports: none",
   "item.chip_wood": "Wooden Microchip",
   "item.chip_wood.desc": "§7Tier: §eWood§7 | §b5 ticks/s§7 | §a16×16 world\n§7Place in a §6VLSI Workbench§7 to design circuits.\n§7Ports: none (unprogrammed)",
   "item.chip_stone": "Stone Microchip",
