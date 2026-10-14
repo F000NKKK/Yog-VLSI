@@ -1,7 +1,17 @@
 {
-  "mod_name": {"value": "Yog VLSI", "comment": "The mod's name (yog.toml name)"},
-  "mod_description": {"value": "Very Large Scale Integration — design and fabricate redstone microchips with a Rust-accelerated simulation VM. Multi-tier workbench, ALU block, and chip-to-chip linking.", "comment": "yog.toml description"},
-  "item_group": {"value": "Yog VLSI", "key": "itemGroup.yog-vlsi", "comment": "Creative tab"},
+  "mod_name": {
+    "value": "Yog VLSI",
+    "comment": "The mod's name (yog.toml name)"
+  },
+  "mod_description": {
+    "value": "Very Large Scale Integration — design and fabricate redstone microchips with a Rust-accelerated simulation VM. Multi-tier workbench, ALU block, and chip-to-chip linking.",
+    "comment": "yog.toml description"
+  },
+  "item_group": {
+    "value": "Yog VLSI",
+    "key": "itemGroup.yog-vlsi",
+    "comment": "Creative tab"
+  },
   "block.vlsi_workbench": "VLSI Workbench",
   "block.vlsi_workbench.desc": "§7Design and fabricate redstone microchips.\n§7Right-click to open the design interface.\n§7Insert blank chips, Blueprints, or resources.",
   "block.alu_wood": "Wood ALU",
@@ -25,7 +35,10 @@
   "block.port_input": "VLSI Port (Input)",
   "block.port_output": "VLSI Port (Output)",
   "block.port_bidi": "VLSI Port (Bidirectional)",
-  "block.port.desc": {"value": "§7Place inside a chip's virtual circuit.\n§7Right-click to cycle Input/Output/Bidirectional.\n§7Sneak + right-click, then type a name in chat to rename.", "comment": "Tooltip shared by the three VLSI port blocks"},
+  "block.port.desc": {
+    "value": "§7Place inside a chip's virtual circuit.\n§7Right-click to cycle Input/Output/Bidirectional.\n§7Sneak + right-click, then type a name in chat to rename.",
+    "comment": "Tooltip shared by the three VLSI port blocks"
+  },
   "item.chip_wood": "Wooden Microchip",
   "item.chip_wood.desc": "§7Tier: §eWood§7 | §b5 ticks/s§7 | §a16×16 world\n§7Place in a §6VLSI Workbench§7 to design circuits.\n§7Ports: none (unprogrammed)",
   "item.chip_stone": "Stone Microchip",
@@ -55,24 +68,58 @@
   "screen.workbench.title": "VLSI Workbench",
   "screen.workbench.chip": "Chip",
   "screen.workbench.resources": "Resources",
-  "screen.workbench.designs": "Designs",
-  "screen.workbench.no_designs": {"value": "No designs yet — use /vlsi design", "comment": "Design list when the player has none"},
-  "screen.workbench.design_row": {"value": "{name} [{tier}]", "comment": "Design list row"},
-  "screen.workbench.design_info": {"value": "{ports} ports, {blocks} blocks", "comment": "Under the list: the selected design"},
   "screen.workbench.edit": "Design",
   "screen.workbench.fabricate": "Fabricate",
-  "screen.workbench.export": "Export BP",
-  "screen.alu.title": {"value": "ALU — {chips} chips, {links} links", "comment": "ALU screen header"},
+  "screen.alu.title": {
+    "value": "ALU — {chips} chips, {links} links",
+    "comment": "ALU screen header"
+  },
   "screen.alu.external_ports": "External ports",
   "screen.alu.chips": "Chips",
   "screen.alu.links": "Links",
-  "screen.alu.link_row": {"value": "{from} → {to}", "comment": "One chip-to-chip link: chip.port → chip.port"},
-  "screen.alu.chip_row": {"value": "[{tier}] {name}", "comment": "Chip card header and chip selector row"},
+  "screen.alu.link_row": {
+    "value": "{from} → {to}",
+    "comment": "One chip-to-chip link: chip.port → chip.port"
+  },
+  "screen.alu.chip_row": {
+    "value": "[{tier}] {name}",
+    "comment": "Chip card header and chip selector row"
+  },
   "screen.alu.add_chip": "+ Add Chip",
   "screen.alu.auto_link": "Auto-link",
   "screen.alu.save": "Save",
   "screen.alu.select_chip": "Select a chip to install:",
   "screen.alu.no_chips": "(no programmed chips in your inventory)",
   "screen.alu.cancel": "Cancel",
-  "screen.alu.external": {"value": "ALU", "comment": "The ALU's own external ports, in the link list"}
+  "screen.alu.external": {
+    "value": "ALU",
+    "comment": "The ALU's own external ports, in the link list"
+  },
+  "screen.workbench.blueprint": "Blueprint",
+  "screen.workbench.blueprint_help": {
+    "value": "Put a Blueprint here.\nA blank one: name it, pick a tier, Create.\nA written one: open it in the Editor, or Fabricate a chip from it.",
+    "comment": "Tooltip of the (i) next to the blueprint slot"
+  },
+  "screen.workbench.no_blueprint": "No blueprint",
+  "screen.workbench.name": "Name",
+  "screen.workbench.name_placeholder": "Design name…",
+  "screen.workbench.tier": {
+    "value": "Tier: {tier}",
+    "comment": "Button cycling the new design's tier"
+  },
+  "screen.workbench.create": "Create",
+  "screen.workbench.design_tier": {
+    "value": "{tier} · {ports} ports · {blocks} blocks",
+    "comment": "Under the design's name"
+  },
+  "screen.workbench.cost": "Cost",
+  "screen.workbench.cost_row": {
+    "value": "{resource}: {need} ({have})",
+    "comment": "One resource of the fabrication cost: needed (stored)"
+  },
+  "screen.workbench.free": "Free — an empty design",
+  "screen.workbench.resource_tooltip": {
+    "value": "{resource}: {amount}\nTakes: {inputs}",
+    "comment": "A resource vial's tooltip"
+  }
 }
