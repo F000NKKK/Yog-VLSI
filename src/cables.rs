@@ -4,7 +4,9 @@
 //!   to vanilla redstone. Right-click opens its screen (`port.yui`): its
 //!   name, and Input (redstone → cable) or Output (cable → redstone). The
 //!   ALU screen shows that name on the side whose cable reaches the port.
-//! - **Digital** (`digital_cable`): ALU to ALU.
+//! - **Digital** (`digital_cable`): ALU to ALU — a bus of [`BUS_CHANNELS`]
+//!   channels, each a level 0–15 (the highest any ALU on it drives). An
+//!   ALU side a digital cable reaches is a bus node in its graph.
 //!
 //! An ALU reads and drives each of its six sides through the cable block
 //! next to it, so each side is its own connection.
@@ -24,6 +26,8 @@ pub const ANALOG: &str = "yog-vlsi:analog";
 pub const DIGITAL: &str = "yog-vlsi:digital";
 /// The channel an ALU side's level travels on.
 const SIDE_CHANNEL: u8 = 0;
+/// A digital bus's channels (an ALU's tier sees the first of them).
+pub const BUS_CHANNELS: u16 = 256;
 
 /// A Redstone Port.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,27 +127,44 @@ fn cable_at(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) -> Option<&'sta
     }
 }
 
-/// The level arriving at an ALU side from its cable (`None`: no cable).
-pub fn side_input(srv: &dyn yog_api::Server, dim: &str, alu: (i32, i32, i32), side: &str) -> Option<u8> {
-    let at = beside(alu, side);
-    let cap = cable_at(srv, dim, at)?;
-    yog_pipes::level(cap.to_string(), pipe_pos(dim, at), SIDE_CHANNEL).ok()
+/// Whether a digital cable reaches ALU side `side`: it's a bus.
+pub fn side_bus(srv: &dyn yog_api::Server, dim: &str, alu: (i32, i32, i32), side: &str) -> bool {
+    cable_at(srv, dim, beside(alu, side)) == Some(DIGITAL)
 }
 
-/// Drives `level` out of an ALU side into its cable (if there is one).
+/// The level on channel `ch` of the bus at ALU side `side`.
+pub fn bus_level(dim: &str, alu: (i32, i32, i32), side: &str, ch: u8) -> u8 {
+    yog_pipes::level(DIGITAL.to_string(), pipe_pos(dim, beside(alu, side)), ch).unwrap_or(0)
+}
+
+/// Drives `level` onto channel `ch` of the bus at ALU side `side`.
+pub fn bus_drive(dim: &str, alu: (i32, i32, i32), side: &str, ch: u8, level: u8) {
+    if let Err(e) = yog_pipes::emit(DIGITAL.to_string(), pipe_pos(dim, beside(alu, side)), ch, level.min(15)) {
+        warn!("[yog-vlsi] driving the bus: {e}");
+    }
+}
+
+/// The level arriving at an ALU side from its analog cable (`None`: none).
+pub fn side_input(srv: &dyn yog_api::Server, dim: &str, alu: (i32, i32, i32), side: &str) -> Option<u8> {
+    let at = beside(alu, side);
+    (cable_at(srv, dim, at)? == ANALOG).then_some(())?;
+    yog_pipes::level(ANALOG.to_string(), pipe_pos(dim, at), SIDE_CHANNEL).ok()
+}
+
+/// Drives `level` out of an ALU side into its analog cable (if there is one).
 pub fn side_output(srv: &dyn yog_api::Server, dim: &str, alu: (i32, i32, i32), side: &str, level: u8) {
     let at = beside(alu, side);
-    if let Some(cap) = cable_at(srv, dim, at)
-        && let Err(e) = yog_pipes::emit(cap.to_string(), pipe_pos(dim, at), SIDE_CHANNEL, level.min(15))
+    if cable_at(srv, dim, at) == Some(ANALOG)
+        && let Err(e) = yog_pipes::emit(ANALOG.to_string(), pipe_pos(dim, at), SIDE_CHANNEL, level.min(15))
     {
-        warn!("[yog-vlsi] emitting on {cap}: {e}");
+        warn!("[yog-vlsi] driving an analog cable: {e}");
     }
 }
 
 /// Tells Yog Pipes about the cables and the Redstone Port — once every mod
 /// has loaded.
 fn register_networks() {
-    let signal = |name: &str, prefix: &str| CapabilityDef {
+    let signal = |name: &str, prefix: &str, channels: u16| CapabilityDef {
         name: name.to_string(),
         kinds: Vec::new(),
         exclusive: true,
@@ -151,11 +172,11 @@ fn register_networks() {
         indicators: Vec::new(),
         distribution: Distribution::Nearest,
         events: None,
-        mechanic: Mechanic::Signal { channels: 1, attenuation: 0 },
+        mechanic: Mechanic::Signal { channels, attenuation: 0 },
     };
     let steps: [Result<(), String>; 5] = [
-        yog_pipes::register_capability(signal(ANALOG, "analog")),
-        yog_pipes::register_capability(signal(DIGITAL, "digital")),
+        yog_pipes::register_capability(signal(ANALOG, "analog", 1)),
+        yog_pipes::register_capability(signal(DIGITAL, "digital", BUS_CHANNELS)),
         yog_pipes::attach(AttachDef {
             block: Blocks::ANALOG_CABLE.to_string(),
             capability: ANALOG.to_string(),
