@@ -21,8 +21,9 @@ pub fn wrap(tag: &str, value: &str) -> String {
 }
 
 /// The unescaped string value of `tag` in `snbt`, if it's there as a
-/// double-quoted string (the loader may print it with or without a space
-/// after the colon, or with the key quoted).
+/// quoted string — double or single quotes: Minecraft prints a string that
+/// holds `"` in single quotes. The key may be quoted, the colon followed by
+/// a space.
 pub fn read(snbt: &str, tag: &str) -> Option<String> {
     let mut rest = snbt;
     loop {
@@ -35,18 +36,19 @@ pub fn read(snbt: &str, tag: &str) -> Option<String> {
             continue;
         }
         let Some(value) = after.strip_prefix(':') else { continue };
-        let Some(value) = value.trim_start().strip_prefix('"') else { continue };
-        return unescape_until_quote(value);
+        let value = value.trim_start();
+        let Some(quote) = value.chars().next().filter(|c| matches!(c, '"' | '\'')) else { continue };
+        return unescape_until(&value[1..], quote);
     }
 }
 
-fn unescape_until_quote(s: &str) -> Option<String> {
+fn unescape_until(s: &str, quote: char) -> Option<String> {
     let mut out = String::new();
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
         match c {
             '\\' => out.push(chars.next()?),
-            '"' => return Some(out),
+            c if c == quote => return Some(out),
             c => out.push(c),
         }
     }
@@ -70,6 +72,8 @@ mod tests {
         assert_eq!(read(r#"{"Tag":"v"}"#, "Tag").as_deref(), Some("v"));
         assert_eq!(read(r#"{NotTag:"a",Tag:"b"}"#, "Tag").as_deref(), Some("b"));
         assert_eq!(read("{}", "Tag"), None);
+        // How Minecraft prints a string holding double quotes.
+        assert_eq!(read(r#"{Tag:'{"name":"it\'s"}'}"#, "Tag").as_deref(), Some(r#"{"name":"it's"}"#));
         assert_eq!(read(r#"{Tag:"unterminated}"#, "Tag"), None);
     }
 }
