@@ -12,7 +12,7 @@
 //! and the server side: the stores, the requests, and the state each
 //! player with a workbench open is kept up to date with.
 
-yog_api::ui_include!("workbench");
+yog_api::ui_include!("ui/workbench");
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};

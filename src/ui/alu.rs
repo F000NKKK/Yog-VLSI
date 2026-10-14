@@ -11,7 +11,7 @@
 //!   or into empty space to remove it;
 //! - drag a chip by its title to move it.
 
-yog_api::ui_include!("alu");
+yog_api::ui_include!("ui/alu");
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex, Once};

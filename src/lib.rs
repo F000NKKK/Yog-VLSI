@@ -1,17 +1,17 @@
 //! Yog VLSI — Very Large Scale Integration.
 
-mod alu;
 mod board;
 mod cables;
 mod chip;
 mod commands;
 mod editor;
 mod nbt;
-mod port;
 mod resources;
 pub mod tier;
 pub mod vm;
-mod workbench;
+mod ui;
+
+use ui::{alu, port, workbench};
 
 // `crate::res` — typed accessors for resources/*.yres (Strings::...).
 yog_api::resources!();

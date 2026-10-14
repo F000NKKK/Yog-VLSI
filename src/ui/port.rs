@@ -10,7 +10,7 @@
 //!   (`cables.rs`): Input or Output, and the name the ALU screen shows on
 //!   the side whose cable reaches it.
 
-yog_api::ui_include!("port");
+yog_api::ui_include!("ui/port");
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
