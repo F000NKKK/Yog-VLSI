@@ -824,9 +824,9 @@ checksum = "25c7825105d390e604067b97b2814466b20491defb53877e6b3e1dcbfa8a028f"
 
 [[package]]
 name = "yog-api"
-version = "0.92.6"
+version = "0.92.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38dc397766f87a1ed98489637f4ce9b5040acbb975dfd8a9a4d94e73b4439c40"
+checksum = "751a4c6b625b294c60f336de3fd02d2d968dab3f81983f77658b6d847f32e972"
 dependencies = [
  "ctor",
  "rkyv",
@@ -878,9 +878,9 @@ checksum = "d712d79a3e046f0482232c1dc59400e23f85f60935758b7bbcf2a02ed288e981"
 
 [[package]]
 name = "yog-core"
-version = "0.3.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c1461cb00b45fea43054008a23272f95cf2d63f2145d01e0aad37d7058fa396"
+checksum = "f90e1e021a837c4cae69c946b23ce4d80401036dfea7a7d08a27bae1f036b6d1"
 
 [[package]]
 name = "yog-dimensions"
@@ -944,9 +944,9 @@ dependencies = [
 
 [[package]]
 name = "yog-kit"
-version = "0.3.7"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38ed8a02fc829435c19ac7b1df55b9750fd9870dbf97ba2af691cbb1d791cff8"
+checksum = "cef5557d4ec5700c089111e755a31bdc6e6196a1ed349478bb91bd1c36017c3a"
 dependencies = [
  "yog-api",
 ]
@@ -975,9 +975,9 @@ dependencies = [
 
 [[package]]
 name = "yog-registry"
-version = "0.28.0"
+version = "0.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0f10c26673c9ff6e691397cf615939852b241af79380ac245f379cdb02e2598"
+checksum = "7ce6cc47c9beb496c8d84e24b9337f6b122be390cabe010f4c32b8200a807e4b"
 dependencies = [
  "serde",
  "yog-abi",
@@ -991,9 +991,9 @@ checksum = "d300b68e1172c9cec95fee547a1cf641cc7063562b5851b91017814d39beb045"
 
 [[package]]
 name = "yog-ui"
-version = "0.40.4"
+version = "0.40.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83c5e9221a00fc3f8e77fdb210153f88d0955ea0e773cdaf712279b7674add31"
+checksum = "b75bac7391d860e62d814cbbfb32e533a4cae1cb13b985fa42626c27f7cbdae2"
 dependencies = [
  "yog-abi",
  "yog-gfx",
