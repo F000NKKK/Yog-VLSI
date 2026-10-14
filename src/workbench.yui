@@ -97,7 +97,7 @@
                     <Slot index="7" accepts="yog-vlsi:blueprint" />
                     <Label x:Name="no_blueprint"
                            text="@Strings.screen.workbench.no_blueprint"
-                           color="#FF707070"
+                           color="#FF505050"
                            visible="{x:Bind no_blueprint()}" />
                     <Label x:Name="design_name"
                            flex="1"
