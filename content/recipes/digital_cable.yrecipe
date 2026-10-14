@@ -1,14 +1,14 @@
 {
-  "type": "shaped",
-  "pattern": [
-    "GRG",
-    "RIR",
-    "GRG"
-  ],
-  "key": {
-    "G": "@item:minecraft:gold_nugget",
-    "R": "@item:minecraft:redstone",
-    "I": "@item:minecraft:iron_ingot"
+  "type": "yog-vlsi:assembly",
+  "slots": {
+    "parts": [
+      "@item:minecraft:iron_ingot",
+      "@item:minecraft:gold_nugget",
+      "@item:minecraft:gold_nugget"
+    ]
+  },
+  "values": {
+    "redstone": 4
   },
   "result": "@item:yog-vlsi:digital_cable",
   "count": 4

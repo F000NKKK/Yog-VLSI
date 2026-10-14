@@ -1,13 +1,14 @@
 {
-  "type": "shaped",
-  "pattern": [
-    "SSS",
-    "SRS",
-    "SSS"
-  ],
-  "key": {
-    "S": "@item:minecraft:smooth_stone",
-    "R": "@item:minecraft:redstone"
+  "type": "yog-vlsi:assembly",
+  "slots": {
+    "parts": [
+      "@item:minecraft:smooth_stone",
+      "@item:minecraft:smooth_stone",
+      "@item:minecraft:redstone"
+    ]
+  },
+  "values": {
+    "stone": 6
   },
   "result": "@item:yog-vlsi:redstone_port"
 }

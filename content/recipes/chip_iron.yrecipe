@@ -1,0 +1,14 @@
+{
+  "type": "yog-vlsi:assembly",
+  "slots": {
+    "parts": [
+      "@item:minecraft:iron_ingot",
+      "@item:minecraft:comparator"
+    ]
+  },
+  "values": {
+    "redstone": 8,
+    "iron": 4
+  },
+  "result": "@item:yog-vlsi:chip_iron"
+}

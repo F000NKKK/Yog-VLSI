@@ -1,15 +1,18 @@
 {
-  "type": "shaped",
-  "pattern": [
-    "GCG",
-    "CRC",
-    "GDG"
-  ],
-  "key": {
-    "G": "@item:minecraft:gold_ingot",
-    "C": "@item:minecraft:copper_ingot",
-    "R": "@item:minecraft:repeater",
-    "D": "@item:minecraft:diamond"
+  "type": "yog-vlsi:assembly",
+  "slots": {
+    "parts": [
+      "@item:minecraft:repeater",
+      "@item:minecraft:copper_ingot",
+      "@item:minecraft:copper_ingot",
+      "@item:minecraft:gold_ingot",
+      "@item:minecraft:gold_ingot",
+      "@item:minecraft:diamond"
+    ]
+  },
+  "values": {
+    "redstone": 8,
+    "gold": 8
   },
   "result": "@item:yog-vlsi:alu_gold"
 }

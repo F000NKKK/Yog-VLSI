@@ -34,6 +34,25 @@ impl Resource {
         self as usize
     }
 
+    /// Its name in an assembly recipe's `values` (content/recipes/assembly.ydef).
+    pub fn key(self) -> &'static str {
+        match self {
+            Resource::Redstone => "redstone",
+            Resource::Iron => "iron",
+            Resource::Gold => "gold",
+            Resource::Quartz => "quartz",
+            Resource::Wood => "wood",
+            Resource::Stone => "stone",
+        }
+    }
+
+    /// What an assembly recipe's `values` cost.
+    pub fn cost_of(values: &yog_api::yog_data::Value) -> Amounts {
+        Resource::ALL.map(|r| {
+            values.get(r.key()).and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f.ceil() as i64))).unwrap_or(0).max(0) as u64
+        })
+    }
+
     /// The workbench slot it's fed through (1–6; 0 is the chip, 7 the blueprint).
     pub fn slot(self) -> u32 {
         self.index() as u32 + 1

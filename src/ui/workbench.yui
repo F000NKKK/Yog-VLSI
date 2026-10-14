@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The VLSI Workbench's inventory screen. View model: WorkbenchVm in workbench.rs. -->
 <Screen id="yog-vlsi:workbench"
-        width="276"
+        width="388"
         height="222"
         anchor="center"
         theme="minecraft:vanilla"
@@ -122,7 +122,7 @@
                             command="{x:Bind create()}" />
                 </Column>
 
-                <!-- A design: what it is and what it costs. -->
+                <!-- A design: what it is, what it costs, and the blank chip it goes on. -->
                 <Column gap="1" visible="{x:Bind has_design()}">
                     <Label x:Name="design_tier" text="{x:Bind design_tier()}" font_scale="0.7" no_wrap="true" />
                     <Label style="@Header" margin="3 0 0 0" text="@Strings.screen.workbench.cost" />
@@ -134,6 +134,20 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </Column>
+            </Column>
+
+            <!-- Assembly: parts in, a part out, paid from the store too. -->
+            <Column w="104" gap="2">
+                <Label style="@Header" text="@Strings.screen.workbench.assembly" />
+                <RecipeArea kind="assembly" />
+                <Label style="@Header" margin="3 0 0 0" text="@Strings.screen.workbench.cost" visible="{x:Bind has_assembly()}" />
+                <ItemsControl x:Name="assembly_cost" w="100%" gap="1" items="{x:Bind assembly_rows()}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="CostRow">
+                            <Label w="100%" text="{x:Bind text}" color="{x:Bind color}" font_scale="0.7" no_wrap="true" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
             </Column>
         </Row>
 

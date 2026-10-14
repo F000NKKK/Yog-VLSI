@@ -76,6 +76,8 @@
   "screen.workbench.cost": "Стоимость",
   "screen.workbench.cost_row": "{resource}: {need} ({have})",
   "screen.workbench.free": "Бесплатно — схема пустая",
+  "screen.workbench.assembly": "Сборка",
+  "screen.workbench.need_chip": "Нужен чистый чип: {tier}",
   "screen.workbench.resource_tooltip": "{resource}: {amount}\nПринимает: {inputs}",
   "screen.alu.title": "АЛУ ({tier}) — работают чипов: {chips}/{max}",
   "screen.alu.slots": "Тир питает слоты 1–{max}",

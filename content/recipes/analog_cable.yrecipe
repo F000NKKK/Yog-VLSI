@@ -1,10 +1,12 @@
 {
-  "type": "shaped",
-  "pattern": [
-    "RRR"
-  ],
-  "key": {
-    "R": "@item:minecraft:redstone"
+  "type": "yog-vlsi:assembly",
+  "slots": {
+    "parts": [
+      "@item:minecraft:redstone"
+    ]
+  },
+  "values": {
+    "redstone": 2
   },
   "result": "@item:yog-vlsi:analog_cable",
   "count": 3

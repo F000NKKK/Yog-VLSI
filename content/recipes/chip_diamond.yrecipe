@@ -1,0 +1,14 @@
+{
+  "type": "yog-vlsi:assembly",
+  "slots": {
+    "parts": [
+      "@item:minecraft:diamond",
+      "@item:minecraft:comparator"
+    ]
+  },
+  "values": {
+    "redstone": 16,
+    "quartz": 8
+  },
+  "result": "@item:yog-vlsi:chip_diamond"
+}

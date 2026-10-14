@@ -1,0 +1,15 @@
+{
+  "type": "yog-vlsi:assembly",
+  "slots": {
+    "parts": [
+      "@item:minecraft:netherite_ingot",
+      "@item:minecraft:diamond",
+      "@item:minecraft:comparator"
+    ]
+  },
+  "values": {
+    "redstone": 32,
+    "quartz": 16
+  },
+  "result": "@item:yog-vlsi:chip_netherite"
+}

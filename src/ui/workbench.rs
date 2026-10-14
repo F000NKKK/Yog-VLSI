@@ -6,7 +6,10 @@
 //! Whatever goes into a resource slot is swallowed into the workbench's own
 //! store (blocks count ×9, quartz blocks ×4), so it holds any amount. A
 //! blank Blueprint gets a name and a tier (Create); a written one opens in
-//! the editor or is fabricated into a chip, paid from the store.
+//! the editor or is fabricated onto a blank chip of its tier, paid from the
+//! store. Its assembly grid (a `<RecipeArea>`) makes VLSI's parts and blank
+//! chips — `yog-vlsi:assembly` recipes — like a crafting table, each also
+//! paid from the store.
 //!
 //! This file is the screen's code-behind — the view model `WorkbenchVm` —
 //! and the server side: the stores, the requests, and the state each
@@ -31,6 +34,8 @@ use crate::tier::Tier;
 
 pub const WORKBENCH_ID: &str = crate::content::Blocks::VLSI_WORKBENCH;
 pub const BLUEPRINT_ID: &str = Items::BLUEPRINT;
+/// Its inventory (content/vlsi_workbench.yblock), a machine for assembly recipes.
+const WORKBENCH_INVENTORY: &str = "yog-vlsi:workbench";
 
 /// The workbench's own slots.
 const CHIP_SLOT: u32 = 0;
@@ -75,8 +80,10 @@ pub struct BenchState {
     pub bench: BenchId,
     pub stored: Amounts,
     pub blueprint: BlueprintView,
-    /// The chip slot is empty (a fabricated chip can come out).
-    pub chip_free: bool,
+    /// The chip slot holds one blank chip of the design's tier.
+    pub chip_ready: bool,
+    /// What the assembly grid makes and what that costs.
+    pub assembly: Option<(String, Amounts)>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -158,11 +165,9 @@ impl WorkbenchVm {
             .map(|(_, tier, ports, blocks, _)| Strings::screen_workbench_design_tier(tier.name(), ports, blocks))
             .unwrap_or_default()
     }
-    pub fn cost_rows(&self) -> Vec<CostRow> {
-        let Some((.., cost)) = self.design() else {
-            return Vec::new();
-        };
-        let rows: Vec<CostRow> = Resource::ALL
+    /// A row per resource `cost` takes: needed (stored), red when short.
+    fn rows_for(&self, cost: &Amounts) -> Vec<CostRow> {
+        Resource::ALL
             .into_iter()
             .filter(|r| cost[r.index()] > 0)
             .map(|r| {
@@ -172,11 +177,29 @@ impl WorkbenchVm {
                     color: if have >= need { 0xFF_404040 } else { 0xFF_B02020 },
                 }
             })
-            .collect();
+            .collect()
+    }
+    pub fn cost_rows(&self) -> Vec<CostRow> {
+        let Some((_, tier, .., cost)) = self.design() else {
+            return Vec::new();
+        };
+        let mut rows = self.rows_for(cost);
         if rows.is_empty() {
-            return vec![CostRow { text: Strings::screen_workbench_free(), color: 0xFF_404040 }];
+            rows.push(CostRow { text: Strings::screen_workbench_free(), color: 0xFF_404040 });
+        }
+        if !self.state.as_ref().is_some_and(|s| s.chip_ready) {
+            rows.push(CostRow { text: Strings::screen_workbench_need_chip(tier.name()), color: 0xFF_B02020 });
         }
         rows
+    }
+    pub fn has_assembly(&self) -> bool {
+        self.state.as_ref().is_some_and(|s| s.assembly.as_ref().is_some_and(|(_, cost)| cost.iter().any(|c| *c > 0)))
+    }
+    pub fn assembly_rows(&self) -> Vec<CostRow> {
+        match self.state.as_ref().and_then(|s| s.assembly.as_ref()) {
+            Some((_, cost)) => self.rows_for(cost),
+            None => Vec::new(),
+        }
     }
 
     fn tier(&self) -> Tier {
@@ -195,7 +218,7 @@ impl WorkbenchVm {
     pub fn can_fabricate(&self) -> bool {
         let Some(state) = &self.state else { return false };
         let Some((.., cost)) = self.design() else { return false };
-        state.chip_free && Resource::ALL.iter().all(|r| state.stored[r.index()] >= cost[r.index()])
+        state.chip_ready && Resource::ALL.iter().all(|r| state.stored[r.index()] >= cost[r.index()])
     }
 
     pub fn create(&mut self) {
@@ -237,6 +260,11 @@ static STORES: LazyLock<Mutex<HashMap<BenchId, Amounts>>> = LazyLock::new(|| Mut
 static WATCHERS: LazyLock<Mutex<HashMap<String, (BenchId, Option<BenchState>)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static TICKS: Mutex<u64> = Mutex::new(0);
+/// What each workbench's assembly grid last made (the game asks while it's
+/// open): the result, its cost, and the tick it was asked.
+static ASSEMBLING: LazyLock<Mutex<HashMap<BenchId, (String, Amounts, u64)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Ticks an answer stands for: the game asks every 10 while it's open.
+const ASSEMBLING_FOR: u64 = 20;
 
 /// Moves what's in the resource slots of `bench` into its store.
 fn absorb(srv: &dyn yog_api::Server, bench: &BenchId) {
@@ -279,12 +307,26 @@ fn blueprint_in(srv: &dyn yog_api::Server, bench: &BenchId) -> (BlueprintView, O
     }
 }
 
+/// The chip slot holds one blank chip of `tier`.
+fn blank_chip_in(srv: &dyn yog_api::Server, bench: &BenchId, tier: Tier) -> bool {
+    matches!(srv.get_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT),
+        Some((id, 1, nbt)) if id == tier.chip_item() && ChipMeta::from_nbt(&nbt).is_none())
+}
+
 fn state_of(srv: &dyn yog_api::Server, bench: &BenchId) -> BenchState {
+    let (blueprint, bp) = blueprint_in(srv, bench);
+    let now = *TICKS.lock().unwrap();
     BenchState {
         bench: bench.clone(),
         stored: STORES.lock().unwrap().get(bench).copied().unwrap_or_default(),
-        blueprint: blueprint_in(srv, bench).0,
-        chip_free: srv.get_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT).is_none(),
+        chip_ready: bp.is_some_and(|bp| blank_chip_in(srv, bench, bp.tier)),
+        blueprint,
+        assembly: ASSEMBLING
+            .lock()
+            .unwrap()
+            .get(bench)
+            .filter(|(.., at)| now.saturating_sub(*at) <= ASSEMBLING_FOR)
+            .map(|(result, cost, _)| (result.clone(), *cost)),
     }
 }
 
@@ -346,8 +388,8 @@ fn fabricate(srv: &dyn yog_api::Server, bench: &BenchId) -> String {
     let Some(bp) = blueprint_in(srv, bench).1 else {
         return "§cPut a written Blueprint in the workbench.".into();
     };
-    if srv.get_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT).is_some() {
-        return "§cTake the chip out of the chip slot first.".into();
+    if !blank_chip_in(srv, bench, bp.tier) {
+        return format!("§cPut one blank {} chip in the chip slot.", bp.tier.name());
     }
     let cost = crate::resources::circuit_cost(&bp.circuit, &|id| crate::chip::CircuitData::load_for_chip(&srv.game_dir(), id));
     {
@@ -399,6 +441,28 @@ pub fn setup(registry: &mut Registry) {
         }
     });
 
+    // The assembly grid: a recipe shows only if the store pays for it, and
+    // taking it pays.
+    registry.on_machine_craft(|e, phase, _srv| {
+        if e.machine != WORKBENCH_INVENTORY {
+            return true;
+        }
+        let bench = BenchId { dimension: e.dimension.clone(), x: e.pos.x, y: e.pos.y, z: e.pos.z };
+        let cost = Resource::cost_of(&e.values);
+        let mut stores = STORES.lock().unwrap();
+        if phase == EventPhase::Post {
+            let store = stores.entry(bench).or_default();
+            for (s, c) in store.iter_mut().zip(cost) {
+                *s = s.saturating_sub(c);
+            }
+            return true;
+        }
+        let now = *TICKS.lock().unwrap();
+        ASSEMBLING.lock().unwrap().insert(bench.clone(), (e.result_item.clone(), cost, now));
+        let stored = stores.get(&bench).copied().unwrap_or_default();
+        stored.iter().zip(cost).all(|(s, c)| *s >= c)
+    });
+
     // Opening a workbench: watch it from now on.
     registry.on_use_block(|e, phase, _srv| -> bool {
         if phase == EventPhase::Pre && e.block_id == WORKBENCH_ID {
@@ -440,14 +504,18 @@ mod tests {
             bench: BenchId { dimension: "minecraft:overworld".into(), x: 0, y: 0, z: 0 },
             stored,
             blueprint,
-            chip_free: true,
+            chip_ready: true,
+            assembly: None,
         }
     }
 
     #[test]
     fn slots_fit_the_screen_apart() {
         let def = yog_kit::inventory_of::<View>().unwrap();
-        assert_eq!(def.slot_count, 8);
+        // Chip, six resources, blueprint; six parts and the assembly's result.
+        assert_eq!(def.slot_count, 15);
+        let machine = def.machine.as_ref().expect("the assembly grid");
+        assert_eq!((machine.kind.as_str(), machine.result, machine.places.len()), ("yog-vlsi:assembly", 14, 6));
         assert!(def.include_player_inventory);
         let (px, py) = def.player_inv_offset;
         // The player's inventory (9×18 by 3×18 + 4 + 18) stays on screen.
@@ -479,6 +547,27 @@ mod tests {
         h.vm_mut().apply(state([5, 0, 0, 0, 0, 1], BlueprintView::Design { name: "Adder".into(), tier: Tier::ALL[0], ports: 2, blocks: 4, cost }));
         assert!(h.vm().can_fabricate());
         assert_eq!(h.vm().cost_rows().len(), 2);
+    }
+
+    #[test]
+    fn assembly_shows_what_it_costs_and_the_design_its_chip() {
+        let values = yog_api::yog_data::json::from_json_text(r#"{"redstone": 4, "wood": 8}"#).unwrap();
+        let cost = Resource::cost_of(&values);
+        assert_eq!(cost, [4, 0, 0, 0, 8, 0]);
+        let mut vm = WorkbenchVm::default();
+        let mut s = state([10, 0, 0, 0, 2, 0], BlueprintView::None);
+        s.assembly = Some(("yog-vlsi:alu_wood".into(), cost));
+        vm.apply(s.clone());
+        assert!(vm.has_assembly());
+        let rows = vm.assembly_rows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].color, 0xFF_B02020, "short of wood");
+
+        s.chip_ready = false;
+        s.blueprint = BlueprintView::Design { name: "Adder".into(), tier: Tier::ALL[0], ports: 2, blocks: 4, cost: [1, 0, 0, 0, 0, 0] };
+        vm.apply(s);
+        assert!(!vm.can_fabricate(), "no blank chip");
+        assert_eq!(vm.cost_rows().last().unwrap().color, 0xFF_B02020);
     }
 
     #[test]

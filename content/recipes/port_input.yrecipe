@@ -1,13 +1,12 @@
 {
-  "type": "shaped",
-  "pattern": [
-    " R ",
-    "RSR",
-    " R "
-  ],
-  "key": {
-    "R": "@item:minecraft:redstone",
-    "S": "@item:minecraft:stone"
+  "type": "yog-vlsi:assembly",
+  "slots": {
+    "parts": [
+      "@item:minecraft:stone"
+    ]
+  },
+  "values": {
+    "redstone": 4
   },
   "result": "@item:yog-vlsi:port_input",
   "count": 2
