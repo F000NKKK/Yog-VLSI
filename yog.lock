@@ -225,9 +225,9 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
 name = "equivalent"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
 name = "fdeflate"
@@ -818,15 +818,15 @@ dependencies = [
 
 [[package]]
 name = "yog-abi"
-version = "0.28.2"
+version = "0.28.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25c7825105d390e604067b97b2814466b20491defb53877e6b3e1dcbfa8a028f"
+checksum = "b8c3f0ceee895f5325ba3231a70c38d38f773de474eaa56a9e142a7219b3d81e"
 
 [[package]]
 name = "yog-api"
-version = "0.92.9"
+version = "0.92.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "751a4c6b625b294c60f336de3fd02d2d968dab3f81983f77658b6d847f32e972"
+checksum = "a2861bf5c6e44da6713bcb69ae7e51d3f5228761669d5a50a90d6c05bdbc7adf"
 dependencies = [
  "ctor",
  "rkyv",
@@ -878,9 +878,9 @@ checksum = "d712d79a3e046f0482232c1dc59400e23f85f60935758b7bbcf2a02ed288e981"
 
 [[package]]
 name = "yog-core"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f90e1e021a837c4cae69c946b23ce4d80401036dfea7a7d08a27bae1f036b6d1"
+checksum = "09b3065718bc13e4b9d93adc5a03528ac07451cf645d676b20f2bbacfafdded4"
 
 [[package]]
 name = "yog-dimensions"
@@ -944,9 +944,9 @@ dependencies = [
 
 [[package]]
 name = "yog-kit"
-version = "0.3.9"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cef5557d4ec5700c089111e755a31bdc6e6196a1ed349478bb91bd1c36017c3a"
+checksum = "b9aa42653bea8e7cf190d0f899c23f9f720fc3c47f3d7587b466e79e26102166"
 dependencies = [
  "yog-api",
 ]
@@ -975,9 +975,9 @@ dependencies = [
 
 [[package]]
 name = "yog-registry"
-version = "0.28.1"
+version = "0.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ce6cc47c9beb496c8d84e24b9337f6b122be390cabe010f4c32b8200a807e4b"
+checksum = "74cf3b8d92c8942dc00716500c8619ef86ac22cf0c99b2205234bf0bda913e6d"
 dependencies = [
  "serde",
  "yog-abi",
