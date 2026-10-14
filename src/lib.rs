@@ -1,12 +1,12 @@
 //! Yog VLSI — Very Large Scale Integration.
 
 mod alu;
+mod board;
 mod cables;
 mod chip;
 mod commands;
 mod editor;
 mod nbt;
-mod network;
 mod port;
 mod resources;
 pub mod tier;
@@ -55,14 +55,14 @@ impl Mod for YogVlsi {
 
         workbench::setup(registry);
         alu::setup(registry);
+        board::setup(registry);
         port::setup(registry);
         editor::register(registry);
-        network::register(registry);
         commands::register(registry);
         cables::register(registry);
 
         registry.on_tick(|srv| {
-            alu::tick_all(srv);
+            board::tick(srv);
             cables::tick(srv);
             workbench::tick(srv);
         });
@@ -70,13 +70,13 @@ impl Mod for YogVlsi {
         // Persistence
         registry.on_server_started(|srv| {
             workbench::load_resources(srv);
-            alu::load_state(srv);
+            board::load(srv);
             cables::load(srv);
             port::load(srv);
         });
         registry.on_server_stopping(|srv| {
             workbench::save_resources(srv);
-            alu::save_state(srv);
+            board::save(srv);
             cables::save(srv);
             port::save(srv);
         });

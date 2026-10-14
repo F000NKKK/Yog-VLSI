@@ -487,7 +487,7 @@ impl RedstoneVM {
     }
 
     /// 2. Wire levels: what each wire gets from outside the dust, spread
-    /// along it strongest first, one less per block.
+    ///    along it strongest first, one less per block.
     fn settle_wire(&mut self) {
         let mut buckets: [Vec<u32>; 16] = Default::default();
         for k in 0..self.active.len() {

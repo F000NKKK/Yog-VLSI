@@ -31,12 +31,12 @@
   "block.digital_cable": "Digital Cable",
   "block.digital_cable.desc": "§7Carries up to 256 digital bits (64 channels × 4 colors).\n§7Connects Digital Ports between ALUs.",
   "block.redstone_port": "Redstone Port",
-  "block.redstone_port.desc": "§7Adapter between ALU and external redstone.\n§7Place on any side of an ALU. Connect Analog Cable on one side, redstone on the other.",
+  "block.redstone_port.desc": "§7Joins an Analog Cable to redstone.\n§7Right-click to name it and set Input or Output; the ALU screen shows its name.",
   "block.port_input": "VLSI Port (Input)",
   "block.port_output": "VLSI Port (Output)",
   "block.port_bidi": "VLSI Port (Bidirectional)",
   "block.port.desc": {
-    "value": "§7Place inside a chip's virtual circuit.\n§7Right-click to cycle Input/Output/Bidirectional.\n§7Sneak + right-click, then type a name in chat to rename.",
+    "value": "§7Place inside a chip's virtual circuit.\n§7Right-click to name it and set Input/Output/Bidirectional.",
     "comment": "Tooltip shared by the three VLSI port blocks"
   },
   "item.chip_wood": "Wooden Microchip",
@@ -73,33 +73,8 @@
   "screen.port.title": "Port",
   "screen.port.name_placeholder": "Pin name",
   "screen.port.done": "Done",
-  "screen.alu.title": {
-    "value": "ALU ({tier}) — chips {chips}/{max}, links {links}, {channels} channels",
-    "comment": "ALU screen header"
-  },
-  "screen.alu.external_ports": "External ports",
   "screen.alu.chips": "Chips",
-  "screen.alu.links": "Links",
-  "screen.alu.link_row": {
-    "value": "{from} → {to}",
-    "comment": "One chip-to-chip link: chip.port → chip.port"
-  },
-  "screen.alu.chip_row": {
-    "value": "[{tier}] {name}",
-    "comment": "Chip card header and chip selector row"
-  },
-  "screen.alu.add_chip": "+ Add Chip",
-  "screen.alu.auto_link": "Auto-link",
-  "screen.alu.unlink": "Unlink",
   "screen.alu.clear_links": "Clear links",
-  "screen.alu.save": "Save",
-  "screen.alu.select_chip": "Select a chip to install:",
-  "screen.alu.no_chips": "(no programmed chips in your inventory)",
-  "screen.alu.cancel": "Cancel",
-  "screen.alu.external": {
-    "value": "ALU",
-    "comment": "The ALU's own external ports, in the link list"
-  },
   "screen.workbench.blueprint": "Blueprint",
   "screen.workbench.blueprint_help": {
     "value": "Put a Blueprint here.\nA blank one: name it, pick a tier, Create.\nA written one: open it in the Editor, or Fabricate a chip from it.",
@@ -127,10 +102,30 @@
     "value": "{resource}: {amount}\nTakes: {inputs}",
     "comment": "A resource vial's tooltip"
   },
-  "screen.alu.full": {
-    "value": "This ALU holds {max} chips at most.",
-    "comment": "Installing a chip into a full ALU"
+  "screen.alu.title": {
+    "value": "{tier} ALU — {chips}/{max} chips working",
+    "comment": "ALU screen header"
   },
-  "redstone_port.input": "Redstone Port: input — redstone goes into the cable",
-  "redstone_port.output": "Redstone Port: output — the cable's level comes out as redstone"
+  "screen.alu.slots": {
+    "value": "Slots 1–{max} work at this tier",
+    "comment": "Under the ALU's chip slots"
+  },
+  "screen.alu.inputs": {
+    "value": "Inputs",
+    "comment": "Graph node: the ALU's sides as sources (what their cables bring in)"
+  },
+  "screen.alu.outputs": {
+    "value": "Outputs",
+    "comment": "Graph node: the ALU's sides as sinks (what goes out into their cables)"
+  },
+  "screen.alu.sleeping": {
+    "value": "off",
+    "comment": "A chip in a slot past the ALU tier's limit"
+  },
+  "screen.alu.empty": "Put programmed chips in the slots below",
+  "screen.alu.help": {
+    "value": "Inputs (left): what each side's cable brings in. Outputs (right): what goes out into it.\nDrag from an output pin (right edge) to an input pin (left edge) to wire them — chip to chip stays inside the ALU.\nDrag a wire off its input pin to move it, or into empty space to remove it. Drag a chip by its title.\nName a Redstone Port (right-click it) and its name shows on the side its cable reaches.",
+    "comment": "Tooltip of the (i) in the ALU screen"
+  },
+  "screen.port.redstone_title": "Redstone Port"
 }

@@ -8,6 +8,7 @@
     "light": 7,
     "tool": "pickaxe",
     "requires_tool": true,
+    "inventory": "yog-vlsi:alu",
     "connect_groups": [
       "analog",
       "digital"

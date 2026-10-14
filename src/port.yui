@@ -10,7 +10,7 @@
         <Style x:Key="Mode" target="ToggleButton" flex="1" h="20" />
     </Screen.Resources>
     <Column w="100%" h="100%" padding="6 8 8 8" gap="4">
-        <Label text="@Strings.screen.port.title" no_wrap="true" />
+        <Label text="{x:Bind title()}" no_wrap="true" />
         <TextBox x:Name="label"
                  w="100%"
                  h="14"
@@ -34,6 +34,7 @@
                           style="@Mode"
                           text="@Strings.port_short_bidi"
                           tooltip="@Strings.port_mode_bidi"
+                          visible="{x:Bind chip_port()}"
                           checked="{x:Bind mode == PortMode::Bidirectional}"
                           command="{x:Bind set_mode(PortMode::Bidirectional)}" />
         </Row>

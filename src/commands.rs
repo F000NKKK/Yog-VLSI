@@ -1,106 +1,18 @@
-//! Commands for Yog VLSI — ALU and debugging. Designs are made in the
+//! Commands for Yog VLSI — chips and debugging. Designs are made in the
 //! workbench, on Blueprints (see `workbench.rs`), not by command.
 //!
 //! /vlsi                            — help
 //! /vlsi chip <tier>                — give blank chip
 //! /vlsi info                       — show held chip NBT
 //! /vlsi test <tier>                — create programmed test chip
-//! /vlsi vm step                    — step VM on held chip
-//! /vlsi alu install                — install held chip into nearest ALU
-//! /vlsi alu list                   — list chips in nearest ALU
-
-use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+//! /vlsi vm step                    — run the held chip's circuit a second
 
 use yog_api::player::Player;
 use yog_api::Registry;
 
 use crate::chip::{ChipMeta, CircuitBlock, CircuitData, Port};
 use crate::tier::Tier;
-use crate::vm::{PortMode, RedstoneVM};
-
-/// In-memory ALU state: (x, y, z) → list of (chip_id, tier)
-pub static ALU_STATE: LazyLock<Mutex<HashMap<(i32, i32, i32), Vec<(String, Tier)>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// In-memory chip-VM cache: chip_id → RedstoneVM
-pub static VM_CACHE: LazyLock<Mutex<HashMap<String, RedstoneVM>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Port list per installed chip (cached at install time so the tick loop
-/// doesn't need a Storage read every tick): chip_id → ports.
-pub static CHIP_PORTS: LazyLock<Mutex<HashMap<String, Vec<Port>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Server-authoritative link graph, keyed like the UI shows it:
-/// `(chip_id, port_label) → (chip_id, port_label)`. An ALU's own 6 external
-/// ports are addressed with the chip_id `"__ext_<x>_<y>_<z>"` and a label of
-/// `"N"`/`"S"`/`"E"`/`"W"`/`"U"`/`"D"`, so external ↔ chip links live in the
-/// same map as chip ↔ chip links.
-pub static LINKS: LazyLock<Mutex<HashMap<(String, String), (String, String)>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// I/O mode per ALU external port: `"__ext_<x>_<y>_<z>:<side>"` → mode string.
-pub static IO_MODES: LazyLock<Mutex<HashMap<String, crate::vm::PortMode>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Latest computed value for each ALU's external analog ports (what a
-/// Redstone Port *would* drive onto its Analog Cable). Actually asserting
-/// this onto real-world redstone needs a loader-level redstone-power R/W
-/// hook that does not exist yet — see `alu::tick_all` for details.
-pub static EXT_VALUES: LazyLock<Mutex<HashMap<(i32, i32, i32), HashMap<String, u8>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Display name per installed chip (for the ALU node editor): chip_id → name.
-pub static CHIP_NAMES: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Each ALU's dimension, by position — recorded when it's opened (its
-/// cables are read and driven there); saved with the ALU state.
-pub static ALU_DIMS: LazyLock<Mutex<HashMap<(i32, i32, i32), String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Each ALU's tier, by position — recorded when it's opened (its chip limit).
-pub static ALU_TIERS: LazyLock<Mutex<HashMap<(i32, i32, i32), Tier>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-pub fn ext_chip_id(alu_pos: (i32, i32, i32)) -> String {
-    format!("__ext_{}_{}_{}", alu_pos.0, alu_pos.1, alu_pos.2)
-}
-
-/// Install a chip (by its item NBT) into the ALU at `alu_pos`, preloading its
-/// VM and port cache. Shared by `/vlsi alu install` and the ALU GUI's
-/// network-driven chip installer.
-pub fn install_chip(srv: &dyn yog_api::Server, meta: &ChipMeta, alu_pos: (i32, i32, i32)) {
-    ALU_STATE.lock().unwrap().entry(alu_pos).or_default().push((meta.id.clone(), meta.tier));
-    CHIP_NAMES.lock().unwrap().insert(meta.id.clone(), meta.name.clone());
-    if let Some(circuit) = load_circuit(srv, &meta.id) {
-        VM_CACHE.lock().unwrap().insert(meta.id.clone(), circuit.vm());
-        CHIP_PORTS.lock().unwrap().insert(meta.id.clone(), circuit.ports);
-    }
-}
-
-/// Install the chip sitting in the player's inventory `slot` into the ALU at
-/// `alu_pos`, clearing that slot. Used by the ALU GUI's chip selector, which
-/// has to round-trip through a packet since inventory access is a
-/// server-authoritative call unavailable from client-side UI code.
-pub fn install_chip_from_slot(srv: &dyn yog_api::Server, player_name: &str, slot: u32, alu_pos: (i32, i32, i32)) -> String {
-    let Some((item_id, _count, nbt)) = srv.get_slot_item(player_name, slot) else {
-        return "§cInvalid slot.".into();
-    };
-    if !item_id.starts_with("yog-vlsi:chip_") {
-        return "§cThat slot isn't a microchip.".into();
-    }
-    let Some(meta) = ChipMeta::from_nbt(&nbt) else {
-        return "§cThat chip hasn't been programmed with a design yet.".into();
-    };
-    if let Some(tier) = ALU_TIERS.lock().unwrap().get(&alu_pos).copied() {
-        let installed = ALU_STATE.lock().unwrap().get(&alu_pos).map_or(0, Vec::len);
-        if installed >= tier.max_chips() {
-            return format!("§c{}", crate::res::Strings::screen_alu_full(tier.max_chips()));
-        }
-    }
-    install_chip(srv, &meta, alu_pos);
-    Player::new(srv, player_name).set_slot(slot, "minecraft:air", 0);
-    format!("§aInstalled '{}' into the ALU.", meta.name)
-}
+use crate::vm::PortMode;
 
 // ── Registration ────────────────────────────────────────────────────────────
 
@@ -111,12 +23,10 @@ pub fn register(registry: &mut Registry) {
             "§6Yog VLSI §7— Very Large Scale Integration\n\
              §7Designs live on Blueprints: put one in a VLSI Workbench.\n\
              §7/vlsi save                 §f— save the circuit you're editing and return\n\
-             §7/vlsi alu install          §f— install the held chip into an ALU\n\
-             §7/vlsi alu list             §f— list an ALU's chips\n\
              §7/vlsi chip <tier>          §f— give a blank chip\n\
              §7/vlsi info                 §f— show the held chip\n\
              §7/vlsi test <tier>          §f— make a test chip\n\
-             §7/vlsi vm step              §f— step the held chip's VM"
+             §7/vlsi vm step              §f— run the held chip's circuit a second"
         ))
     });
 
@@ -180,53 +90,19 @@ pub fn register(registry: &mut Registry) {
         let meta = match ChipMeta::from_nbt(&nbt) {
             Some(m) => m, None => return Some("§cNo VLSI chip data.".into()),
         };
-        let mut cache = VM_CACHE.lock().unwrap();
-        let vm = cache.entry(meta.id.clone()).or_insert_with(|| {
-            load_circuit(srv, &meta.id).map_or_else(|| RedstoneVM::new(meta.tier.world_size()), |c| c.vm())
-        });
-        let before = vm.tick;
-        vm.step();
-        let outputs = vm.read_outputs(0);
-        let out_str = if outputs.is_empty() { "§7(none)".into() }
-        else { outputs.iter().map(|(x,z,p)| format!("({},{}): §c{}", x, z, p)).collect::<Vec<_>>().join(", ") };
-        Some(format!("§6VM Step §f{}→{}\n§7Outputs: {}", before, vm.tick, out_str))
-    });
-
-    // ── /vlsi alu install ──────────────────────────────────────────────────
-    registry.on_typed_command("vlsi", "word word", |ctx, srv| {
-        if ctx.arg_str(0).unwrap_or("") != "alu" || ctx.arg_str(1).unwrap_or("") != "install" { return None; }
-        let nbt = match srv.get_held_item_nbt(&ctx.source) {
-            Some(n) => n, None => return Some("§cNo NBT on held item.".into()),
-        };
-        let meta = match ChipMeta::from_nbt(&nbt) {
-            Some(m) => m, None => return Some("§cNo VLSI chip data.".into()),
-        };
-        // Install into ALU at player position (simplified: nearest ALU)
-        let pos = match Player::with_uuid(srv, &ctx.source, &ctx.uuid).position() {
-            Some((x, y, z)) => ((x - 1.0) as i32, y as i32, (z - 1.0) as i32),
-            None => return Some("§cCannot determine position.".into()),
-        };
-        install_chip(srv, &meta, pos);
-        let _ = srv.set_held_item_nbt(&ctx.source, "");
-        Some(format!("§aInstalled '{}' into ALU at {:?}.", meta.name, pos))
-    });
-
-    // ── /vlsi alu list ─────────────────────────────────────────────────────
-    registry.on_typed_command("vlsi", "word word", |ctx, srv| {
-        if ctx.arg_str(0).unwrap_or("") != "alu" || ctx.arg_str(1).unwrap_or("") != "list" { return None; }
-        let pos = match Player::with_uuid(srv, &ctx.source, &ctx.uuid).position() {
-            Some((x, y, z)) => ((x - 1.0) as i32, y as i32, (z - 1.0) as i32),
-            None => return Some("§cCannot determine position.".into()),
-        };
-        let state = ALU_STATE.lock().unwrap();
-        if let Some(chips) = state.get(&pos) {
-            let lines: Vec<String> = chips.iter()
-                .map(|(id, tier)| format!("§e{}§7 ({})", &id[..8], tier.name()))
-                .collect();
-            Some(format!("§6ALU chips ({}):\n{}", chips.len(), lines.join("\n")))
-        } else {
-            Some("§7No chips in nearby ALU.".into())
+        let Some(circuit) = load_circuit(srv, &meta.id) else { return Some("§cThis chip's circuit is missing.".into()) };
+        let mut vm = circuit.vm();
+        for _ in 0..20 {
+            vm.step();
         }
+        let outs: Vec<String> = circuit
+            .ports
+            .iter()
+            .filter(|p| p.dir.outputs())
+            .map(|p| format!("§e{}§7: §c{}", p.label, vm.get_port_output(p.x, p.y, p.z)))
+            .collect();
+        let out_str = if outs.is_empty() { "§7(none)".into() } else { outs.join(", ") };
+        Some(format!("§6After 20 steps, inputs at 0:\n§7{}", out_str))
     });
 }
 

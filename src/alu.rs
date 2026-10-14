@@ -1,518 +1,550 @@
-//! ALU block: accepts microchips, routes signals, links chips into node
-//! graphs. Right-click opens its node editor (`alu.yui`); this file is that
-//! screen's code-behind (`AluVm`), plus the block's recipes, tick and
-//! persistence.
+//! The ALU's screen (`alu.yui`, this file is its code-behind): its chip
+//! slots, the player's inventory, and the node graph (DESIGN.md §4.6) —
+//! a `<Surface>` drawn and driven here. What the graph means is in
+//! `board.rs`; the server owns it, the screen draws the [`BoardView`] it's
+//! sent and asks for changes.
+//!
+//! Using the graph:
+//! - drag from an output pin (a dot on a node's right edge) to an input pin
+//!   (a dot on a left edge) to wire them — or the other way round;
+//! - drag a wire off the input pin it ends at to move it to another pin,
+//!   or into empty space to remove it;
+//! - drag a chip by its title to move it.
 
 yog_api::ui_include!("alu");
 
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, Once};
 
-use yog_api::Registry;
+use yog_api::gfx_draw2d::Draw2D;
+use yog_api::ui::{Pointer, Rect, Surface};
+use yog_api::{GfxContext, Registry};
 use yog_kit::prelude::*;
 
-use crate::commands::{ALU_STATE, CHIP_NAMES, CHIP_PORTS, EXT_VALUES, IO_MODES, LINKS, VM_CACHE, ext_chip_id};
-use crate::network;
-use crate::res::{Colors, Strings};
-use crate::tier::{SERVER_TICKS_PER_SECOND, Tier};
+use crate::board::{self, BoardView, Node, Pin, Request, Wire};
+use crate::res::Strings;
 use crate::vm::PortMode;
 
-/// Server → client reply channel for the chip selector's inventory listing.
-pub const CHIP_LIST_CHANNEL: &str = "yog-vlsi:alu_chiplist";
-/// Links the editor lists (the rest still route).
-const LINKS_SHOWN: usize = 10;
-
-/// Fractional VM-steps owed to each chip, accumulated every server tick
-/// (20/s) at the chip tier's `tick_rate()` and drained in whole-step
-/// increments — this is what makes Netherite (40/s → 2 steps/tick) run
-/// faster than Wood (5/s → 1 step every 4 ticks), per DESIGN.md §4.7.
-static STEP_ACCUM: LazyLock<Mutex<HashMap<String, f32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-pub const EXT_SIDES: [&str; 6] = ["N", "S", "E", "W", "U", "D"];
-
-pub fn is_alu_block(block_id: &str) -> bool {
-    Tier::from_alu_block(block_id).is_some()
-}
-
-// ── The node editor's view model ─────────────────────────────────────────────
-
-/// A programmed chip in the player's inventory, offered by "+ Add Chip".
-#[derive(Debug, Clone)]
-pub struct ChipChoice {
-    pub slot: u32,
-    tier: String,
-    name: String,
-}
-
-impl ChipChoice {
-    pub fn label(&self) -> String {
-        Strings::screen_alu_chip_row(&self.tier, &self.name)
-    }
-}
-
-/// One of the ALU's own external ports.
-pub struct ExtPort {
-    pub side: &'static str,
-    pub mode: PortMode,
-    selected: bool,
-}
-
-impl ExtPort {
-    pub fn label(&self) -> String {
-        format!("{} {}", if self.selected { "▶" } else { "◉" }, self.side)
-    }
-    pub fn color(&self) -> u32 {
-        if self.selected { Colors::PIN_SELECTED } else { self.mode.color() }
-    }
-}
-
-/// A row of the chip list: a chip's header (`port` empty) or one of its pins.
-pub struct PinRow {
-    pub chip: String,
-    pub port: String,
-    pub text: String,
-    pub color: u32,
-    pub bg: u32,
-}
-
-/// One chip-to-chip (or chip-to-ALU) link.
-pub struct LinkRow {
-    pub text: String,
-    /// Where the link starts — its key in `LINKS`.
-    pub chip: String,
-    pub port: String,
-}
+// ── The screen's view model ──────────────────────────────────────────────────
 
 #[derive(Default)]
 pub struct AluVm {
-    /// The ALU being edited, and its tier.
-    pos: (i32, i32, i32),
-    tier: Option<Tier>,
-    /// The chip selector is showing (the server listed the chips).
-    choosing: bool,
-    choices: Vec<ChipChoice>,
-    /// Where a new link starts: (chip id, port label).
-    from: Option<(String, String)>,
+    view: Option<BoardView>,
 }
 
-impl ViewModel for AluVm {
-    fn on_close(&mut self, _cx: &mut Cx<'_, Self>) {
-        self.choosing = false;
-        self.from = None;
-    }
-}
+impl ViewModel for AluVm {}
 
 impl AluVm {
-    /// The editor opens on the ALU at `pos`.
-    pub fn open_at(&mut self, pos: (i32, i32, i32), tier: Tier) {
-        self.pos = pos;
-        self.tier = Some(tier);
-        self.choosing = false;
-        self.from = None;
+    fn apply(&mut self, view: BoardView) {
+        self.view = Some(view);
     }
-    /// The server listed the player's chips: pick one.
-    pub fn show_choices(&mut self, choices: Vec<ChipChoice>) {
-        self.choices = choices;
-        self.choosing = true;
-    }
-
-    fn chips(&self) -> Vec<(String, Tier)> {
-        ALU_STATE.lock().unwrap().get(&self.pos).cloned().unwrap_or_default()
-    }
-    fn chip_name(id: &str) -> String {
-        if id.starts_with("__ext_") {
-            return Strings::screen_alu_external();
-        }
-        CHIP_NAMES.lock().unwrap().get(id).cloned().unwrap_or_else(|| id[..6.min(id.len())].to_string())
-    }
-    /// Whether a link starting at `chip` belongs to this ALU.
-    fn owns(&self, chip: &str) -> bool {
-        chip == ext_chip_id(self.pos) || self.chips().iter().any(|(c, _)| c == chip)
-    }
-    fn is_from(&self, chip: &str, port: &str) -> bool {
-        self.from.as_ref().is_some_and(|(c, p)| c == chip && p == port)
-    }
-
     pub fn title(&self) -> String {
-        let tier = self.tier.unwrap_or(Tier::ALL[0]);
-        Strings::screen_alu_title(
-            tier.name(),
-            self.chips().len(),
-            tier.max_chips(),
-            LINKS.lock().unwrap().keys().filter(|(c, _)| self.owns(c)).count(),
-            tier.digital_channels(),
-        )
+        let Some(v) = &self.view else { return String::new() };
+        let working = v.chips.iter().filter(|c| c.active).count();
+        Strings::screen_alu_title(v.tier.name(), working, v.tier.max_chips())
     }
-    pub fn editing(&self) -> bool {
-        !self.choosing
+    pub fn slots_text(&self) -> String {
+        let max = self.view.as_ref().map_or(0, |v| v.tier.max_chips());
+        Strings::screen_alu_slots(max)
     }
-    pub fn ext_ports(&self) -> Vec<ExtPort> {
-        let ext = ext_chip_id(self.pos);
-        let modes = IO_MODES.lock().unwrap();
-        EXT_SIDES
-            .iter()
-            .map(|&side| ExtPort {
-                side,
-                mode: modes.get(&format!("{ext}:{side}")).copied().unwrap_or(PortMode::Input),
-                selected: self.is_from(&ext, side),
-            })
-            .collect()
+    pub fn has_wires(&self) -> bool {
+        self.view.as_ref().is_some_and(|v| !v.wires.is_empty())
     }
-    pub fn pins(&self) -> Vec<PinRow> {
-        let ports = CHIP_PORTS.lock().unwrap();
-        let mut rows = Vec::new();
-        for (chip, tier) in self.chips() {
-            rows.push(PinRow {
-                text: Strings::screen_alu_chip_row(tier.name(), Self::chip_name(&chip)),
-                chip: chip.clone(),
-                port: String::new(),
-                color: 0xFF_FFFFFF,
-                bg: 0xFF_555555,
-            });
-            for p in ports.get(&chip).into_iter().flatten() {
-                let selected = self.is_from(&chip, &p.label);
-                rows.push(PinRow {
-                    text: format!("{} {} {}", if selected { "▶" } else { " " }, p.dir.short(), p.label),
-                    color: if selected { Colors::PIN_SELECTED } else { p.dir.color() },
-                    bg: 0,
-                    chip: chip.clone(),
-                    port: p.label.clone(),
-                });
-            }
+    pub fn clear(&mut self) {
+        if let Some(v) = &self.view {
+            board::send(&Request::Clear { alu: v.alu.clone() });
         }
-        rows
-    }
-    pub fn has_links(&self) -> bool {
-        LINKS.lock().unwrap().keys().any(|(c, _)| self.owns(c))
-    }
-    pub fn links(&self) -> Vec<LinkRow> {
-        LINKS
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|((sc, _), _)| self.owns(sc))
-            .take(LINKS_SHOWN)
-            .map(|((sc, sp), (dc, dp))| LinkRow {
-                text: Strings::screen_alu_link_row(
-                    format!("{}.{sp}", Self::chip_name(sc)),
-                    format!("{}.{dp}", Self::chip_name(dc)),
-                ),
-                chip: sc.clone(),
-                port: sp.clone(),
-            })
-            .collect()
-    }
-    /// Removes the link starting at `chip`.`port`.
-    pub fn unlink(&mut self, chip: String, port: String) {
-        LINKS.lock().unwrap().remove(&(chip, port));
-    }
-    /// Removes every link of this ALU.
-    pub fn clear_links(&mut self) {
-        self.from = None;
-        let owned: Vec<_> = LINKS.lock().unwrap().keys().filter(|(c, _)| self.owns(c)).cloned().collect();
-        let mut links = LINKS.lock().unwrap();
-        for key in owned {
-            links.remove(&key);
+        if let Some(v) = GRAPH.lock().unwrap().view.as_mut() {
+            v.wires.clear();
         }
-    }
-
-    pub fn select_ext(&mut self, side: &'static str) {
-        self.select(ext_chip_id(self.pos), side.to_string());
-    }
-    pub fn cycle_mode(&mut self, side: &'static str) {
-        let key = format!("{}:{side}", ext_chip_id(self.pos));
-        let mut modes = IO_MODES.lock().unwrap();
-        let next = modes.get(&key).copied().unwrap_or(PortMode::Input).next();
-        modes.insert(key, next);
-    }
-    pub fn select_pin(&mut self, chip: String, port: String) {
-        if !port.is_empty() {
-            self.select(chip, port);
-        }
-    }
-    /// The first pick starts a link; the second ends it.
-    fn select(&mut self, chip: String, port: String) {
-        match self.from.take() {
-            None => self.from = Some((chip, port)),
-            Some(src) => {
-                LINKS.lock().unwrap().insert(src, (chip, port));
-            }
-        }
-    }
-    pub fn add_chip(&mut self) {
-        network::request_chip_list();
-    }
-    /// Links every pair of chips' same-named ports.
-    pub fn auto_link(&mut self) {
-        let chips = self.chips();
-        let ports = CHIP_PORTS.lock().unwrap();
-        let mut links = LINKS.lock().unwrap();
-        for (i, (a, _)) in chips.iter().enumerate() {
-            for (b, _) in &chips[i + 1..] {
-                for pa in ports.get(a).into_iter().flatten() {
-                    for pb in ports.get(b).into_iter().flatten() {
-                        if pa.label == pb.label {
-                            links.insert((a.clone(), pa.label.clone()), (b.clone(), pb.label.clone()));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    pub fn save(&mut self) {
-        network::send_alu_action(&["save_links"]);
-    }
-    pub fn install(&mut self, slot: u32) {
-        self.choosing = false;
-        let (x, y, z) = self.pos;
-        network::send_alu_action(&["install", &slot.to_string(), &x.to_string(), &y.to_string(), &z.to_string()]);
-    }
-    pub fn cancel(&mut self) {
-        self.choosing = false;
     }
 }
 
-/// The ALU blocks' node editor (recipes: content/recipes/alu_*.yrecipe).
-pub fn setup(registry: &mut Registry) {
-    let screen = register(registry);
-    // The server's answer to "+ Add Chip": `slot\ttier\tname` lines.
-    let chooser = screen.clone();
-    registry.on_client_packet(CHIP_LIST_CHANNEL, move |ev, _srv| {
-        let text = String::from_utf8_lossy(&ev.payload);
-        let choices = text
-            .lines()
-            .filter_map(|line| {
-                let mut f = line.split('\t');
-                Some(ChipChoice {
-                    slot: f.next()?.parse().ok()?,
-                    tier: f.next()?.to_string(),
-                    name: f.next().unwrap_or("chip").to_string(),
-                })
-            })
-            .collect();
-        chooser.update(move |vm| vm.show_choices(choices));
-    });
+// ── The graph ────────────────────────────────────────────────────────────────
 
-    // Right-click any ALU tier → open the node editor on it.
-    registry.on_use_block(move |e, phase, srv| -> bool {
-        if phase != yog_api::EventPhase::Pre || !is_alu_block(&e.block_id) {
-            return true;
-        }
-        let pos = (e.pos.x, e.pos.y, e.pos.z);
-        let Some(tier) = Tier::from_alu_block(&e.block_id) else { return true };
-        crate::commands::ALU_TIERS.lock().unwrap().insert(pos, tier);
-        crate::commands::ALU_DIMS.lock().unwrap().insert(pos, e.dimension.clone());
-        screen.update(move |vm| vm.open_at(pos, tier));
-        network::open_ui_for(srv, &e.player_name, ID);
-        false
-    });
+const SURFACE_ID: &str = "yog-vlsi:alu_graph";
+const ROW: f32 = 10.0;
+const HEAD: f32 = 12.0;
+const SIDE_W: f32 = 62.0;
+const CHIP_W: f32 = 100.0;
+const GAP: f32 = 10.0;
+/// How near a pin the pointer has to be to take it.
+const REACH: f32 = 6.0;
+
+const BG: u32 = 0xFF1A2B20;
+const NODE: u32 = 0xEE2C2C2C;
+const HEADER: u32 = 0xFF4A4A4A;
+const HEADER_SLEEPING: u32 = 0xFF3A2626;
+const TEXT: u32 = 0xFFFFFFFF;
+const TEXT_DIM: u32 = 0xFF8A8A8A;
+const PIN_IN: u32 = 0xFF4F8FFF;
+const PIN_OUT: u32 = 0xFFFF8A3A;
+const PIN_BIDI: u32 = 0xFFB070FF;
+const WIRE_OFF: u32 = 0xFF5A1818;
+const WIRE_ON: u32 = 0xFFFF3A3A;
+const WIRE_NEW: u32 = 0xFFFFE070;
+
+/// A pin where it's drawn (local to the graph).
+#[derive(Clone)]
+struct PinAt {
+    pin: Pin,
+    x: f32,
+    y: f32,
+    /// A source (a dot on a right edge); else a sink.
+    source: bool,
+    usable: bool,
 }
 
-/// Server tick: step every installed chip's VM, then route signals along the
-/// link graph the ALU node editor built.
-///
-/// External analog ports (Redstone Port + Analog Cable) are represented
-/// internally as pseudo-chips (`commands::ext_chip_id`) so the same `LINKS`
-/// map can carry chip↔chip and chip↔external links. Asserting the computed
-/// `EXT_VALUES` onto real-world redstone still needs a loader-level
-/// redstone-power read/write hook that doesn't exist yet (`get_block` only
-/// returns block identity) — this is the one remaining piece of item #2 from
-/// DESIGN.md that has to land in Yog-Mod-Loader itself before it can bridge
-/// to the physical world. Digital Cable channel routing has no such
-/// dependency: it's purely link-graph bit routing between ALUs, so it's
-/// fully wired below.
-pub fn tick_all(srv: &dyn yog_api::Server) {
-    let state = ALU_STATE.lock().unwrap().clone();
+struct NodeAt {
+    node: Node,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    title: String,
+    awake: bool,
+    /// (text, x, y, color) — pin labels.
+    labels: Vec<(String, f32, f32, u32)>,
+}
 
-    // 1. Step every chip's VM at its tier's own rate.
-    {
-        let mut cache = VM_CACHE.lock().unwrap();
-        let mut accum = STEP_ACCUM.lock().unwrap();
-        for chips in state.values() {
-            for (chip_id, tier) in chips {
-                let Some(vm) = cache.get_mut(chip_id) else { continue };
-                let owed = accum.entry(chip_id.clone()).or_insert(0.0);
-                *owed += tier.tick_rate() as f32 / SERVER_TICKS_PER_SECOND as f32;
-                while *owed >= 1.0 {
-                    vm.step();
-                    *owed -= 1.0;
-                }
-            }
-        }
+#[derive(Default)]
+struct Layout {
+    nodes: Vec<NodeAt>,
+    pins: Vec<PinAt>,
+}
+
+impl Layout {
+    fn pin(&self, pin: &Pin, source: bool) -> Option<&PinAt> {
+        self.pins.iter().find(|p| &p.pin == pin && p.source == source)
     }
 
-    // 2. Read every chip's current port outputs.
-    let ports = CHIP_PORTS.lock().unwrap().clone();
-    let cache = VM_CACHE.lock().unwrap();
-    let mut outputs: std::collections::HashMap<(String, String), u8> = std::collections::HashMap::new();
-    for chips in state.values() {
-        for (chip_id, _) in chips {
-            let Some(vm) = cache.get(chip_id) else { continue };
-            let Some(chip_ports) = ports.get(chip_id) else { continue };
-            for port in chip_ports {
-                if !port.dir.outputs() { continue; }
-                let value = vm.get_port_output(port.x, port.y, port.z);
-                outputs.insert((chip_id.clone(), port.label.clone()), value);
-            }
-        }
+    /// The pin nearest `(x, y)` within reach.
+    fn hit(&self, x: f32, y: f32) -> Option<&PinAt> {
+        self.pins
+            .iter()
+            .filter(|p| (p.y - y).abs() <= ROW / 2.0 && (p.x - x).abs() <= REACH * 2.0)
+            .min_by(|a, b| (a.x - x).abs().total_cmp(&(b.x - x).abs()))
     }
-    drop(cache);
 
-    // 2b. What arrives at the ALUs' input sides from their cables acts as an
-    //     output of the ALU's external pseudo-chip.
-    let dims = crate::commands::ALU_DIMS.lock().unwrap().clone();
-    let modes = IO_MODES.lock().unwrap().clone();
-    let side_mode = |pos: (i32, i32, i32), side: &str| {
-        modes.get(&format!("{}:{side}", ext_chip_id(pos))).copied().unwrap_or(PortMode::Input)
+    /// The chip whose title bar is at `(x, y)`.
+    fn header(&self, x: f32, y: f32) -> Option<&NodeAt> {
+        self.nodes.iter().rev().find(|n| {
+            matches!(n.node, Node::Chip(_)) && x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + HEAD
+        })
+    }
+}
+
+enum Drag {
+    None,
+    /// A wire from a source, following the pointer; `lifted` is the sink
+    /// it was taken off.
+    FromSource { from: Pin, lifted: Option<Pin> },
+    /// A wire from a sink, looking for its source.
+    FromSink { to: Pin },
+    /// A chip being moved; the pointer's offset in its title bar.
+    Node { slot: u8, dx: f32, dy: f32 },
+}
+
+struct Graph {
+    view: Option<BoardView>,
+    layout: Layout,
+    drag: Drag,
+    pointer: (f32, f32),
+    /// Chip positions moved here but not yet echoed back by the server.
+    moved: HashMap<u8, (f32, f32)>,
+}
+
+static GRAPH: LazyLock<Mutex<Graph>> = LazyLock::new(|| {
+    Mutex::new(Graph { view: None, layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new() })
+});
+
+fn mode_color(mode: PortMode) -> u32 {
+    match mode {
+        PortMode::Input => PIN_IN,
+        PortMode::Output => PIN_OUT,
+        PortMode::Bidirectional => PIN_BIDI,
+    }
+}
+
+fn level_color(level: u8) -> u32 {
+    if level == 0 {
+        return WIRE_OFF;
+    }
+    let t = level.min(15) as f32 / 15.0;
+    let mix = |shift: u32| {
+        let a = (WIRE_OFF >> shift) & 0xFF;
+        let b = (WIRE_ON >> shift) & 0xFF;
+        ((a as f32 + (b as f32 - a as f32) * (0.4 + 0.6 * t)) as u32) << shift
     };
-    for (pos, dim) in &dims {
-        for side in EXT_SIDES {
-            if side_mode(*pos, side).inputs()
-                && let Some(level) = crate::cables::side_input(srv, dim, *pos, side)
-            {
-                outputs.insert((ext_chip_id(*pos), side.to_string()), level);
-            }
+    0xFF00_0000 | mix(16) | mix(8) | mix(0)
+}
+
+/// Lays the graph out in a `w`×`h` box; `width_of` measures text.
+fn layout(view: &BoardView, moved: &HashMap<u8, (f32, f32)>, w: f32, h: f32, width_of: &dyn Fn(&str) -> f32) -> Layout {
+    let mut out = Layout::default();
+    let fit = |s: &str, room: f32| -> String {
+        if width_of(s) <= room {
+            return s.to_string();
         }
+        let mut t: String = s.to_string();
+        while !t.is_empty() && width_of(&format!("{t}…")) > room {
+            t.pop();
+        }
+        format!("{t}…")
+    };
+
+    // The ALU's sides: In on the left, Out on the right.
+    for (node, x) in [(Node::In, 2.0), (Node::Out, w - SIDE_W - 2.0)] {
+        let mut labels = Vec::new();
+        for (row, side) in view.sides.iter().enumerate() {
+            let y = 2.0 + HEAD + row as f32 * ROW;
+            let source = node == Node::In;
+            let usable = !source || !side.output;
+            let text = match &side.name {
+                Some(name) => format!("{} {name}", side.side),
+                None => side.side.clone(),
+            };
+            let text = fit(&text, SIDE_W - 8.0);
+            let tx = if source { x + 3.0 } else { x + SIDE_W - 3.0 - width_of(&text) };
+            labels.push((text, tx, y + 1.0, if usable { TEXT } else { TEXT_DIM }));
+            out.pins.push(PinAt {
+                pin: Pin::new(node, &side.side),
+                x: if source { x + SIDE_W } else { x },
+                y: y + ROW / 2.0,
+                source,
+                usable,
+            });
+        }
+        let title = if node == Node::In { Strings::screen_alu_inputs() } else { Strings::screen_alu_outputs() };
+        out.nodes.push(NodeAt { node, x, y: 2.0, w: SIDE_W, h: HEAD + 6.0 * ROW + 2.0, title, awake: true, labels });
     }
 
-    // 3. Push linked outputs into inputs (chip inputs take effect next tick;
-    //    external pseudo-ports are recorded into EXT_VALUES for bridging).
-    let links = LINKS.lock().unwrap();
-    let mut ext = EXT_VALUES.lock().unwrap();
-    let mut cache = VM_CACHE.lock().unwrap();
-    for ((src_chip, src_label), (dst_chip, dst_label)) in links.iter() {
-        let Some(&value) = outputs.get(&(src_chip.clone(), src_label.clone())) else { continue };
+    // The chips, in columns between them unless moved.
+    let (x0, x1) = (SIDE_W + 2.0 + GAP, w - SIDE_W - 2.0 - GAP);
+    let cols = (((x1 - x0 + GAP) / (CHIP_W + GAP)).floor() as usize).max(1);
+    let mut col_y = vec![2.0f32; cols];
+    for (i, chip) in view.chips.iter().enumerate() {
+        let ins: Vec<_> = chip.pins.iter().filter(|(_, m)| m.inputs()).collect();
+        let outs: Vec<_> = chip.pins.iter().filter(|(_, m)| m.outputs()).collect();
+        let nh = HEAD + ins.len().max(outs.len()).max(1) as f32 * ROW + 2.0;
+        let saved = view.layout.iter().find(|(s, _)| *s == chip.slot).map(|(_, p)| *p);
+        let (x, y) = match moved.get(&chip.slot).copied().or(saved) {
+            Some(p) => p,
+            None => {
+                let col = i % cols;
+                let p = (x0 + col as f32 * (CHIP_W + GAP), col_y[col]);
+                col_y[col] += nh + GAP;
+                p
+            }
+        };
+        let x = x.clamp(0.0, (w - CHIP_W).max(0.0));
+        let y = y.clamp(0.0, (h - HEAD).max(0.0));
+        let mut labels = Vec::new();
+        for (row, (name, mode)) in ins.iter().enumerate() {
+            let y = y + HEAD + row as f32 * ROW;
+            let text = fit(name, CHIP_W / 2.0 - 5.0);
+            labels.push((text, x + 4.0, y + 1.0, if chip.active { TEXT } else { TEXT_DIM }));
+            let _ = mode;
+            out.pins.push(PinAt { pin: Pin::new(Node::Chip(chip.slot), name.as_str()), x, y: y + ROW / 2.0, source: false, usable: chip.active });
+        }
+        for (row, (name, _)) in outs.iter().enumerate() {
+            let y = y + HEAD + row as f32 * ROW;
+            let text = fit(name, CHIP_W / 2.0 - 5.0);
+            let tx = x + CHIP_W - 4.0 - width_of(&text);
+            labels.push((text, tx, y + 1.0, if chip.active { TEXT } else { TEXT_DIM }));
+            out.pins.push(PinAt {
+                pin: Pin::new(Node::Chip(chip.slot), name.as_str()),
+                x: x + CHIP_W,
+                y: y + ROW / 2.0,
+                source: true,
+                usable: chip.active,
+            });
+        }
+        let title = if chip.active {
+            format!("{} {}", chip.slot + 1, chip.name)
+        } else {
+            format!("{} {} ({})", chip.slot + 1, chip.name, Strings::screen_alu_sleeping())
+        };
+        out.nodes.push(NodeAt {
+            node: Node::Chip(chip.slot),
+            x,
+            y,
+            w: CHIP_W,
+            h: nh,
+            title: fit(&title, CHIP_W - 6.0),
+            awake: chip.active,
+            labels,
+        });
+    }
+    out
+}
 
-        if let Some(dst_ports) = ports.get(dst_chip) {
-            if let Some(port) = dst_ports.iter().find(|p| &p.label == dst_label) {
-                if let Some(vm) = cache.get_mut(dst_chip) {
-                    vm.set_port_input(port.x, port.y, port.z, value);
-                }
+/// The pin's mode color.
+fn pin_color(view: &BoardView, p: &PinAt) -> u32 {
+    if !p.usable {
+        return TEXT_DIM;
+    }
+    match p.pin.node {
+        Node::In => PIN_OUT,
+        Node::Out => PIN_IN,
+        Node::Chip(slot) => view
+            .chips
+            .iter()
+            .find(|c| c.slot == slot)
+            .and_then(|c| c.pins.iter().find(|(n, _)| *n == p.pin.name))
+            .map_or(TEXT_DIM, |(_, m)| mode_color(*m)),
+    }
+}
+
+/// A wire from `(x1, y1)` (a right edge) to `(x2, y2)` (a left edge), in
+/// right-angled runs like a board's traces.
+fn trace(d2: &Draw2D<'_>, (x1, y1): (f32, f32), (x2, y2): (f32, f32), color: u32) {
+    let hline = |xa: f32, xb: f32, y: f32| d2.rect(xa.min(xb), y - 0.5, xa.max(xb) + 1.0, y + 0.5, color);
+    let vline = |x: f32, ya: f32, yb: f32| d2.rect(x - 0.5, ya.min(yb), x + 0.5, ya.max(yb) + 1.0, color);
+    if x2 >= x1 + 8.0 {
+        let mx = ((x1 + x2) / 2.0).round();
+        hline(x1, mx, y1);
+        vline(mx, y1, y2);
+        hline(mx, x2, y2);
+    } else {
+        // Backwards: out to the right, across, and in from the left.
+        let (ra, lb) = (x1 + 5.0, x2 - 5.0);
+        let my = ((y1 + y2) / 2.0).round();
+        hline(x1, ra, y1);
+        vline(ra, y1, my);
+        hline(lb, ra, my);
+        vline(lb, my, y2);
+        hline(lb, x2, y2);
+    }
+}
+
+struct GraphSurface;
+
+impl Surface for GraphSurface {
+    fn paint(&self, gfx: &GfxContext, rect: Rect) {
+        let mut g = GRAPH.lock().unwrap();
+        let d2 = gfx.draw2d();
+        d2.rect(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, BG);
+        let Some(view) = g.view.clone() else { return };
+        let width_of = |t: &str| d2.text_width(t, "");
+        g.layout = layout(&view, &g.moved, rect.w, rect.h, &width_of);
+        let (ox, oy) = (rect.x, rect.y);
+        let at = |x: f32, y: f32| (ox + x, oy + y);
+        let levels: HashMap<&Pin, u8> = view.levels.iter().map(|(p, l)| (p, *l)).collect();
+        let lifted = match &g.drag {
+            Drag::FromSource { lifted, .. } => lifted.clone(),
+            _ => None,
+        };
+
+        // Nodes.
+        for n in &g.layout.nodes {
+            let (x, y) = at(n.x, n.y);
+            d2.rect(x, y, x + n.w, y + n.h, NODE);
+            d2.rect(x, y, x + n.w, y + HEAD - 1.0, if n.awake { HEADER } else { HEADER_SLEEPING });
+            d2.text(&n.title, x + 3.0, y + 2.0, if n.awake { TEXT } else { TEXT_DIM }, false);
+            for (text, tx, ty, color) in &n.labels {
+                d2.text(text, ox + tx, oy + ty, *color, false);
+            }
+        }
+
+        // Wires.
+        for Wire { from, to } in &view.wires {
+            if lifted.as_ref() == Some(to) {
                 continue;
             }
+            let (Some(a), Some(b)) = (g.layout.pin(from, true), g.layout.pin(to, false)) else { continue };
+            let level = levels.get(from).copied().unwrap_or(0);
+            trace(&d2, at(a.x, a.y), at(b.x, b.y), level_color(level));
         }
 
-        // Destination isn't a chip port — must be an ALU external pseudo-port.
-        if let Some(alu_pos) = parse_ext_chip_id(dst_chip) {
-            ext.entry(alu_pos).or_default().insert(dst_label.clone(), value);
+        // Pins.
+        for p in &g.layout.pins {
+            let (x, y) = at(p.x, p.y);
+            d2.rect(x - 2.0, y - 2.0, x + 2.0, y + 2.0, pin_color(&view, p));
+            if p.source
+                && let Some(level) = levels.get(&p.pin).filter(|l| **l > 0)
+            {
+                d2.text(&level.to_string(), x + 3.0, y - 8.0, 0xFFFFD0D0, false);
+            }
+        }
+
+        // The wire being drawn.
+        let (px, py) = g.pointer;
+        match &g.drag {
+            Drag::FromSource { from, .. } => {
+                if let Some(a) = g.layout.pin(from, true) {
+                    trace(&d2, at(a.x, a.y), at(px, py), WIRE_NEW);
+                }
+            }
+            Drag::FromSink { to } => {
+                if let Some(b) = g.layout.pin(to, false) {
+                    trace(&d2, at(px, py), at(b.x, b.y), WIRE_NEW);
+                }
+            }
+            _ => {}
+        }
+        if g.view.as_ref().is_some_and(|v| v.chips.is_empty()) {
+            let hint = Strings::screen_alu_empty();
+            let w = width_of(&hint);
+            d2.text(&hint, ox + (rect.w - w) / 2.0, oy + rect.h / 2.0 - 4.0, TEXT_DIM, false);
         }
     }
-    drop(cache);
 
-    // 4. The ALUs' output sides drive their cables.
-    for (pos, dim) in &dims {
-        for side in EXT_SIDES {
-            if side_mode(*pos, side).outputs() {
-                let level = ext.get(pos).and_then(|m| m.get(side)).copied().unwrap_or(0);
-                crate::cables::side_output(srv, dim, *pos, side, level);
+    fn pointer(&self, ev: Pointer, _size: (f32, f32)) -> bool {
+        let mut g = GRAPH.lock().unwrap();
+        let Some(view) = g.view.clone() else { return false };
+        match ev {
+            Pointer::Down { x, y } => {
+                g.pointer = (x, y);
+                let pin = g.layout.hit(x, y).cloned();
+                g.drag = match pin {
+                    Some(p) if p.usable && p.source => Drag::FromSource { from: p.pin, lifted: None },
+                    Some(p) if p.usable => match view.wires.iter().find(|w| w.to == p.pin) {
+                        Some(w) => Drag::FromSource { from: w.from.clone(), lifted: Some(p.pin) },
+                        None => Drag::FromSink { to: p.pin },
+                    },
+                    Some(_) => Drag::None,
+                    None => match g.layout.header(x, y) {
+                        Some(n) => match n.node {
+                            Node::Chip(slot) => Drag::Node { slot, dx: x - n.x, dy: y - n.y },
+                            _ => Drag::None,
+                        },
+                        None => return false,
+                    },
+                };
+                true
+            }
+            Pointer::Drag { x, y } | Pointer::Move { x, y } => {
+                g.pointer = (x, y);
+                if let Drag::Node { slot, dx, dy } = g.drag {
+                    g.moved.insert(slot, (x - dx, y - dy));
+                }
+                matches!(ev, Pointer::Drag { .. })
+            }
+            Pointer::Up { x, y } => {
+                g.pointer = (x, y);
+                let alu = view.alu.clone();
+                let target = g.layout.hit(x, y).filter(|p| p.usable).cloned();
+                let drag = std::mem::replace(&mut g.drag, Drag::None);
+                let request = match drag {
+                    Drag::FromSource { from, lifted } => match target.filter(|t| !t.source) {
+                        Some(t) => Some(Request::Connect { alu, from, to: t.pin }),
+                        None => lifted.map(|to| Request::Disconnect { alu, to }),
+                    },
+                    Drag::FromSink { to } => {
+                        target.filter(|t| t.source).map(|t| Request::Connect { alu, from: t.pin, to })
+                    }
+                    Drag::Node { slot, .. } => {
+                        g.moved.get(&slot).map(|&(x, y)| Request::Move { alu, slot, x: x.round(), y: y.round() })
+                    }
+                    Drag::None => None,
+                };
+                if let Some(request) = request {
+                    // Show it now; the server's view follows.
+                    if let Some(v) = g.view.as_mut() {
+                        match &request {
+                            Request::Connect { from, to, .. } => {
+                                v.wires.retain(|w| &w.to != to);
+                                v.wires.push(Wire { from: from.clone(), to: to.clone() });
+                            }
+                            Request::Disconnect { to, .. } => v.wires.retain(|w| &w.to != to),
+                            _ => {}
+                        }
+                    }
+                    board::send(&request);
+                }
+                true
+            }
+            Pointer::Leave => {
+                if matches!(g.drag, Drag::None) {
+                    g.pointer = (-100.0, -100.0);
+                }
+                false
             }
         }
     }
 }
 
-fn parse_ext_chip_id(id: &str) -> Option<(i32, i32, i32)> {
-    let rest = id.strip_prefix("__ext_")?;
-    let mut it = rest.splitn(3, '_');
-    let x: i32 = it.next()?.parse().ok()?;
-    let y: i32 = it.next()?.parse().ok()?;
-    let z: i32 = it.next()?.parse().ok()?;
-    Some((x, y, z))
-}
+static SURFACE: Once = Once::new();
 
-/// Persist installed-chip placement, names, and the link/IO-mode graph so
-/// ALUs survive a server restart. VM working state itself isn't persisted —
-/// each chip's circuit is replayed from its saved design instead, which is
-/// cheap next to storing a full grid snapshot per tier.
-pub fn save_state(srv: &dyn yog_api::Server) {
-    let game_dir = srv.game_dir();
-    let mut store = yog_api::Storage::open(&game_dir, crate::MOD_ID);
+/// The ALU blocks' screen (recipes: content/recipes/alu_*.yrecipe).
+pub fn setup(registry: &mut Registry) {
+    // The screen's markup lays out the block's inventory
+    // (content/alu/*.yblock open it).
+    let screen = register(registry);
+    SURFACE.call_once(|| yog_api::ui::surface::register(SURFACE_ID, Arc::new(GraphSurface)));
 
-    // HashMaps with tuple/non-string keys don't round-trip through
-    // serde_json (object keys must be strings), so persist as Vec<(K, V)>.
-    let state: Vec<((i32, i32, i32), Vec<(String, Tier)>)> =
-        ALU_STATE.lock().unwrap().iter().map(|(k, v)| (*k, v.clone())).collect();
-    let links: Vec<((String, String), (String, String))> =
-        LINKS.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    let modes: Vec<(String, PortMode)> = IO_MODES.lock().unwrap().iter().map(|(k, v)| (k.clone(), *v)).collect();
-    let names: Vec<(String, String)> =
-        CHIP_NAMES.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-
-    store.set("alu_state", serde_json::to_string(&state).unwrap_or_default());
-    store.set("alu_links", serde_json::to_string(&links).unwrap_or_default());
-    store.set("alu_io_modes", serde_json::to_string(&modes).unwrap_or_default());
-    store.set("alu_chip_names", serde_json::to_string(&names).unwrap_or_default());
-    let dims: Vec<((i32, i32, i32), String)> =
-        crate::commands::ALU_DIMS.lock().unwrap().iter().map(|(k, v)| (*k, v.clone())).collect();
-    store.set("alu_dims", serde_json::to_string(&dims).unwrap_or_default());
-    let _ = store.flush();
-}
-
-pub fn load_state(srv: &dyn yog_api::Server) {
-    use crate::commands::install_chip;
-    use crate::chip::ChipMeta;
-    let game_dir = srv.game_dir();
-    let store = yog_api::Storage::open(&game_dir, crate::MOD_ID);
-
-    let state: Vec<((i32, i32, i32), Vec<(String, Tier)>)> =
-        store.get("alu_state").and_then(|v| v.as_str()).and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
-    let names: std::collections::HashMap<String, String> =
-        store.get("alu_chip_names").and_then(|v| v.as_str())
-            .and_then(|j| serde_json::from_str::<Vec<(String, String)>>(j).ok())
-            .map(|v| v.into_iter().collect())
-            .unwrap_or_default();
-    if let Some(dims) = store.get("alu_dims").and_then(|v| v.as_str())
-        .and_then(|j| serde_json::from_str::<Vec<((i32, i32, i32), String)>>(j).ok())
-    {
-        *crate::commands::ALU_DIMS.lock().unwrap() = dims.into_iter().collect();
-    }
-    if let Some(links) = store.get("alu_links").and_then(|v| v.as_str())
-        .and_then(|j| serde_json::from_str::<Vec<((String, String), (String, String))>>(j).ok())
-    {
-        *LINKS.lock().unwrap() = links.into_iter().collect();
-    }
-    if let Some(modes) = store.get("alu_io_modes").and_then(|v| v.as_str())
-        .and_then(|j| serde_json::from_str::<Vec<(String, PortMode)>>(j).ok())
-    {
-        *IO_MODES.lock().unwrap() = modes.into_iter().collect();
-    }
-
-    for (alu_pos, chips) in state {
-        for (chip_id, tier) in chips {
-            let name = names.get(&chip_id).cloned().unwrap_or_else(|| chip_id.clone());
-            install_chip(srv, &ChipMeta { id: chip_id, tier, name, ports: Vec::new() }, alu_pos);
+    registry.on_client_packet(board::VIEW_CHANNEL, move |ev, _srv| {
+        let Ok(view) = serde_json::from_slice::<BoardView>(&ev.payload) else { return };
+        {
+            let mut g = GRAPH.lock().unwrap();
+            // The server has the moves it was sent.
+            g.moved.retain(|slot, p| !view.layout.iter().any(|(s, q)| s == slot && q == p));
+            if g.view.as_ref().is_some_and(|v| v.alu != view.alu) {
+                g.moved.clear();
+            }
+            g.view = Some(view.clone());
         }
-    }
+        screen.update(move |vm| vm.apply(view));
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chip::Port;
+    use crate::board::{ChipView, SideView};
+    use crate::tier::Tier;
 
-    fn port(label: &str, dir: PortMode) -> Port {
-        Port { label: label.into(), x: 0, y: 0, z: 0, dir }
+    fn view() -> BoardView {
+        BoardView {
+            alu: board::AluId { dimension: String::new(), x: 0, y: 0, z: 0 },
+            tier: Tier::ALL[0],
+            chips: vec![ChipView {
+                slot: 0,
+                name: "Adder".into(),
+                tier: Tier::ALL[0],
+                pins: vec![("A".into(), PortMode::Input), ("B".into(), PortMode::Input), ("S".into(), PortMode::Output)],
+                active: true,
+            }],
+            sides: board::SIDES.iter().map(|s| SideView { side: s.to_string(), name: None, output: *s == "E" }).collect(),
+            wires: Vec::new(),
+            layout: Vec::new(),
+            levels: Vec::new(),
+        }
     }
 
     #[test]
-    fn links_two_picks_and_auto_link() {
-        let pos = (900, 64, 900);
-        ALU_STATE.lock().unwrap().insert(pos, vec![("chip_a".into(), Tier::Wood), ("chip_b".into(), Tier::Wood)]);
-        CHIP_PORTS.lock().unwrap().insert("chip_a".into(), vec![port("clk", PortMode::Output)]);
-        CHIP_PORTS.lock().unwrap().insert("chip_b".into(), vec![port("clk", PortMode::Input), port("rst", PortMode::Input)]);
+    fn pins_sit_on_their_edges() {
+        let l = layout(&view(), &HashMap::new(), 360.0, 140.0, &|t| t.len() as f32 * 6.0);
+        let chip = l.nodes.iter().find(|n| n.node == Node::Chip(0)).unwrap();
+        let a = l.pin(&Pin::new(Node::Chip(0), "A"), false).unwrap();
+        let s = l.pin(&Pin::new(Node::Chip(0), "S"), true).unwrap();
+        assert_eq!(a.x, chip.x);
+        assert_eq!(s.x, chip.x + CHIP_W);
+        assert!(l.pin(&Pin::new(Node::Chip(0), "A"), true).is_none(), "an input is no source");
+        // In:E is an output side now: drawn, not usable.
+        assert!(!l.pin(&Pin::new(Node::In, "E"), true).unwrap().usable);
+        assert!(l.pin(&Pin::new(Node::Out, "E"), false).unwrap().usable);
+        // Nothing overlaps the side columns.
+        assert!(chip.x >= SIDE_W + 2.0 && chip.x + CHIP_W <= 360.0 - SIDE_W - 2.0);
+    }
 
-        let mut vm = AluVm::default();
-        vm.open_at(pos, Tier::Wood);
-        // Header, pin, header, pin, pin.
-        assert_eq!(vm.pins().len(), 5);
-        vm.select_pin("chip_a".into(), "clk".into());
-        assert!(vm.pins()[1].text.starts_with('▶'));
-        vm.select_pin("chip_b".into(), "rst".into());
-        assert_eq!(LINKS.lock().unwrap().get(&("chip_a".into(), "clk".into())), Some(&("chip_b".into(), "rst".into())));
+    #[test]
+    fn slots_fit_the_screen() {
+        let def = yog_kit::inventory_of::<super::View>().unwrap();
+        assert_eq!(def.slot_count, board::CHIP_SLOTS as usize);
+        assert!(def.include_player_inventory);
+        let (px, py) = def.player_inv_offset;
+        assert!(px + 9.0 * 18.0 <= WIDTH && py + 76.0 <= HEIGHT, "{px},{py}");
+        assert!(def.layout.iter().all(|a| a.x + 16.0 <= px && a.y + 16.0 <= HEIGHT), "{:?}", def.layout);
+        assert_eq!(def.layout[0].accepts.len(), 6);
+    }
 
-        vm.auto_link();
-        assert_eq!(LINKS.lock().unwrap().get(&("chip_a".into(), "clk".into())), Some(&("chip_b".into(), "clk".into())));
-
-        vm.cycle_mode("N");
-        assert_eq!(vm.ext_ports()[0].mode, PortMode::Output);
+    #[test]
+    fn hits_the_nearest_pin() {
+        let l = layout(&view(), &HashMap::new(), 360.0, 140.0, &|t| t.len() as f32 * 6.0);
+        let s = l.pin(&Pin::new(Node::Chip(0), "S"), true).unwrap().clone();
+        assert_eq!(l.hit(s.x + 3.0, s.y - 2.0).map(|p| &p.pin), Some(&s.pin));
+        assert!(l.hit(180.0, 139.0).is_none());
     }
 }

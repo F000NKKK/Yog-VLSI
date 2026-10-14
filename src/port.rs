@@ -1,9 +1,14 @@
-//! VLSI Port block: what players place inside the circuit editor to give a
-//! design its pins. The mode (Input/Output/Bidirectional) is which of the
-//! three block variants stands there; the name is kept here, per position.
-//! Right-click opens the port's screen (`port.yui`, this file is its
-//! code-behind) to name it and pick its mode. Saving the design (`/vlsi
-//! save`) turns every port in the cube into a pin of that name.
+//! Port screens (`port.yui`, this file is its code-behind): right-click a
+//! port to name it and pick its mode.
+//!
+//! - **VLSI Port** — what players place inside the circuit editor to give a
+//!   design its pins. The mode (Input/Output/Bidirectional) is which of the
+//!   three block variants stands there; the name is kept here, per
+//!   position. Saving the design (`/vlsi save`) turns every port in the
+//!   cube into a pin of that name.
+//! - **Redstone Port** — joins an analog cable to vanilla redstone
+//!   (`cables.rs`): Input or Output, and the name the ALU screen shows on
+//!   the side whose cable reaches it.
 
 yog_api::ui_include!("port");
 
@@ -14,7 +19,9 @@ use serde::{Deserialize, Serialize};
 use yog_api::{BlockPos, EventPhase, Registry, Server, Storage};
 use yog_kit::prelude::*;
 
+use crate::cables::{self, RedstonePort};
 use crate::content::Blocks;
+use crate::res::Strings;
 use crate::vm::PortMode;
 
 pub const PORT_INPUT: &str = Blocks::PORT_INPUT;
@@ -74,6 +81,8 @@ struct PortEdit {
     pos: (i32, i32, i32),
     label: String,
     mode: PortMode,
+    /// A Redstone Port (Input or Output only), not a VLSI Port.
+    redstone: bool,
 }
 
 // ── The screen's view model ──────────────────────────────────────────────────
@@ -97,6 +106,13 @@ impl PortVm {
         self.label = edit.label.clone();
         self.mode = edit.mode;
         self.edit = Some(edit);
+    }
+    pub fn title(&self) -> String {
+        if self.chip_port() { Strings::screen_port_title() } else { Strings::screen_port_redstone_title() }
+    }
+    /// A VLSI Port: it can be bidirectional too.
+    pub fn chip_port(&self) -> bool {
+        !self.edit.as_ref().is_some_and(|e| e.redstone)
     }
     pub fn set_mode(&mut self, mode: PortMode) {
         self.mode = mode;
@@ -153,23 +169,41 @@ pub fn setup(registry: &mut Registry) {
         let (x, y, z) = edit.pos;
         let pos = BlockPos { x, y, z };
         let Some(state) = srv.get_block_state(&edit.dimension, pos) else { return };
-        if !is_port_block(state.split('[').next().unwrap_or(&state)) {
-            return;
+        let id = state.split('[').next().unwrap_or(&state);
+        if edit.redstone && id == Blocks::REDSTONE_PORT {
+            let port = RedstonePort { output: edit.mode == PortMode::Output, name: edit.label.trim().to_string() };
+            cables::set_redstone_port(srv, &edit.dimension, pos, port);
+        } else if !edit.redstone && is_port_block(id) {
+            write_label(srv, &edit.dimension, pos, &edit.label);
+            srv.set_block_state(&edit.dimension, pos, block_for_dir(edit.mode));
         }
-        write_label(srv, &edit.dimension, pos, &edit.label);
-        srv.set_block_state(&edit.dimension, pos, block_for_dir(edit.mode));
     });
 
     // Right-click: edit it.
     registry.on_use_block(|e, phase, srv| -> bool {
-        if phase != EventPhase::Pre || !is_port_block(&e.block_id) {
+        if phase != EventPhase::Pre {
             return true;
         }
-        let edit = PortEdit {
-            dimension: e.dimension.clone(),
-            pos: (e.pos.x, e.pos.y, e.pos.z),
-            label: read_label(srv, &e.dimension, e.pos).unwrap_or_default(),
-            mode: dir_for_block(&e.block_id).unwrap_or(PortMode::Input),
+        let at = (e.pos.x, e.pos.y, e.pos.z);
+        let edit = if is_port_block(&e.block_id) {
+            PortEdit {
+                dimension: e.dimension.clone(),
+                pos: at,
+                label: read_label(srv, &e.dimension, e.pos).unwrap_or_default(),
+                mode: dir_for_block(&e.block_id).unwrap_or(PortMode::Input),
+                redstone: false,
+            }
+        } else if e.block_id == Blocks::REDSTONE_PORT {
+            let port = cables::redstone_port(&e.dimension, e.pos);
+            PortEdit {
+                dimension: e.dimension.clone(),
+                pos: at,
+                label: port.name,
+                mode: if port.output { PortMode::Output } else { PortMode::Input },
+                redstone: true,
+            }
+        } else {
+            return true;
         };
         if let Ok(json) = serde_json::to_string(&edit) {
             srv.send_to_player(&e.player_name, CHANNEL, json.as_bytes());
