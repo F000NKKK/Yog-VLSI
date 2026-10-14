@@ -240,18 +240,8 @@ impl AluVm {
     }
 }
 
-/// The ALU blocks' recipes and node editor.
+/// The ALU blocks' node editor (recipes: content/recipes/alu_*.yrecipe).
 pub fn setup(registry: &mut Registry) {
-    for tier in Tier::ALL {
-        let (corner, center) = tier.alu_recipe_materials();
-        registry.add_shaped_recipe(
-            yog_api::ShapedRecipe::new(&format!("yog-vlsi:alu_{}_craft", tier.id()), tier.alu_block(), 1)
-                .row("GCG").row("CRC").row("GDG")
-                .key('G', corner).key('C', "minecraft:copper_ingot")
-                .key('R', "minecraft:repeater").key('D', center)
-        );
-    }
-
     let screen = register(registry);
     // The server's answer to "+ Add Chip": `slot\ttier\tname` lines.
     let chooser = screen.clone();

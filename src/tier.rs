@@ -136,17 +136,6 @@ impl Tier {
         Tier::ALL.into_iter().find(|t| t.alu_block() == id)
     }
 
-    /// `(corner, centre)` ingredients of this tier's ALU recipe.
-    pub fn alu_recipe_materials(self) -> (&'static str, &'static str) {
-        match self {
-            Tier::Wood => ("minecraft:oak_planks", "minecraft:redstone_block"),
-            Tier::Stone => ("minecraft:cobblestone", "minecraft:redstone_block"),
-            Tier::Gold => ("minecraft:gold_ingot", "minecraft:diamond"),
-            Tier::Iron => ("minecraft:iron_ingot", "minecraft:diamond"),
-            Tier::Diamond => ("minecraft:diamond", "minecraft:diamond_block"),
-            Tier::Netherite => ("minecraft:netherite_ingot", "minecraft:diamond_block"),
-        }
-    }
 }
 
 #[cfg(test)]

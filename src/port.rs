@@ -58,15 +58,6 @@ pub fn write_label(srv: &dyn yog_api::Server, dimension: &str, pos: BlockPos, la
 }
 
 pub fn register(registry: &mut Registry) {
-    registry.add_shaped_recipe(
-        yog_api::ShapedRecipe::new("yog-vlsi:port_craft", PORT_INPUT, 2)
-            .row(" R ")
-            .row("RSR")
-            .row(" R ")
-            .key('R', "minecraft:redstone")
-            .key('S', "minecraft:stone"),
-    );
-
     registry.on_use_block(|e, phase, srv| -> bool {
         if phase != yog_api::EventPhase::Pre { return true; }
         if !is_port_block(&e.block_id) { return true; }
