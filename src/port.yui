@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A port block's settings: its name and mode. View model: PortVm in port.rs. -->
+<Screen id="yog-vlsi:port"
+        width="200"
+        height="96"
+        anchor="center"
+        theme="minecraft:vanilla"
+        x:ViewModel="PortVm">
+    <Screen.Resources>
+        <Style x:Key="Mode" target="ToggleButton" flex="1" h="20" />
+    </Screen.Resources>
+    <Column w="100%" h="100%" padding="6 8 8 8" gap="4">
+        <Label text="@Strings.screen.port.title" no_wrap="true" />
+        <TextBox x:Name="label"
+                 w="100%"
+                 h="14"
+                 max_length="24"
+                 text="{x:Bind label, Mode=TwoWay}"
+                 placeholder="@Strings.screen.port.name_placeholder" />
+        <Row w="100%" gap="2">
+            <ToggleButton x:Name="input"
+                          style="@Mode"
+                          text="@Strings.port_short_input"
+                          tooltip="@Strings.port_mode_input"
+                          checked="{x:Bind mode == PortMode::Input}"
+                          command="{x:Bind set_mode(PortMode::Input)}" />
+            <ToggleButton x:Name="output"
+                          style="@Mode"
+                          text="@Strings.port_short_output"
+                          tooltip="@Strings.port_mode_output"
+                          checked="{x:Bind mode == PortMode::Output}"
+                          command="{x:Bind set_mode(PortMode::Output)}" />
+            <ToggleButton x:Name="bidi"
+                          style="@Mode"
+                          text="@Strings.port_short_bidi"
+                          tooltip="@Strings.port_mode_bidi"
+                          checked="{x:Bind mode == PortMode::Bidirectional}"
+                          command="{x:Bind set_mode(PortMode::Bidirectional)}" />
+        </Row>
+        <Button x:Name="done" w="60" h="20" halign="right" text="@Strings.screen.port.done" command="{x:Bind done()}" />
+    </Column>
+</Screen>
