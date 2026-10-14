@@ -4,7 +4,9 @@
 //! `lib.rs`). Each player gets a lane of their own: a cube the size of the
 //! chip's tier on every side (a tier-256 chip: 256³), wrapped in a shell of
 //! barriers one block thick — 258³ in all. The shell can't be broken, not
-//! even in creative.
+//! even in creative. Past the barriers (seen through them) a second shell
+//! shows where the field ends: grey wool, a cyan grid every 8 blocks from
+//! the field's corner, sea lanterns where its lines cross.
 //!
 //! The design comes from a Blueprint in a workbench's blueprint slot and
 //! goes back onto it on `/vlsi save` (onto a new Blueprint in the player's
@@ -37,6 +39,12 @@ pub const GENERATOR_ID: &str = "yog-vlsi:editor_terrain";
 const EDITOR_Y: i32 = 10;
 /// What the shell is made of: transparent, solid, unbreakable here.
 const WALL: &str = "minecraft:barrier";
+/// The shell seen through the barriers: its wool, its grid and its lights.
+const SKIN: &str = "minecraft:light_gray_wool";
+const GRID: &str = "minecraft:cyan_wool";
+const LIGHT: &str = "minecraft:sea_lantern";
+/// The grid's spacing, from the field's corner.
+const GRID_EVERY: i32 = 8;
 /// Lane 0's corner; each further lane is offset along X.
 const BASE_X: i32 = 0;
 const BASE_Z: i32 = 0;
@@ -100,11 +108,52 @@ fn shell(lo: BlockPos, hi: BlockPos) -> [(BlockPos, BlockPos); 6] {
     ]
 }
 
-/// Wraps the lane's cube in its barrier shell and empties it.
+/// The shell past the barriers: one block further out than [`shell`].
+fn skin(lo: BlockPos, hi: BlockPos) -> [(BlockPos, BlockPos); 6] {
+    let grow = |p: BlockPos, d: i32| BlockPos { x: p.x + d, y: p.y + d, z: p.z + d };
+    shell(grow(lo, -1), grow(hi, 1))
+}
+
+/// Paints one face of the skin: wool, a grid line every [`GRID_EVERY`]
+/// blocks from the field's corner `lo`, a lantern where two lines cross.
+fn paint_face(srv: &dyn yog_api::Server, (from, to): (BlockPos, BlockPos), lo: BlockPos) {
+    srv.fill_region(DIMENSION_ID, from, to, SKIN);
+    let get = |p: BlockPos, axis: usize| [p.x, p.y, p.z][axis];
+    let set = |mut p: BlockPos, axis: usize, v: i32| {
+        match axis {
+            0 => p.x = v,
+            1 => p.y = v,
+            _ => p.z = v,
+        }
+        p
+    };
+    // The two axes the face spans (the third is flat).
+    let span: Vec<usize> = (0..3).filter(|&a| get(from, a) != get(to, a)).collect();
+    let on_grid = |axis: usize, v: i32| (v - get(lo, axis)).rem_euclid(GRID_EVERY) == 0;
+    for &a in &span {
+        for v in get(from, a)..=get(to, a) {
+            if on_grid(a, v) {
+                srv.fill_region(DIMENSION_ID, set(from, a, v), set(to, a, v), GRID);
+            }
+        }
+    }
+    let (a, b) = (span[0], span[1]);
+    for u in (get(from, a)..=get(to, a)).filter(|&u| on_grid(a, u)) {
+        for v in (get(from, b)..=get(to, b)).filter(|&v| on_grid(b, v)) {
+            srv.set_block_state(DIMENSION_ID, set(set(from, a, u), b, v), LIGHT);
+        }
+    }
+}
+
+/// Wraps the lane's cube in its barrier shell and the skin that shows it,
+/// and empties it.
 fn build_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i32) {
     let (lo, hi) = interior(origin_x, origin_z, size);
     for (from, to) in shell(lo, hi) {
         srv.fill_region(DIMENSION_ID, from, to, WALL);
+    }
+    for face in skin(lo, hi) {
+        paint_face(srv, face, lo);
     }
     // What a previous design left inside.
     for (pos, _) in srv.scan_region(DIMENSION_ID, lo, hi) {
@@ -265,7 +314,7 @@ fn remove_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i3
     for (pos, _) in srv.scan_region(DIMENSION_ID, lo, hi) {
         srv.set_block_state(DIMENSION_ID, pos, "minecraft:air");
     }
-    for (from, to) in shell(lo, hi) {
+    for (from, to) in shell(lo, hi).into_iter().chain(skin(lo, hi)) {
         srv.fill_region(DIMENSION_ID, from, to, "minecraft:air");
     }
 }
