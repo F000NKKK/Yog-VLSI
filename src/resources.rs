@@ -56,10 +56,6 @@ impl Resource {
         self.inputs().iter().find(|(id, _)| *id == item).map(|(_, n)| *n)
     }
 
-    /// Its slot's `accepts` list, as `.yui` writes it.
-    pub fn accepts(self) -> String {
-        self.inputs().iter().map(|(id, _)| *id).collect::<Vec<_>>().join(" ")
-    }
 
     /// The game's name for it (the base item's translation).
     pub fn name(self) -> String {
@@ -74,18 +70,6 @@ impl Resource {
         yog_api::tr(key)
     }
 
-    /// The vial's colour.
-    pub fn color(self) -> u32 {
-        use crate::res::Colors;
-        match self {
-            Resource::Redstone => Colors::VIAL_REDSTONE,
-            Resource::Iron => Colors::VIAL_IRON,
-            Resource::Gold => Colors::VIAL_GOLD,
-            Resource::Quartz => Colors::VIAL_QUARTZ,
-            Resource::Wood => Colors::VIAL_WOOD,
-            Resource::Stone => Colors::VIAL_COBBLESTONE,
-        }
-    }
 }
 
 /// `n` short: `999`, `1.2k`, `15k`, `1.5m`, `2b`, `3t`.

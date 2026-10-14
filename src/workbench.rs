@@ -19,7 +19,7 @@ use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
 use yog_api::player::Player;
-use yog_api::{BlockPos, EventPhase, Registry, Storage};
+use yog_api::{BlockPos, EventPhase, Registry, Server, Storage};
 use yog_kit::prelude::*;
 
 use crate::chip::{Blueprint, ChipMeta};
@@ -315,7 +315,7 @@ pub fn tick(srv: &dyn yog_api::Server) {
 }
 
 /// Runs a client's request; the reply goes to its action bar.
-fn handle(srv: &dyn yog_api::Server, player: &str, request: Request) -> String {
+fn run_request(srv: &dyn yog_api::Server, player: &str, request: Request) -> String {
     match request {
         Request::Create { bench, name, tier } => {
             if !matches!(blueprint_in(srv, &bench).0, BlueprintView::Blank) {
@@ -389,7 +389,7 @@ pub fn setup(registry: &mut Registry) {
 
     registry.on_packet(REQUEST_CHANNEL, |ev, srv| {
         let Ok(request) = serde_json::from_slice::<Request>(&ev.payload) else { return };
-        let reply = handle(srv, &ev.player, request);
+        let reply = run_request(srv, &ev.player, request);
         if !reply.is_empty() {
             srv.send_actionbar(&ev.player, &reply);
         }
