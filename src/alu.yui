@@ -10,7 +10,7 @@
     <Screen.Resources>
         <Style x:Key="Header" target="Label" no_wrap="true" />
         <Style x:Key="Action" target="Button" h="20" padding="0 8" />
-        <Style x:Key="Pin" target="Button" h="12" padding="0 4" shadow="false" no_wrap="true" hover:bg="#33FFFFFF" />
+        <Style x:Key="Pin" target="Button" h="12" padding="0 4" bg="#00000000" shadow="false" no_wrap="true" hover:bg="#33FFFFFF" />
     </Screen.Resources>
     <Grid w="100%" h="100%" rows="18,*,Auto" padding="6 8">
         <Label x:Name="title" style="@Header" text="{x:Bind title()}" />
@@ -40,7 +40,7 @@
             </Column>
             <Column flex="1" h="100%" gap="2">
                 <Label style="@Header" text="@Strings.screen.alu.chips" />
-                <ScrollView x:Name="chips" flex="1" w="100%" padding="2" bg="sprite:slot">
+                <ScrollView x:Name="chips" flex="1" w="100%" padding="2">
                     <ItemsControl w="100%" gap="1" items="{x:Bind pins()}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="PinRow">
@@ -73,7 +73,6 @@
                       w="100%"
                       gap="1"
                       padding="2"
-                      bg="sprite:slot"
                       items="{x:Bind choices}"
                       key="{x:Bind slot}"
                       item_height="20">
