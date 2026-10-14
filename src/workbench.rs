@@ -467,7 +467,9 @@ mod tests {
         h.open();
         assert!(!h.widget(ids::FABRICATE).unwrap().enabled);
 
-        h.vm_mut().apply(state([0; 6], BlueprintView::Blank));
+        let blank = state([0; 6], BlueprintView::Blank);
+        h.handle().update(move |vm| vm.apply(blank));
+        h.frame();
         h.type_into(ids::NAME, "Adder");
         assert!(h.vm().can_create());
 
