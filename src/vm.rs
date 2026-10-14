@@ -358,6 +358,9 @@ pub struct RedstoneVM {
     /// Item ids, indexed by the numbers in `inventories`.
     items: Vec<String>,
     rng: u64,
+    /// Settled, and nothing from outside changed since: another step would
+    /// change nothing either, so [`settle`](Self::settle) skips it.
+    quiet: bool,
 }
 
 /// One slot's item: (index into `items`, count); count 0 = empty.
@@ -395,6 +398,7 @@ impl RedstoneVM {
             nested: HashMap::new(),
             items: Vec::new(),
             rng: 0x9E37_79B9_7F4A_7C15,
+            quiet: false,
         }
     }
 
@@ -474,6 +478,7 @@ impl RedstoneVM {
     }
 
     pub fn set_block(&mut self, x: u32, y: u32, z: u32, block: BlockType) {
+        self.quiet = false;
         if !self.in_bounds(x as i32, y as i32, z as i32) {
             return;
         }
@@ -513,6 +518,7 @@ impl RedstoneVM {
 
     /// Fills the container at `(x, y, z)`: (slot, item id, count).
     pub fn set_items(&mut self, x: u32, y: u32, z: u32, items: &[(u8, String, u8)]) {
+        self.quiet = false;
         if !self.in_bounds(x as i32, y as i32, z as i32) {
             return;
         }
@@ -548,6 +554,7 @@ impl RedstoneVM {
     /// Drives `power` into the Input/Bidirectional port at `(x, y, z)`.
     /// Puts `alu`'s insides into the ALU block at `(x, y, z)`.
     pub fn set_nested(&mut self, x: u32, y: u32, z: u32, alu: NestedAlu) {
+        self.quiet = false;
         if !self.in_bounds(x as i32, y as i32, z as i32) {
             return;
         }
@@ -562,8 +569,9 @@ impl RedstoneVM {
             return;
         }
         let i = self.idx(x, y, z);
-        if matches!(self.get(i).block, BlockType::Port(PortMode::Input | PortMode::Bidirectional)) {
+        if matches!(self.get(i).block, BlockType::Port(PortMode::Input | PortMode::Bidirectional)) && self.get(i).port_in != power.min(15) {
             self.get_mut(i).port_in = power.min(15);
+            self.quiet = false;
         }
     }
 
@@ -602,11 +610,17 @@ impl RedstoneVM {
     /// `budget` steps; how many it took. A circuit answers its inputs in
     /// the steps it needs, not one a server tick.
     pub fn settle(&mut self, budget: u32) -> u32 {
+        // Settled and its inputs as they were: the step would change nothing.
+        if self.quiet {
+            return 0;
+        }
         let mut before = self.state();
         for n in 1..=budget {
             self.step();
             let now = self.state();
             if now == before {
+                // Not while a nested ALU's chip waits for its next tick's steps.
+                self.quiet = self.nested.values().all(|a| a.chips.iter().all(|c| c.settled_on.is_some()));
                 return n;
             }
             before = now;
@@ -1692,7 +1706,12 @@ mod tests {
         let steps = vm.settle(8);
         assert_eq!(vm.get_port_output(4, 0, 0), 0, "answered the same tick");
         assert!(steps < 8, "stopped once nothing changed ({steps})");
-        assert_eq!(vm.settle(8), 1, "nothing to do: one look");
+        assert_eq!(vm.settle(8), 0, "settled, inputs as they were: not a step");
+        vm.set_port_input(0, 0, 0, 15);
+        assert_eq!(vm.settle(8), 0, "the same input isn't a change");
+        vm.set_port_input(0, 0, 0, 0);
+        assert!(vm.settle(8) > 0, "a new one is");
+        assert_eq!(vm.get_port_output(4, 0, 0), 15);
     }
 
     /// A NOT gate: port IN at x 0 → wire → block → torch → port OUT at x 4.

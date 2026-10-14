@@ -12,6 +12,7 @@
 //! next to it, so each side is its own connection.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,18 @@ type Key = (String, i32, i32, i32);
 
 /// Every Redstone Port, by (dimension, position).
 static PORTS: LazyLock<Mutex<HashMap<Key, RedstonePort>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// A cable was placed or broken: the ALUs look at their sides again.
+static CABLES_CHANGED: AtomicBool = AtomicBool::new(false);
+/// Ticks since the ports were last looked for in the world.
+static PORT_TICKS: AtomicU64 = AtomicU64::new(0);
+/// How often: a port broken by hand goes at once (`register`); one blown
+/// up or pushed away, by the next look.
+const PORT_CHECK_EVERY: u64 = 20;
+
+/// Whether a cable was placed or broken since the last call.
+pub fn cables_changed() -> bool {
+    CABLES_CHANGED.swap(false, Ordering::Relaxed)
+}
 
 pub fn redstone_port(dimension: &str, pos: BlockPos) -> RedstonePort {
     PORTS
@@ -119,7 +132,7 @@ pub fn beside(pos: (i32, i32, i32), side: &str) -> BlockPos {
 }
 
 /// The cable network next to an ALU side: (capability, cable position).
-fn cable_at(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) -> Option<&'static str> {
+pub fn cable_at(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) -> Option<&'static str> {
     match srv.get_block_state(dim, pos)?.split('[').next()? {
         id if id == Blocks::ANALOG_CABLE => Some(ANALOG),
         id if id == Blocks::DIGITAL_CABLE => Some(DIGITAL),
@@ -127,10 +140,10 @@ fn cable_at(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) -> Option<&'sta
     }
 }
 
-/// Whether a digital cable reaches ALU side `side`: it's a bus.
-pub fn side_bus(srv: &dyn yog_api::Server, dim: &str, alu: (i32, i32, i32), side: &str) -> bool {
-    cable_at(srv, dim, beside(alu, side)) == Some(DIGITAL)
+fn is_cable(block: &str) -> bool {
+    block == Blocks::ANALOG_CABLE || block == Blocks::DIGITAL_CABLE
 }
+
 
 /// The level on channel `ch` of the bus at ALU side `side`.
 pub fn bus_level(dim: &str, alu: (i32, i32, i32), side: &str, ch: u8) -> u8 {
@@ -144,17 +157,17 @@ pub fn bus_drive(dim: &str, alu: (i32, i32, i32), side: &str, ch: u8, level: u8)
     }
 }
 
-/// The level arriving at an ALU side from its analog cable (`None`: none).
-pub fn side_input(srv: &dyn yog_api::Server, dim: &str, alu: (i32, i32, i32), side: &str) -> Option<u8> {
-    let at = beside(alu, side);
-    (cable_at(srv, dim, at)? == ANALOG).then_some(())?;
-    yog_pipes::level(ANALOG.to_string(), pipe_pos(dim, at), SIDE_CHANNEL).ok()
+/// The level arriving at an ALU side from the cable there (`cable`, as
+/// [`cable_at`] said): an analog one's, else `None`.
+pub fn side_input(dim: &str, alu: (i32, i32, i32), side: &str, cable: Option<&str>) -> Option<u8> {
+    (cable? == ANALOG).then_some(())?;
+    yog_pipes::level(ANALOG.to_string(), pipe_pos(dim, beside(alu, side)), SIDE_CHANNEL).ok()
 }
 
-/// Drives `level` out of an ALU side into its analog cable (if there is one).
-pub fn side_output(srv: &dyn yog_api::Server, dim: &str, alu: (i32, i32, i32), side: &str, level: u8) {
+/// Drives `level` out of an ALU side into the cable there, if analog.
+pub fn side_output(dim: &str, alu: (i32, i32, i32), side: &str, cable: Option<&str>, level: u8) {
     let at = beside(alu, side);
-    if cable_at(srv, dim, at) == Some(ANALOG)
+    if cable == Some(ANALOG)
         && let Err(e) = yog_pipes::emit(ANALOG.to_string(), pipe_pos(dim, at), SIDE_CHANNEL, level.min(15))
     {
         warn!("[yog-vlsi] driving an analog cable: {e}");
@@ -211,9 +224,13 @@ fn register_networks() {
     }
 }
 
-/// The Redstone Ports that still stand, with whether they're outputs.
-fn ports(srv: &dyn yog_api::Server) -> Vec<((String, i32, i32, i32), bool)> {
+/// The Redstone Ports, with whether they're outputs — every
+/// [`PORT_CHECK_EVERY`] ticks, those that still stand (`check`).
+fn ports(srv: &dyn yog_api::Server, check: bool) -> Vec<((String, i32, i32, i32), bool)> {
     let all: Vec<(Key, bool)> = PORTS.lock().unwrap().iter().map(|(k, p)| (k.clone(), p.output)).collect();
+    if !check {
+        return all;
+    }
     all.into_iter()
         .filter(|((dim, x, y, z), _)| {
             let there = srv
@@ -230,7 +247,8 @@ fn ports(srv: &dyn yog_api::Server) -> Vec<((String, i32, i32, i32), bool)> {
 /// Redstone into the cables, before the ALUs step: what reaches a port this
 /// tick is in its network for them this tick.
 pub fn tick_inputs(srv: &dyn yog_api::Server) {
-    for ((dim, x, y, z), output) in ports(srv) {
+    let check = PORT_TICKS.fetch_add(1, Ordering::Relaxed) % PORT_CHECK_EVERY == 0;
+    for ((dim, x, y, z), output) in ports(srv, check) {
         let pos = BlockPos { x, y, z };
         if output {
             let _ = yog_pipes::emit(ANALOG.to_string(), pipe_pos(&dim, pos), SIDE_CHANNEL, 0);
@@ -244,7 +262,7 @@ pub fn tick_inputs(srv: &dyn yog_api::Server) {
 /// Cable levels out as redstone, after the ALUs stepped: what they put out
 /// this tick leaves this tick.
 pub fn tick_outputs(srv: &dyn yog_api::Server) {
-    for ((dim, x, y, z), output) in ports(srv) {
+    for ((dim, x, y, z), output) in ports(srv, false) {
         if output {
             let pos = BlockPos { x, y, z };
             let level = yog_pipes::level(ANALOG.to_string(), pipe_pos(&dim, pos), SIDE_CHANNEL).unwrap_or(0);
@@ -285,6 +303,19 @@ pub fn register(registry: &mut Registry) {
                 .lock()
                 .unwrap()
                 .insert((e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z), RedstonePort { output: false, name: String::new() });
+        }
+        if phase == EventPhase::Post && is_cable(&e.block_id) {
+            CABLES_CHANGED.store(true, Ordering::Relaxed);
+        }
+        true
+    });
+    registry.on_block_break(|e, phase, _srv| {
+        if phase == EventPhase::Post {
+            if e.block_id == Blocks::REDSTONE_PORT {
+                PORTS.lock().unwrap().remove(&(e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z));
+            } else if is_cable(&e.block_id) {
+                CABLES_CHANGED.store(true, Ordering::Relaxed);
+            }
         }
         true
     });

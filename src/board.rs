@@ -127,8 +127,11 @@ struct Board {
     levels: HashMap<Pin, u8>,
     /// The name of the Redstone Port on each side's cable.
     side_names: HashMap<String, String>,
-    /// Which sides a digital cable reaches.
-    buses: [bool; 6],
+    /// The cable on each side (`cables::ANALOG`, `DIGITAL`), looked at when
+    /// cables change and every [`SYNC_EVERY`] ticks — not every tick.
+    cables: [Option<&'static str>; 6],
+    /// `cables` has been looked at.
+    cables_known: bool,
     /// What this ALU last drove onto each bus channel `(side, channel)`.
     bus_driven: HashMap<(u8, u8), u8>,
 }
@@ -140,7 +143,8 @@ impl Board {
             chips: (0..CHIP_SLOTS).map(|_| None).collect(),
             levels: HashMap::new(),
             side_names: HashMap::new(),
-            buses: [false; 6],
+            cables: [None; 6],
+            cables_known: false,
             bus_driven: HashMap::new(),
         }
     }
@@ -169,7 +173,7 @@ impl Board {
     /// The channel (0-based) a pin of bus `side` names, if the bus is there and the tier sees it.
     fn bus_channel(&self, side: u8, name: &str) -> Option<u8> {
         let n: u16 = name.parse().ok()?;
-        (self.buses.get(side as usize) == Some(&true) && (1..=self.bus_channels()).contains(&n)).then(|| (n - 1) as u8)
+        (self.is_bus(side as usize) && (1..=self.bus_channels()).contains(&n)).then(|| (n - 1) as u8)
     }
 
     fn bus_rows(&self, side: u8) -> u16 {
@@ -250,20 +254,26 @@ impl Board {
     }
 
     /// Which sides a digital cable reaches now.
-    fn sync_buses(&mut self, srv: &dyn yog_api::Server, alu: &AluId) {
+    fn sync_cables(&mut self, srv: &dyn yog_api::Server, alu: &AluId) {
         for (i, side) in SIDES.iter().enumerate() {
-            self.buses[i] = cables::side_bus(srv, &alu.dimension, alu.xyz(), side);
+            self.cables[i] = cables::cable_at(srv, &alu.dimension, cables::beside(alu.xyz(), side));
         }
+        self.cables_known = true;
+    }
+
+    /// A digital cable reaches side `i`: it's a bus.
+    fn is_bus(&self, i: usize) -> bool {
+        self.cables[i] == Some(cables::DIGITAL)
     }
 
     /// What every source drives now: the inputs coming into the ALU's sides,
     /// the chips' output ports and the bus channels shown or wired.
-    fn sources(&self, srv: &dyn yog_api::Server, alu: &AluId) -> HashMap<Pin, u8> {
+    fn sources(&self, alu: &AluId) -> HashMap<Pin, u8> {
         let max = self.saved.tier.max_chips();
         let mut levels = HashMap::new();
-        for side in SIDES {
+        for (i, &side) in SIDES.iter().enumerate() {
             if !self.side_is_output(side) {
-                let level = cables::side_input(srv, &alu.dimension, alu.xyz(), side).unwrap_or(0);
+                let level = cables::side_input(&alu.dimension, alu.xyz(), side, self.cables[i]).unwrap_or(0);
                 levels.insert(Pin::new(Node::In, side), level);
             }
         }
@@ -273,7 +283,7 @@ impl Board {
                 levels.insert(Pin::new(Node::Chip(slot as u8), &port.label), chip.vm.get_port_output(port.x, port.y, port.z));
             }
         }
-        for (i, side) in SIDES.iter().enumerate().filter(|(i, _)| self.buses[*i]) {
+        for (i, side) in SIDES.iter().enumerate().filter(|(i, _)| self.is_bus(*i)) {
             let shown = (1..=self.bus_rows(i as u8)).map(|n| n.to_string());
             let wired = self.saved.wires.iter().filter(|w| w.from.node == Node::Bus(i as u8)).map(|w| w.from.name.clone());
             for name in shown.chain(wired) {
@@ -289,14 +299,14 @@ impl Board {
     /// chips, the chips step with it, and what they put out leaves by the
     /// output sides the same tick — a signal crosses an ALU in the chips'
     /// own steps, no tick lost waiting on either side of them.
-    fn tick(&mut self, srv: &dyn yog_api::Server, alu: &AluId) {
+    fn tick(&mut self, alu: &AluId) {
         let max = self.saved.tier.max_chips();
         let incoming = |wires: &[Wire], levels: &HashMap<Pin, u8>, to: &Pin| {
             wires.iter().find(|w| &w.to == to).and_then(|w| levels.get(&w.from)).copied().unwrap_or(0)
         };
 
         // In: the sides' inputs and the other chips' outputs, into each chip.
-        let before = self.sources(srv, alu);
+        let before = self.sources(alu);
         let mut inputs = Vec::new();
         for (slot, chip) in self.chips.iter().enumerate().take(max) {
             let Some(chip) = chip else { continue };
@@ -318,12 +328,12 @@ impl Board {
         }
 
         // Out: what they put out now, through the output sides.
-        let mut levels = self.sources(srv, alu);
+        let mut levels = self.sources(alu);
         let mut driven = Vec::new();
-        for side in SIDES {
+        for (i, &side) in SIDES.iter().enumerate() {
             if self.side_is_output(side) {
                 let level = incoming(&self.saved.wires, &levels, &Pin::new(Node::Out, side));
-                cables::side_output(srv, &alu.dimension, alu.xyz(), side, level);
+                cables::side_output(&alu.dimension, alu.xyz(), side, self.cables[i], level);
                 driven.push((Pin::new(Node::Out, side), level));
             }
         }
@@ -378,7 +388,7 @@ impl Board {
                 })
                 .collect(),
             buses: (0..SIDES.len() as u8)
-                .filter(|&i| self.buses[i as usize])
+                .filter(|&i| self.is_bus(i as usize))
                 .map(|i| BusView { index: i, side: SIDES[i as usize].to_string(), channels: self.bus_channels(), rows: self.bus_rows(i) })
                 .collect(),
             wires: self.saved.wires.clone(),
@@ -521,18 +531,21 @@ pub fn tick(srv: &dyn yog_api::Server) {
         *t
     };
     let names = if n % SYNC_EVERY == 0 { Some(cables::port_names(srv)) } else { None };
+    let cables_changed = cables::cables_changed();
     {
         let mut boards = BOARDS.lock().unwrap();
         for (alu, board) in boards.iter_mut() {
+            if names.is_some() || cables_changed || !board.cables_known {
+                board.sync_cables(srv, alu);
+            }
             if let Some(names) = &names {
                 board.sync_chips(srv, alu);
-                board.sync_buses(srv, alu);
                 board.side_names = SIDES
                     .iter()
                     .filter_map(|&side| Some((side.to_string(), cables::side_port_name(srv, alu, side, names)?)))
                     .collect();
             }
-            board.tick(srv, alu);
+            board.tick(alu);
         }
     }
     if n % SEND_EVERY == 0 {
@@ -690,7 +703,7 @@ mod tests {
         let mut b = Board::new(Tier::Wood);
         let ch = |n: &str| Pin::new(Node::Bus(2), n);
         assert!(!b.is_source(&ch("1")), "no digital cable on E yet");
-        b.buses[2] = true;
+        b.cables[2] = Some(cables::DIGITAL);
         assert_eq!(b.bus_channels(), 32, "wood: 8 × 4 colours");
         assert!(b.is_source(&ch("1")) && b.is_sink(&ch("1")));
         assert!(b.is_sink(&ch("32")) && !b.is_sink(&ch("33")) && !b.is_source(&ch("0")));
