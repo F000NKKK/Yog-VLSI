@@ -1,18 +1,15 @@
 {
-  "type": "yog-vlsi:assembly",
-  "slots": {
-    "parts": [
-      "@item:minecraft:repeater",
-      "@item:minecraft:copper_ingot",
-      "@item:minecraft:copper_ingot",
-      "@item:minecraft:diamond",
-      "@item:minecraft:diamond",
-      "@item:minecraft:diamond_block"
-    ]
-  },
-  "values": {
-    "redstone": 16,
-    "quartz": 8
+  "type": "shaped",
+  "pattern": [
+    "GCG",
+    "CRC",
+    "GDG"
+  ],
+  "key": {
+    "G": "@item:minecraft:diamond",
+    "C": "@item:minecraft:copper_ingot",
+    "R": "@item:minecraft:repeater",
+    "D": "@item:minecraft:diamond_block"
   },
   "result": "@item:yog-vlsi:alu_diamond"
 }

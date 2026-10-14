@@ -1,17 +1,15 @@
 {
-  "type": "yog-vlsi:assembly",
-  "slots": {
-    "parts": [
-      "@item:minecraft:repeater",
-      "@item:minecraft:copper_ingot",
-      "@item:minecraft:copper_ingot",
-      "@item:minecraft:oak_planks",
-      "@item:minecraft:oak_planks"
-    ]
-  },
-  "values": {
-    "redstone": 4,
-    "wood": 8
+  "type": "shaped",
+  "pattern": [
+    "GCG",
+    "CRC",
+    "GDG"
+  ],
+  "key": {
+    "G": "@item:minecraft:oak_planks",
+    "C": "@item:minecraft:copper_ingot",
+    "R": "@item:minecraft:repeater",
+    "D": "@item:minecraft:redstone_block"
   },
   "result": "@item:yog-vlsi:alu_wood"
 }

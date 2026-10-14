@@ -1,17 +1,15 @@
 {
-  "type": "yog-vlsi:assembly",
-  "slots": {
-    "parts": [
-      "@item:minecraft:repeater",
-      "@item:minecraft:copper_ingot",
-      "@item:minecraft:copper_ingot",
-      "@item:minecraft:cobblestone",
-      "@item:minecraft:cobblestone"
-    ]
-  },
-  "values": {
-    "redstone": 4,
-    "stone": 8
+  "type": "shaped",
+  "pattern": [
+    "GCG",
+    "CRC",
+    "GDG"
+  ],
+  "key": {
+    "G": "@item:minecraft:cobblestone",
+    "C": "@item:minecraft:copper_ingot",
+    "R": "@item:minecraft:repeater",
+    "D": "@item:minecraft:redstone_block"
   },
   "result": "@item:yog-vlsi:alu_stone"
 }

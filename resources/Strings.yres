@@ -101,11 +101,6 @@
     "comment": "One resource of the fabrication cost: needed (stored)"
   },
   "screen.workbench.free": "Free — an empty design",
-  "screen.workbench.assembly": "Assembly",
-  "screen.workbench.need_chip": {
-    "value": "Needs a blank {tier} chip",
-    "comment": "Under the fabrication cost, when the chip slot hasn't one"
-  },
   "screen.workbench.resource_tooltip": {
     "value": "{resource}: {amount}\nTakes: {inputs}",
     "comment": "A resource vial's tooltip"

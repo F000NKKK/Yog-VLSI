@@ -1,6 +1,0 @@
-// VLSI's kind of recipe, made on the workbench's assembly grid: parts in
-// its slots, plus a cost in the workbench's stored resources (`values`,
-// units as the resource slots count them; missing = 0).
-{ kind: "recipe_kind", id: "assembly",
-  slots: { parts: { max: 6, required: true } },
-  values: { redstone: "number", iron: "number", gold: "number", quartz: "number", wood: "number", stone: "number" } }

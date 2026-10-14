@@ -1,15 +1,13 @@
 {
-  "type": "yog-vlsi:assembly",
-  "slots": {
-    "parts": [
-      "@item:minecraft:paper",
-      "@item:minecraft:paper",
-      "@item:minecraft:paper",
-      "@item:minecraft:paper"
-    ]
-  },
-  "values": {
-    "iron": 1
+  "type": "shaped",
+  "pattern": [
+    "PPP",
+    "PIP",
+    "PPP"
+  ],
+  "key": {
+    "P": "@item:minecraft:paper",
+    "I": "@item:minecraft:iron_ingot"
   },
   "result": "@item:yog-vlsi:blueprint"
 }
