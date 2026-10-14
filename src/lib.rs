@@ -56,6 +56,12 @@ impl Mod for YogVlsi {
             // Void — the editor builds its own floor/walls per session.
         });
 
+        // A written Blueprint shows its design: its name, then tier, ports and blocks.
+        registry.on_item_text(content::Items::BLUEPRINT, |_, snbt| {
+            let bp = chip::Blueprint::from_nbt(snbt)?;
+            let info = res::Strings::screen_workbench_design_tier(bp.tier.name(), bp.circuit.ports.len(), bp.circuit.blocks.len());
+            Some((Some(bp.name), vec![format!("§7{info}")]))
+        });
         workbench::setup(registry);
         alu::setup(registry);
         board::setup(registry);
