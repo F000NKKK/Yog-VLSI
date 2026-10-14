@@ -4,20 +4,12 @@
         width="340"
         height="216"
         anchor="center"
-        bg="sprite:panel"
+        theme="minecraft:vanilla"
         live="true"
         x:ViewModel="AluVm">
     <Screen.Resources>
-        <Style x:Key="Header" target="Label" color="#FF404040" shadow="false" no_wrap="true" />
-        <Style x:Key="Action"
-               target="Button"
-               h="20"
-               padding="0 8"
-               bg="sprite:button"
-               color="#FFFFFF"
-               hover:bg="sprite:button_hover"
-               disabled:bg="sprite:button_disabled"
-               disabled:color="#FFA0A0A0" />
+        <Style x:Key="Header" target="Label" no_wrap="true" />
+        <Style x:Key="Action" target="Button" h="20" padding="0 8" />
         <Style x:Key="Pin" target="Button" h="12" padding="0 4" shadow="false" no_wrap="true" hover:bg="#33FFFFFF" />
     </Screen.Resources>
     <Grid w="100%" h="100%" rows="18,*,Auto" padding="6 8">
