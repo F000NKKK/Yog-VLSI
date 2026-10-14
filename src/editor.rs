@@ -118,7 +118,10 @@ pub fn enter(
     build_room(srv, origin_x, origin_z, size as i32);
 
     let at = |x: u32, y: u32, z: u32| BlockPos { x: origin_x + x as i32, y: EDITOR_Y + y as i32, z: origin_z + z as i32 };
-    for block in &blueprint.circuit.blocks {
+    // What stands on or hangs from another block goes in after it: placed
+    // first, the next block set beside it would knock it off.
+    let (hanging, standing): (Vec<_>, Vec<_>) = blueprint.circuit.blocks.iter().partition(|b| needs_support(b.id()));
+    for block in standing.into_iter().chain(hanging) {
         srv.set_block_state(DIMENSION_ID, at(block.x, block.y, block.z), &block.state);
     }
     for p in &blueprint.circuit.ports {
@@ -213,6 +216,16 @@ pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
     } else {
         format!("§aSaved '{}' to a new Blueprint in your inventory — {summary}.", blueprint.name)
     }
+}
+
+/// Blocks that break without the block they stand on or hang from.
+fn needs_support(id: &str) -> bool {
+    const PARTS: [&str; 16] = [
+        "torch", "button", "lever", "repeater", "comparator", "redstone_wire", "rail", "pressure_plate", "door",
+        "carpet", "ladder", "sign", "banner", "tripwire", "lantern", "vine",
+    ];
+    let path = id.strip_prefix("minecraft:").unwrap_or(id);
+    PARTS.iter().any(|p| path.contains(p))
 }
 
 /// Whether a block in the editor dimension is part of a lane's shell.
