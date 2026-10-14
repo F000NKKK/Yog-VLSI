@@ -109,7 +109,8 @@ fn craft(blocks: &[CircuitBlock]) -> [f64; 6] {
 }
 
 /// What fabricating `blocks` costs: [`PRINT_SHARE`] of crafting them, rounded up.
-pub fn cost(blocks: &[CircuitBlock]) -> Amounts {
+#[cfg(test)]
+fn cost(blocks: &[CircuitBlock]) -> Amounts {
     craft(blocks).map(|units| (units * PRINT_SHARE).ceil() as u64)
 }
 
