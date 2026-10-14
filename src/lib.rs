@@ -101,10 +101,11 @@ impl Mod for YogVlsi {
             workbench::load_resources(srv);
             board::load(srv);
             cables::load(srv);
+            editor::load(srv);
             port::load(srv);
         });
         registry.on_server_stopping(|srv| {
-            editor::finish_all(srv);
+            editor::save_sessions(srv);
             workbench::save_resources(srv);
             board::save(srv);
             cables::save(srv);

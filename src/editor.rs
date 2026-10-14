@@ -11,9 +11,12 @@
 //! The design comes from a Blueprint in a workbench's blueprint slot and
 //! goes back onto it on `/vlsi save` (onto a new Blueprint in the player's
 //! inventory if that one was taken out meanwhile). Then the field is
-//! removed. Leaving the game (or the server stopping) saves it the same
-//! way — onto a Blueprint dropped where the player left if there's
-//! nowhere else. No one stays in the editor dimension without a session.
+//! removed — its blocks and whatever lies about in it — and the player gets
+//! back the inventory and game mode they came in with: the editor is
+//! creative, what was made there stays there. A session outlives leaving
+//! the game, a crash and the server stopping (it's on disk from the start):
+//! back in, the player is still editing. No one stays in the editor
+//! dimension without a session.
 //!
 //! Saving reads the whole cube in one `scan_region` call, with every
 //! block's full state (a repeater's delay and facing, …), and what the
@@ -22,7 +25,8 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use yog_api::{BlockPos, EventPhase, Registry};
+use serde::{Deserialize, Serialize};
+use yog_api::{BlockPos, EventPhase, Registry, Storage};
 
 use crate::board;
 use crate::chip::{Blueprint, ChipMeta, CircuitBlock, CircuitData, Port, SavedAlu, container_slots};
@@ -57,13 +61,28 @@ const LANE_SPACING: i32 = 320;
 const PLAYER_SLOTS: u32 = 36;
 
 /// Where an edited design lives: a slot of a block container.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Source {
     pub dimension: String,
+    #[serde(with = "pos_serde")]
     pub pos: BlockPos,
     pub slot: u32,
 }
 
+mod pos_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use yog_api::BlockPos;
+
+    pub fn serialize<S: Serializer>(p: &BlockPos, s: S) -> Result<S::Ok, S::Error> {
+        (p.x, p.y, p.z).serialize(s)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<BlockPos, D::Error> {
+        let (x, y, z) = <(i32, i32, i32)>::deserialize(d)?;
+        Ok(BlockPos { x, y, z })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 struct EditorSession {
     name: String,
     tier: Tier,
@@ -73,7 +92,18 @@ struct EditorSession {
     source: Source,
     return_dim: String,
     return_pos: (f64, f64, f64),
+    /// What the player came in with: their inventory (its full SNBT list,
+    /// `Inventory` of their entity data) and game mode — theirs again on the way out.
+    inventory: Option<String>,
+    gamemode: String,
 }
+
+/// Where sessions and lanes are kept between runs.
+const STORE_FILE: &str = "yog-vlsi/editor";
+const SESSIONS_KEY: &str = "sessions";
+const LANES_KEY: &str = "lanes";
+/// The player's entity data key their inventory is under.
+const INVENTORY_TAG: &str = "Inventory";
 
 /// Stable per-player lane index, assigned on first use.
 static LANES: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -85,6 +115,56 @@ fn lane_for(player_name: &str) -> u32 {
     let mut lanes = LANES.lock().unwrap();
     let next = lanes.len() as u32;
     *lanes.entry(player_name.to_string()).or_insert(next)
+}
+
+/// Writes the sessions and lanes to disk: a session survives a crash.
+fn persist(srv: &dyn yog_api::Server) {
+    let mut store = Storage::open(&srv.game_dir(), STORE_FILE);
+    if let Ok(json) = serde_json::to_string(&*SESSIONS.lock().unwrap()) {
+        store.set(SESSIONS_KEY, &*json);
+    }
+    if let Ok(json) = serde_json::to_string(&*LANES.lock().unwrap()) {
+        store.set(LANES_KEY, &*json);
+    }
+    if let Err(e) = store.flush() {
+        yog_api::warn!("[yog-vlsi] saving editor sessions: {e}");
+    }
+}
+
+/// Reads the sessions and lanes back (the server started).
+pub fn load(srv: &dyn yog_api::Server) {
+    let store = Storage::open(&srv.game_dir(), STORE_FILE);
+    let read = |key: &str| store.get(key).and_then(|v| v.as_str().map(str::to_string));
+    *SESSIONS.lock().unwrap() = read(SESSIONS_KEY).and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+    *LANES.lock().unwrap() = read(LANES_KEY).and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+}
+
+/// The player's whole inventory, as their entity data has it.
+fn inventory_of(srv: &dyn yog_api::Server, player: &str) -> Option<String> {
+    let uuid = srv.player_info(player)?.uuid;
+    let nbt = srv.entity_get_nbt(&uuid)?;
+    let r = crate::nbt::top_value(&nbt, INVENTORY_TAG)?;
+    Some(nbt[r].to_string())
+}
+
+/// Gives the player back `inventory` (from [`inventory_of`]) — everything
+/// else about them as it is now.
+fn restore_inventory(srv: &dyn yog_api::Server, player: &str, inventory: &str) -> bool {
+    let Some(uuid) = srv.player_info(player).map(|i| i.uuid) else { return false };
+    let Some(now) = srv.entity_get_nbt(&uuid) else { return false };
+    srv.entity_set_nbt(&uuid, &crate::nbt::with_top_value(&now, INVENTORY_TAG, inventory))
+}
+
+/// Removes whatever isn't a player from a field (dropped items, mobs, …).
+fn clear_entities(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i32) {
+    let (lo, hi) = interior(origin_x, origin_z, size);
+    let min = ((lo.x - 2) as f64, (lo.y - 2) as f64, (lo.z - 2) as f64);
+    let max = ((hi.x + 3) as f64, (hi.y + 3) as f64, (hi.z + 3) as f64);
+    for uuid in srv.entities_in_box(DIMENSION_ID, min, max) {
+        if srv.entity_info(&uuid).is_some_and(|e| e.type_id != "minecraft:player") {
+            srv.entity_kill(&uuid);
+        }
+    }
 }
 
 /// The cube's corners (inside the shell).
@@ -218,9 +298,13 @@ pub fn enter(
     }
 
     let (cx, cz) = ((origin_x + size as i32 / 2) as f64, (origin_z + size as i32 / 2) as f64);
+    // What they come in with, theirs again on the way out.
+    let inventory = inventory_of(srv, player_name);
+    let gamemode = srv.player_info(player_name).map_or_else(|| "survival".to_string(), |i| i.gamemode);
     if !srv.teleport_to_dim(player_name, DIMENSION_ID, cx, (EDITOR_Y + 1) as f64, cz) {
         return Err("§cCouldn't enter the editor dimension — see the game log.".into());
     }
+    srv.set_gamemode(player_name, "creative");
     SESSIONS.lock().unwrap().insert(
         player_name.to_string(),
         EditorSession {
@@ -232,8 +316,11 @@ pub fn enter(
             source,
             return_dim: return_dim.to_string(),
             return_pos,
+            inventory,
+            gamemode,
         },
     );
+    persist(srv);
     srv.send_actionbar(
         player_name,
         &format!(
@@ -253,13 +340,9 @@ pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
     let Some(session) = SESSIONS.lock().unwrap().remove(player_name) else {
         return "§cYou are not editing a VLSI circuit right now.".into();
     };
-    match finish(srv, player_name, session, false) {
-        Ok(message) => message,
-        Err((session, message)) => {
-            SESSIONS.lock().unwrap().insert(player_name.to_string(), session);
-            message
-        }
-    }
+    let message = finish(srv, player_name, session);
+    persist(srv);
+    message
 }
 
 /// Reads the design off the player's field.
@@ -303,21 +386,24 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
     }
 }
 
-/// Saves the session's design and ends it: back onto its Blueprint, onto a
-/// new one in the player's inventory, or — `leaving`, when neither works —
-/// dropped as a Blueprint where they'll come back to. Then the field goes
-/// and the player goes back. Gives the session back if it can't be saved.
-fn finish(
-    srv: &dyn yog_api::Server,
-    player_name: &str,
-    session: EditorSession,
-    leaving: bool,
-) -> Result<String, (EditorSession, String)> {
+/// Saves the session's design and ends it: the player's inventory and game
+/// mode back, the design onto its Blueprint, onto a new one in their
+/// inventory, or — when neither works — dropped as a Blueprint where they
+/// go back to. Then the field goes, and they go back.
+fn finish(srv: &dyn yog_api::Server, player_name: &str, session: EditorSession) -> String {
     let blueprint = scan(srv, &session);
     let summary = format!("{} ports, {} blocks", blueprint.circuit.ports.len(), blueprint.circuit.blocks.len());
     let nbt = blueprint.to_nbt();
     let src = &session.source;
     let (rx, ry, rz) = session.return_pos;
+
+    // Their own things back before a new Blueprint goes among them.
+    if let Some(inventory) = &session.inventory
+        && !restore_inventory(srv, player_name, inventory)
+    {
+        yog_api::warn!("[yog-vlsi] couldn't give {player_name} back their inventory");
+    }
+    srv.set_gamemode(player_name, &session.gamemode);
 
     let still_there = srv
         .get_inventory_slot(&src.dimension, src.pos, src.slot)
@@ -329,20 +415,18 @@ fn finish(
         let free = (0..PLAYER_SLOTS).find(|s| !taken.contains(s));
         if free.is_some_and(|slot| srv.set_slot_item(player_name, slot, Items::BLUEPRINT, 1, &nbt)) {
             format!("§aSaved '{}' to a new Blueprint in your inventory — {summary}.", blueprint.name)
-        } else if leaving {
-            srv.spawn_item(&session.return_dim, (rx, ry, rz), (0.0, 0.0, 0.0), Items::BLUEPRINT, 1, &nbt);
-            format!("§eSaved '{}' to a Blueprint dropped where you left — {summary}.", blueprint.name)
         } else {
-            return Err((
-                session,
-                "§cNowhere to write the design: put its Blueprint back in the workbench or free an inventory slot, then /vlsi save again.".into(),
-            ));
+            srv.spawn_item(&session.return_dim, (rx, ry, rz), (0.0, 0.0, 0.0), Items::BLUEPRINT, 1, &nbt);
+            format!("§eSaved '{}' to a Blueprint dropped where you're back — {summary}.", blueprint.name)
         }
     };
 
+    // The field goes — and what its blocks dropped going — while it's
+    // still loaded around the player.
     remove_room(srv, session.origin_x, session.origin_z, session.size as i32);
+    clear_entities(srv, session.origin_x, session.origin_z, session.size as i32);
     srv.teleport_to_dim(player_name, &session.return_dim, rx, ry, rz);
-    Ok(message)
+    message
 }
 
 /// Removes a field: what's in it, and its shell.
@@ -357,12 +441,9 @@ fn remove_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i3
     board::forget_in(DIMENSION_ID, lo, hi);
 }
 
-/// Saves everyone's design and ends every session (the server stops).
-pub fn finish_all(srv: &dyn yog_api::Server) {
-    let sessions: Vec<(String, EditorSession)> = SESSIONS.lock().unwrap().drain().collect();
-    for (player, session) in sessions {
-        let _ = finish(srv, &player, session, true);
-    }
+/// Keeps every session for the next run (the server stops).
+pub fn save_sessions(srv: &dyn yog_api::Server) {
+    persist(srv);
 }
 
 /// Blocks that break without the block they stand on or hang from.
@@ -387,15 +468,6 @@ pub fn register(registry: &mut Registry) {
             return None;
         }
         Some(save(srv, &ctx.source))
-    });
-
-    // Leaving the game: the design is saved and the field goes.
-    // (Whichever phase comes first: the session goes with it.)
-    registry.on_player_leave(|e, _phase, srv| {
-        if let Some(session) = SESSIONS.lock().unwrap().remove(&e.player_name) {
-            let _ = finish(srv, &e.player_name, session, true);
-        }
-        true
     });
 
     // Nobody stays in the editor dimension without a session (a warp, a
