@@ -1,147 +1,155 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The VLSI Workbench's inventory screen. View model: WorkbenchVm in workbench_ui.rs. -->
+<!-- The VLSI Workbench's inventory screen. View model: WorkbenchVm in workbench.rs. -->
 <Screen id="yog-vlsi:workbench"
         width="276"
-        height="214"
+        height="222"
         anchor="center"
-        bg="sprite:panel"
+        theme="minecraft:vanilla"
         x:ViewModel="WorkbenchVm">
     <Screen.Resources>
-        <Style x:Key="Header" target="Label" color="#FF404040" shadow="false" no_wrap="true" />
-        <Style x:Key="Count" target="Label" w="14" color="#FF404040" shadow="false" font_scale="0.7" no_wrap="true" />
+        <Style x:Key="Header" target="Label" no_wrap="true" />
+        <Style x:Key="Count" target="Label" w="22" font_scale="0.7" no_wrap="true" />
         <Style x:Key="Vial" target="Column" w="6" h="18" padding="1" gap="0" bg="sprite:slot" />
-        <Style x:Key="Action"
-               target="Button"
-               w="100%"
-               h="20"
-               bg="sprite:button"
+        <Style x:Key="Fill" target="Column" w="100%" min_h="0" />
+        <Style x:Key="Action" target="Button" w="100%" h="20" />
+        <Style x:Key="Info"
+               target="Label"
+               w="9"
+               h="9"
+               align="center"
+               text="i"
                color="#FFFFFF"
-               hover:bg="sprite:button_hover"
-               disabled:bg="sprite:button_disabled"
-               disabled:color="#FFA0A0A0" />
+               bg="#FF4A70B0"
+               shadow="false"
+               no_wrap="true" />
     </Screen.Resources>
-    <Grid w="100%" h="100%" rows="18,*,Auto">
-        <Row padding="0 8" align="center">
-            <Label style="@Header" text="@Strings.screen.workbench.title" />
-        </Row>
-        <Row Grid.Row="1" padding="4 8" gap="8">
-            <Column w="96" gap="2">
+    <Grid w="100%" h="100%" rows="16,*,Auto" padding="4 8 8 8">
+        <Label style="@Header" text="@Strings.screen.workbench.title" />
+        <Row Grid.Row="1" gap="8">
+            <!-- Chip out, resources in. -->
+            <Column w="104" gap="2">
                 <Label style="@Header" text="@Strings.screen.workbench.chip" />
                 <Slot index="0" accepts="yog-vlsi:chip_wood yog-vlsi:chip_stone yog-vlsi:chip_iron yog-vlsi:chip_gold yog-vlsi:chip_diamond yog-vlsi:chip_netherite" />
                 <Label style="@Header" text="@Strings.screen.workbench.resources" />
                 <Row gap="4">
                     <Column gap="2">
-                        <Row gap="2" align="center">
-                            <Slot index="1" accepts="minecraft:redstone" />
+                        <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Redstone)}">
+                            <Slot index="1" accepts="minecraft:redstone minecraft:redstone_block" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column w="100%" h="{x:Bind vial(1)}" bg="@Colors.vial.redstone" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Redstone)}" bg="@Colors.vial.redstone" />
                             </Column>
-                            <Label style="@Count" text="{x:Bind count(1)}" />
+                            <Label style="@Count" text="{x:Bind amount(Resource::Redstone)}" />
                         </Row>
-                        <Row gap="2" align="center">
-                            <Slot index="2" accepts="minecraft:iron_ingot" />
+                        <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Iron)}">
+                            <Slot index="2" accepts="minecraft:iron_ingot minecraft:iron_block" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column w="100%" h="{x:Bind vial(2)}" bg="@Colors.vial.iron" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Iron)}" bg="@Colors.vial.iron" />
                             </Column>
-                            <Label style="@Count" text="{x:Bind count(2)}" />
+                            <Label style="@Count" text="{x:Bind amount(Resource::Iron)}" />
                         </Row>
-                        <Row gap="2" align="center">
-                            <Slot index="3" accepts="minecraft:gold_ingot" />
+                        <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Gold)}">
+                            <Slot index="3" accepts="minecraft:gold_ingot minecraft:gold_block" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column w="100%" h="{x:Bind vial(3)}" bg="@Colors.vial.gold" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Gold)}" bg="@Colors.vial.gold" />
                             </Column>
-                            <Label style="@Count" text="{x:Bind count(3)}" />
+                            <Label style="@Count" text="{x:Bind amount(Resource::Gold)}" />
                         </Row>
                     </Column>
                     <Column gap="2">
-                        <Row gap="2" align="center">
-                            <Slot index="4" accepts="minecraft:quartz" />
+                        <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Quartz)}">
+                            <Slot index="4" accepts="minecraft:quartz minecraft:quartz_block" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column w="100%" h="{x:Bind vial(4)}" bg="@Colors.vial.quartz" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Quartz)}" bg="@Colors.vial.quartz" />
                             </Column>
-                            <Label style="@Count" text="{x:Bind count(4)}" />
+                            <Label style="@Count" text="{x:Bind amount(Resource::Quartz)}" />
                         </Row>
-                        <Row gap="2" align="center">
+                        <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Wood)}">
                             <Slot index="5" accepts="minecraft:oak_log" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column w="100%" h="{x:Bind vial(5)}" bg="@Colors.vial.wood" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Wood)}" bg="@Colors.vial.wood" />
                             </Column>
-                            <Label style="@Count" text="{x:Bind count(5)}" />
+                            <Label style="@Count" text="{x:Bind amount(Resource::Wood)}" />
                         </Row>
-                        <Row gap="2" align="center">
+                        <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Stone)}">
                             <Slot index="6" accepts="minecraft:cobblestone" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column w="100%" h="{x:Bind vial(6)}" bg="@Colors.vial.cobblestone" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Stone)}" bg="@Colors.vial.cobblestone" />
                             </Column>
-                            <Label style="@Count" text="{x:Bind count(6)}" />
+                            <Label style="@Count" text="{x:Bind amount(Resource::Stone)}" />
                         </Row>
                     </Column>
                 </Row>
             </Column>
+
+            <!-- The blueprint and what's on it. -->
             <Column flex="1" h="100%" gap="2">
-                <Label style="@Header" text="@Strings.screen.workbench.designs" />
-                <ListView x:Name="designs"
-                          flex="1"
-                          w="100%"
-                          gap="1"
-                          padding="1"
-                          bg="sprite:slot"
-                          items="{x:Bind designs}"
-                          key="{x:Bind id}"
-                          selected="{x:Bind selected_id(), BindBack=select}"
-                          item_height="12">
-                    <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="DesignMeta">
-                            <Row w="100%"
-                                 h="12"
-                                 padding="0 3"
-                                 align="center"
-                                 hover:bg="#40FFFFFF"
-                                 selected:bg="#FF555555">
-                                <Label w="100%"
-                                       text="{x:Bind Strings::screen_workbench_design_row(name, tier.name())}"
-                                       color="#FFFFFF"
-                                       selected:color="#FFFFFFA0"
-                                       ellipsis="true" />
-                            </Row>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                    <ListView.Empty>
-                        <Label w="100%" text="@Strings.screen.workbench.no_designs" color="#FF373737" shadow="false" />
-                    </ListView.Empty>
-                </ListView>
-                <Label x:Name="design_info"
-                       text="{x:Bind design_info()}"
-                       color="#FF404040"
-                       shadow="false"
-                       font_scale="0.7"
-                       no_wrap="true" />
+                <Row gap="4" align="center">
+                    <Label style="@Header" text="@Strings.screen.workbench.blueprint" />
+                    <Label x:Name="help" style="@Info" tooltip="@Strings.screen.workbench.blueprint_help" />
+                </Row>
+                <Row gap="4" align="center">
+                    <Slot index="7" accepts="yog-vlsi:blueprint" />
+                    <Label x:Name="no_blueprint"
+                           text="@Strings.screen.workbench.no_blueprint"
+                           color="#FF707070"
+                           visible="{x:Bind no_blueprint()}" />
+                    <Label x:Name="design_name"
+                           flex="1"
+                           text="{x:Bind design_name()}"
+                           ellipsis="true"
+                           visible="{x:Bind has_design()}" />
+                </Row>
+
+                <!-- A blank blueprint: name and tier, then Create. -->
+                <Column gap="3" visible="{x:Bind blank()}">
+                    <TextBox x:Name="name"
+                             w="100%"
+                             h="14"
+                             max_length="32"
+                             text="{x:Bind name, Mode=TwoWay}"
+                             placeholder="@Strings.screen.workbench.name_placeholder" />
+                    <Button x:Name="tier" style="@Action" text="{x:Bind tier_text()}" command="{x:Bind next_tier()}" />
+                    <Button x:Name="create"
+                            style="@Action"
+                            text="@Strings.screen.workbench.create"
+                            enabled="{x:Bind can_create()}"
+                            command="{x:Bind create()}" />
+                </Column>
+
+                <!-- A design: what it is and what it costs. -->
+                <Column gap="1" visible="{x:Bind has_design()}">
+                    <Label x:Name="design_tier" text="{x:Bind design_tier()}" font_scale="0.7" no_wrap="true" />
+                    <Label style="@Header" margin="3 0 0 0" text="@Strings.screen.workbench.cost" />
+                    <ItemsControl x:Name="cost" w="100%" gap="1" items="{x:Bind cost_rows()}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="CostRow">
+                                <Label w="100%" text="{x:Bind text}" color="{x:Bind color}" font_scale="0.7" no_wrap="true" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Column>
             </Column>
         </Row>
-        <Row Grid.Row="2" padding="0 8 8 8" gap="8">
+
+        <Row Grid.Row="2" margin="4 0 0 0" gap="8">
             <PlayerInventory />
             <Column flex="1" gap="4">
                 <Button x:Name="edit"
                         style="@Action"
                         text="@Strings.screen.workbench.edit"
-                        enabled="{x:Bind has_selection()}"
+                        enabled="{x:Bind has_design()}"
                         command="{x:Bind edit()}" />
                 <Button x:Name="fabricate"
                         style="@Action"
                         text="@Strings.screen.workbench.fabricate"
-                        enabled="{x:Bind has_selection()}"
+                        enabled="{x:Bind can_fabricate()}"
                         command="{x:Bind fabricate()}" />
-                <Button x:Name="export"
-                        style="@Action"
-                        text="@Strings.screen.workbench.export"
-                        enabled="{x:Bind has_selection()}"
-                        command="{x:Bind export_blueprint()}" />
             </Column>
         </Row>
     </Grid>
