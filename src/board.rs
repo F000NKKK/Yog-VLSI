@@ -640,4 +640,22 @@ mod tests {
         b.chips[max as usize] = Some(c);
         assert!(connect(&mut b, Pin::new(Node::Chip(max), "Z"), Pin::new(Node::Chip(0), "A")).is_err());
     }
+
+    #[test]
+    fn a_bus_has_as_many_channels_as_the_tier_sees_each_both_ways() {
+        let mut b = Board::new(Tier::Wood);
+        let ch = |n: &str| Pin::new(Node::Bus(2), n);
+        assert!(!b.is_source(&ch("1")), "no digital cable on E yet");
+        b.buses[2] = true;
+        assert_eq!(b.bus_channels(), 32, "wood: 8 × 4 colours");
+        assert!(b.is_source(&ch("1")) && b.is_sink(&ch("1")));
+        assert!(b.is_sink(&ch("32")) && !b.is_sink(&ch("33")) && !b.is_source(&ch("0")));
+        assert_eq!(b.bus_channel(2, "32"), Some(31), "pins count from 1, Pipes' channels from 0");
+        assert_eq!(b.bus_rows(2), BUS_ROWS);
+        b.apply(Request::BusRows { alu: AluId { dimension: String::new(), x: 0, y: 0, z: 0 }, side: 2, rows: 500 }).unwrap();
+        assert_eq!(b.bus_rows(2), 32, "no more rows than channels");
+        // An In side straight onto a bus channel: a bus takes the sides' signals.
+        let alu = AluId { dimension: String::new(), x: 0, y: 0, z: 0 };
+        assert!(b.apply(Request::Connect { alu, from: Pin::new(Node::In, "N"), to: ch("5") }).is_ok());
+    }
 }
