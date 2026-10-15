@@ -5,7 +5,7 @@ from cpu import OPS
 class Emu:
     def __init__(self, words):
         self.w = words; self.pc = 0; self.a = 0; self.x = 0; self.c = 0
-        self.m = [0] * 32; self.px = [0] * 64; self.r = 0; self.btn = 0
+        self.m = [0] * 32; self.px = [0] * 64; self.r = 0; self.btn = 0; self.d = 0
 
     def step(self):
         word = self.w[self.pc] if self.pc < len(self.w) else 0
@@ -30,7 +30,16 @@ class Emu:
         elif op == "JZ" and a == 0: pc = k
         elif op == "JNZ" and a != 0: pc = k
         elif op == "JC" and self.c: pc = k
-        elif op == "IN": a, self.btn = self.btn, 0
+        elif op == "IN":
+            b = self.btn; self.btn = 0
+            code = 0 if b & 1 else 1 if b & 2 else 2 if b & 4 else 3 if b & 8 else None
+            if code is not None and not (code >> 1 == self.d >> 1 and code != self.d):
+                self.d = code
+            a = self.d
+        elif op == "SETD": self.d = a & 3
+        elif op in ("MINC", "MDEC"):
+            t = (a + (1 if op == "MINC" else 255)) & 255
+            a = (a & ~k & 255) | (t & k)
         elif op == "RND": a = self.r
         elif op == "PLOT": self.px[a & 63] = a >> 6 & 1
         elif op == "TEST": a = self.px[a & 63]

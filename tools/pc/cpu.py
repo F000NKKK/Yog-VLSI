@@ -25,7 +25,8 @@ OPS = [
     "JZ",    # if A == 0
     "JNZ",   # if A != 0
     "JC",    # if C
-    "IN",    # A = the buttons pressed since the last IN (bit 0 up, 1 down, 2 left, 3 right)
+    "IN",    # A = the direction (0 up, 1 down, 2 left, 3 right): the button pressed
+             # since the last IN (up first), unless it's straight back; kept as the direction
     "RND",   # A = an 8-bit LFSR, stepping every clock
     "PLOT",  # pixel A[5:0] = A[6]
     "TEST",  # A = pixel A[5:0]
@@ -34,6 +35,9 @@ OPS = [
     "STX",   # M[X] = A
     "TXA",   # A = X
     "SUBI",  # A = A - k, C = no borrow
+    "SETD",  # the direction = A[1:0]
+    "MINC",  # A = A + 1 in the bits of k, the rest kept (wraps within them)
+    "MDEC",  # A = A - 1 in the bits of k, the rest kept
 ]
 OP = {n: i for i, n in enumerate(OPS)}
 RAM_BYTES = 32
@@ -94,13 +98,28 @@ def build(program, debug=True):
         d = n.DFF(n.OR(b, n.AND(q, not_in)), clk)
         n.alias(q, d)
         pressed.append(d)
+    # The direction: the first button pressed (up, down, left, right), a
+    # code 0–3 — unless it's the opposite of the direction now (the pairs
+    # differ in bit 0 only), then the direction stays.
+    up, down, left, right = pressed
+    nu = n.NOT(up)
+    c0 = n.AND(nu, n.OR(down, n.AND(n.NOT(left), right)))
+    c1 = n.AND(nu, n.AND(n.NOT(down), n.OR(left, right)))
+    D = [n.sig(), n.sig()]
+    back = n.AND(n.NOT(n.XOR(c1, D[1])), n.XOR(c0, D[0]))
+    take = n.AND(n.any(pressed), n.NOT(back))
+    direction = n.mux_word(take, D, [c0, c1])
 
     # ── ALU ───────────────────────────────────────────────────────────────
     sub = n.OR(op["SUB"], op["SUBI"])
     imm = n.OR(op["ADDI"], op["SUBI"])
+    step = n.OR(op["MINC"], op["MDEC"])
     operand = n.mux_word(imm, M, k)
+    # MINC adds 1, MDEC 255 (−1): an operand of their own.
+    operand = n.mux_word(step, operand, [n.ONE] + [op["MDEC"]] * 7)
     operand = [n.XOR(b, sub) for b in operand]
     total, carry = n.add(A, operand, sub)
+    stepped = [n.MUX(kb, ab, tb) for kb, ab, tb in zip(k, A, total)]
 
     z = n.NOT(n.any(A))
     arith = n.any([op["ADD"], op["ADDI"], op["SUB"], op["SUBI"]])
@@ -108,15 +127,16 @@ def build(program, debug=True):
         (op["LDI"], k),
         (n.OR(op["LD"], op["LDX"]), M),
         (arith, total),
+        (step, stepped),
         (op["ANDI"], [n.AND(a, b) for a, b in zip(A, k)]),
         (op["ORI"], [n.OR(a, b) for a, b in zip(A, k)]),
         (op["XORI"], [n.XOR(a, b) for a, b in zip(A, k)]),
-        (op["IN"], pressed + [n.ZERO] * 4),
+        (op["IN"], direction + [n.ZERO] * 6),
         (op["RND"], R),
         (op["TEST"], [test] + [n.ZERO] * 7),
         (op["TXA"], X),
     ], 8)
-    load_a = n.any([op[o] for o in ["LDI", "LD", "LDX", "ADD", "ADDI", "SUB", "SUBI", "ANDI", "ORI", "XORI", "IN", "RND", "TEST", "TXA"]])
+    load_a = n.any([op[o] for o in ["LDI", "LD", "LDX", "ADD", "ADDI", "SUB", "SUBI", "ANDI", "ORI", "XORI", "IN", "RND", "TEST", "TXA", "MINC", "MDEC"]])
 
     # ── Registers ─────────────────────────────────────────────────────────
     new = n.register(result, load_a, clk)
@@ -129,6 +149,10 @@ def build(program, debug=True):
     X[:] = new
     c_new = n.register([carry], arith, clk)[0]
     n.alias(C, c_new)
+    # The direction register: an IN keeps what it gave, SETD what A says.
+    new_d = n.register(n.mux_word(op["SETD"], direction, A[:2]), n.OR(op["IN"], op["SETD"]), clk)
+    for ph, q in zip(D, new_d):
+        n.alias(ph, q)
 
     jump = n.any([op["JMP"], n.AND(op["JZ"], z), n.AND(op["JNZ"], n.NOT(z)), n.AND(op["JC"], c_new)])
     next_pc = n.mux_word(jump, n.inc(PC), k)
