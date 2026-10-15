@@ -520,21 +520,21 @@ fn flow_layout(
     // and down again: fewer wires cross.
     for sweep in 0..3 {
         if sweep % 2 == 0 {
-            for d in 0..=max_depth {
+            for (d, column) in columns.iter_mut().enumerate() {
                 let snapshot = at.clone();
                 // The last time round, both ways: between what feeds it and what it feeds.
                 let both = |slot| match (fed_from(&snapshot, slot), feeds(&snapshot, slot)) {
                     (Some(a), Some(b)) if sweep > 0 => Some((a + b) / 2.0),
                     (a, b) => a.or(b),
                 };
-                sort_by(&mut columns[d], &both);
-                stack(&mut at, &columns[d], x_of(d));
+                sort_by(column, &both);
+                stack(&mut at, column, x_of(d));
             }
         } else {
-            for d in (0..max_depth).rev() {
+            for (d, column) in columns.iter_mut().enumerate().take(max_depth).rev() {
                 let snapshot = at.clone();
-                sort_by(&mut columns[d], &|slot| feeds(&snapshot, slot));
-                stack(&mut at, &columns[d], x_of(d));
+                sort_by(column, &|slot| feeds(&snapshot, slot));
+                stack(&mut at, column, x_of(d));
             }
         }
     }
