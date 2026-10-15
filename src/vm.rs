@@ -62,6 +62,9 @@ use serde::{Deserialize, Serialize};
 
 /// A map keyed by cell index, hashed fast.
 type CellMap<V> = HashMap<u32, V, std::hash::BuildHasherDefault<Fnv>>;
+/// Any other hot map, hashed fast.
+type FastMap<K, V> = HashMap<K, V, std::hash::BuildHasherDefault<Fnv>>;
+type FastSet<K> = HashSet<K, std::hash::BuildHasherDefault<Fnv>>;
 
 /// A fast hasher for fingerprints (FNV-1a): not for maps an adversary fills.
 #[derive(Default)]
@@ -397,6 +400,9 @@ pub struct RedstoneVM {
     solids: Vec<u32>,
     readers: Vec<u32>,
     movers: Vec<u32>,
+    /// What decides its own next output (torches, repeaters, …) and analog cables.
+    components: Vec<u32>,
+    cables: Vec<u32>,
     pub tick: u64,
     /// The items of every container, by cell: (item, count) per slot.
     inventories: HashMap<u32, Vec<(u16, u8)>>,
@@ -454,6 +460,8 @@ impl RedstoneVM {
             solids: Vec::new(),
             readers: Vec::new(),
             movers: Vec::new(),
+            components: Vec::new(),
+            cables: Vec::new(),
             tick: 0,
             inventories: HashMap::new(),
             nested: CellMap::default(),
@@ -575,8 +583,20 @@ impl RedstoneVM {
             !air && cell.is_solid(),
             !air && matches!(cell.block, BlockType::RedstoneLamp | BlockType::Port(PortMode::Output | PortMode::Bidirectional)),
             !air && matches!(cell.block, BlockType::Hopper { .. } | BlockType::Dropper { .. }),
+            !air && matches!(
+                cell.block,
+                BlockType::RedstoneTorch { .. }
+                    | BlockType::Repeater { .. }
+                    | BlockType::Comparator { .. }
+                    | BlockType::Observer { .. }
+                    | BlockType::Piston { .. }
+                    | BlockType::Dropper { .. }
+            ),
+            cell.block == BlockType::Cable,
         ];
-        for (list, want) in [&mut self.wires, &mut self.solids, &mut self.readers, &mut self.movers].into_iter().zip(kinds) {
+        for (list, want) in
+            [&mut self.wires, &mut self.solids, &mut self.readers, &mut self.movers, &mut self.components, &mut self.cables].into_iter().zip(kinds)
+        {
             match (list.binary_search(&i), want) {
                 (Ok(at), false) => {
                     list.remove(at);
@@ -985,10 +1005,15 @@ impl RedstoneVM {
     /// 4. Lamps and output ports read what's around them.
     fn read_power(&mut self) {
         self.ensure_buses();
-        let fed = self.buses.as_ref().map(|b| &b.fed);
-        let mut todo: Vec<u32> = self.readers.iter().copied().filter(|i| !fed.is_some_and(|f| f.contains(i))).collect();
-        todo.extend(std::mem::take(&mut self.dirty_readers));
-        for i in todo {
+        let n = self.buses.as_ref().map_or(0, |b| b.every_step.len());
+        for k in 0..n + self.dirty_readers.len() {
+            let i = match self.buses.as_ref().and_then(|b| b.every_step.get(k)) {
+                Some(&i) => i,
+                None => match self.dirty_readers.pop_first() {
+                    Some(i) => i,
+                    None => break,
+                },
+            };
             let cell = *self.get(i);
             let level = match cell.block {
                 BlockType::RedstoneLamp => {
@@ -1021,10 +1046,10 @@ impl RedstoneVM {
     /// — to the ALUs' faces on it and out of its output ports. Worked out
     /// from its sources each step: a source gone, the level goes.
     fn cable_networks(&mut self) {
-        let mut seen: HashSet<u32> = HashSet::new();
+        let mut seen: FastSet<u32> = FastSet::default();
         let mut changes: Vec<(u32, u8)> = Vec::new();
-        for k in 0..self.logic.len() {
-            let start = self.logic[k];
+        for k in 0..self.cables.len() {
+            let start = self.cables[k];
             if self.get(start).block != BlockType::Cable || !seen.insert(start) {
                 continue;
             }
@@ -1069,8 +1094,8 @@ impl RedstoneVM {
             }
             let run = b.levels.len();
             b.levels.push(Vec::new());
-            b.drivers.push(HashMap::new());
-            b.readers.push(HashMap::new());
+            b.drivers.push(FastMap::default());
+            b.readers.push(FastMap::default());
             b.run.insert(start, run);
             let mut queue = VecDeque::from([start]);
             while let Some(i) = queue.pop_front() {
@@ -1113,6 +1138,7 @@ impl RedstoneVM {
         b.always = self.nested.iter().filter(|&(&i, a)| a.reads_faces && !calm(self, i)).map(|(&i, _)| i).collect();
         b.always.sort_unstable();
         b.fed = self.readers.iter().copied().filter(|&i| calm(self, i)).collect();
+        b.every_step = self.readers.iter().copied().filter(|i| !b.fed.contains(i)).collect();
         self.dirty.extend(self.nested.keys().copied());
         self.dirty_readers.extend(b.fed.iter().copied());
         self.buses = Some(b);
@@ -1157,7 +1183,7 @@ impl RedstoneVM {
         self.cable_networks();
         let mut pistons = Vec::new();
         let changes: Vec<(u32, Cell)> = self
-            .logic
+            .components
             .iter()
             .filter_map(|&i| {
                 let cell = *self.get(i);
@@ -1603,20 +1629,22 @@ impl NestedChip {
 #[derive(Default, Clone)]
 struct Buses {
     /// Each bus cell's run.
-    run: HashMap<u32, usize>,
+    run: CellMap<usize>,
     /// Each ALU's faces' runs.
-    alu_runs: HashMap<u32, [Option<usize>; 6]>,
+    alu_runs: CellMap<[Option<usize>; 6]>,
     /// Each run's channels' levels.
     levels: Vec<Vec<u8>>,
     /// Each run's channels' drivers (ALU, its face) and readers.
-    drivers: Vec<HashMap<u16, Vec<(u32, u8)>>>,
-    readers: Vec<HashMap<u16, Vec<u32>>>,
+    drivers: Vec<FastMap<u16, Vec<(u32, u8)>>>,
+    readers: Vec<FastMap<u16, Vec<u32>>>,
     /// ALUs reading their faces with redstone beside them: run every step.
     /// (Those with only ports and ALUs beside them run when those change.)
     always: Vec<u32>,
     /// Lamps and output ports with only ALUs, ports and air beside them:
     /// looked at when those change, not every step.
-    fed: std::collections::HashSet<u32>,
+    fed: FastSet<u32>,
+    /// The other readers, looked at every step.
+    every_step: Vec<u32>,
 }
 
 /// An ALU inside a circuit: its chips and the wires of its board, run each
@@ -1626,7 +1654,7 @@ pub struct NestedAlu {
     pub chips: Vec<NestedChip>,
     pub wires: Vec<(NestedPin, NestedPin)>,
     /// What it drives onto the buses on its faces: (face, channel) → level.
-    pub drives: HashMap<(u8, u16), u8>,
+    pub drives: FastMap<(u8, u16), u8>,
     /// The bus channels its board reads, (face, channel).
     reads: Vec<(u8, u16)>,
     /// Every pin its board drives.
@@ -1719,7 +1747,7 @@ impl NestedAlu {
         NestedAlu {
             chips,
             wires,
-            drives: HashMap::new(),
+            drives: FastMap::default(),
             reads,
             sinks,
             reads_faces,
