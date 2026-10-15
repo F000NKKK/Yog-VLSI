@@ -1,8 +1,9 @@
 name OR
+// A repeater before Q: it gives a full 15, as every gate here does.
 port a A in
 port b B in
 port q Q out
 layer
-a-..
-.--q
-b-..
+a-...
+.-→q.
+b-...
