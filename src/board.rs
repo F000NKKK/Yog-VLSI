@@ -255,6 +255,11 @@ impl Board {
 
     /// Which sides a digital cable reaches now.
     fn sync_cables(&mut self, srv: &dyn yog_api::Server, alu: &AluId) {
+        // The first look: cables written into the world while the server was
+        // down are joined up.
+        if !self.cables_known {
+            cables::refresh_around(srv, &alu.dimension, alu.pos());
+        }
         for (i, side) in SIDES.iter().enumerate() {
             self.cables[i] = cables::cable_at(srv, &alu.dimension, cables::beside(alu.xyz(), side));
         }

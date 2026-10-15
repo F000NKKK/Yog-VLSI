@@ -8,6 +8,9 @@
 //!   channels, each a level 0–15 (the highest any ALU on it drives). An
 //!   ALU side a digital cable reaches is a bus node in its graph.
 //!
+//! A Redstone Port with a channel joins that channel of a digital cable's
+//! bus to vanilla redstone instead (an 8×8 screen: 64 ports, one bus).
+//!
 //! An ALU reads and drives each of its six sides through the cable block
 //! next to it, so each side is its own connection.
 
@@ -37,6 +40,24 @@ pub struct RedstonePort {
     /// redstone it receives goes into the cable.
     pub output: bool,
     pub name: String,
+    /// A bus channel (from 1): it joins that channel of a digital cable;
+    /// 0, an analog cable.
+    #[serde(default)]
+    pub channel: u16,
+}
+
+impl RedstonePort {
+    fn new() -> Self {
+        RedstonePort { output: false, name: String::new(), channel: 0 }
+    }
+
+    /// The capability and channel it's on.
+    fn link(&self) -> (&'static str, u8) {
+        match self.channel {
+            0 => (ANALOG, SIDE_CHANNEL),
+            c => (DIGITAL, (c.min(BUS_CHANNELS) - 1) as u8),
+        }
+    }
 }
 
 /// (dimension, x, y, z) of a block.
@@ -46,6 +67,9 @@ pub type Key = (String, i32, i32, i32);
 static PORTS: LazyLock<Mutex<HashMap<Key, RedstonePort>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// A cable was placed or broken: the ALUs look at their sides again.
 static CABLES_CHANGED: AtomicBool = AtomicBool::new(false);
+/// Ports Yog Pipes was told about since the server started: one written
+/// into the world while it was down is joined to its cables by the first look.
+static PORTS_SEEN: LazyLock<Mutex<std::collections::HashSet<Key>>> = LazyLock::new(Default::default);
 /// Ticks since the ports were last looked for in the world.
 static PORT_TICKS: AtomicU64 = AtomicU64::new(0);
 /// How often: a port broken by hand goes at once (`register`); one blown
@@ -63,7 +87,7 @@ pub fn redstone_port(dimension: &str, pos: BlockPos) -> RedstonePort {
         .unwrap()
         .get(&(dimension.to_string(), pos.x, pos.y, pos.z))
         .cloned()
-        .unwrap_or(RedstonePort { output: false, name: String::new() })
+        .unwrap_or_else(RedstonePort::new)
 }
 
 /// A cable or Redstone Port the mod set or cleared itself (the editor's
@@ -87,7 +111,12 @@ pub fn set_redstone_port(srv: &dyn yog_api::Server, dimension: &str, pos: BlockP
     if !port.output {
         srv.set_redstone_output(dimension, pos, 0);
     }
-    PORTS.lock().unwrap().insert((dimension.to_string(), pos.x, pos.y, pos.z), port);
+    // Off the channel it was on.
+    let before = PORTS.lock().unwrap().insert((dimension.to_string(), pos.x, pos.y, pos.z), port);
+    if let Some(old) = before {
+        let (cap, ch) = old.link();
+        let _ = yog_pipes::emit(cap.to_string(), pipe_pos(dimension, pos), ch, 0);
+    }
 }
 
 /// The analog network a cable block is part of.
@@ -204,7 +233,7 @@ fn register_networks() {
         events: None,
         mechanic: Mechanic::Signal { channels, attenuation: 0 },
     };
-    let steps: [Result<(), String>; 5] = [
+    let steps: [Result<(), String>; 6] = [
         yog_pipes::register_capability(signal(ANALOG, "analog", 1)),
         yog_pipes::register_capability(signal(DIGITAL, "digital", BUS_CHANNELS)),
         yog_pipes::attach(AttachDef {
@@ -218,6 +247,20 @@ fn register_networks() {
             capability: DIGITAL.to_string(),
             groups: vec!["digital".into()],
             params: HashMap::new(),
+        }),
+        yog_pipes::register_endpoint(EndpointDef {
+            capability: DIGITAL.to_string(),
+            target: EndpointTarget::Block(Blocks::REDSTONE_PORT.to_string()),
+            kinds: Vec::new(),
+            can_insert: false,
+            can_extract: false,
+            listens_signals: true,
+            listens_messages: false,
+            groups: Vec::new(),
+            priority: 0,
+            max_packet: 0,
+            pressure: 0,
+            handler: None,
         }),
         yog_pipes::register_endpoint(EndpointDef {
             capability: ANALOG.to_string(),
@@ -241,10 +284,10 @@ fn register_networks() {
     }
 }
 
-/// The Redstone Ports, with whether they're outputs — every
-/// [`PORT_CHECK_EVERY`] ticks, those that still stand (`check`).
-fn ports(srv: &dyn yog_api::Server, check: bool) -> Vec<((String, i32, i32, i32), bool)> {
-    let all: Vec<(Key, bool)> = PORTS.lock().unwrap().iter().map(|(k, p)| (k.clone(), p.output)).collect();
+/// The Redstone Ports — every [`PORT_CHECK_EVERY`] ticks, those that still
+/// stand (`check`).
+fn ports(srv: &dyn yog_api::Server, check: bool) -> Vec<(Key, RedstonePort)> {
+    let all: Vec<(Key, RedstonePort)> = PORTS.lock().unwrap().iter().map(|(k, p)| (k.clone(), p.clone())).collect();
     if !check {
         return all;
     }
@@ -265,25 +308,38 @@ fn ports(srv: &dyn yog_api::Server, check: bool) -> Vec<((String, i32, i32, i32)
 /// tick is in its network for them this tick.
 pub fn tick_inputs(srv: &dyn yog_api::Server) {
     let check = PORT_TICKS.fetch_add(1, Ordering::Relaxed).is_multiple_of(PORT_CHECK_EVERY);
-    for ((dim, x, y, z), output) in ports(srv, check) {
+    for ((dim, x, y, z), port) in ports(srv, check) {
         let pos = BlockPos { x, y, z };
-        if output {
-            let _ = yog_pipes::emit(ANALOG.to_string(), pipe_pos(&dim, pos), SIDE_CHANNEL, 0);
-        } else {
-            let power = srv.redstone_power(&dim, pos).unwrap_or(0);
-            let _ = yog_pipes::emit(ANALOG.to_string(), pipe_pos(&dim, pos), SIDE_CHANNEL, power);
+        if PORTS_SEEN.lock().unwrap().insert((dim.clone(), x, y, z)) {
+            refresh_around(srv, &dim, pos);
         }
+        let (cap, ch) = port.link();
+        let power = if port.output { 0 } else { srv.redstone_power(&dim, pos).unwrap_or(0) };
+        let _ = yog_pipes::emit(cap.to_string(), pipe_pos(&dim, pos), ch, power);
     }
 }
 
 /// Cable levels out as redstone, after the ALUs stepped: what they put out
 /// this tick leaves this tick.
 pub fn tick_outputs(srv: &dyn yog_api::Server) {
-    for ((dim, x, y, z), output) in ports(srv, false) {
-        if output {
+    for ((dim, x, y, z), port) in ports(srv, false) {
+        if port.output {
             let pos = BlockPos { x, y, z };
-            let level = yog_pipes::level(ANALOG.to_string(), pipe_pos(&dim, pos), SIDE_CHANNEL).unwrap_or(0);
+            let (cap, ch) = port.link();
+            let level = yog_pipes::level(cap.to_string(), pipe_pos(&dim, pos), ch).unwrap_or(0);
             srv.set_redstone_output(&dim, pos, level);
+        }
+    }
+}
+
+/// Yog Pipes looks again at `pos` and the cables beside it — joining up
+/// what was written into the world while the server was down.
+pub fn refresh_around(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) {
+    let _ = yog_pipes::refresh(pipe_pos(dim, pos));
+    for side in ["N", "S", "E", "W", "U", "D"] {
+        let at = beside((pos.x, pos.y, pos.z), side);
+        if cable_at(srv, dim, at).is_some() {
+            let _ = yog_pipes::refresh(pipe_pos(dim, at));
         }
     }
 }
@@ -319,7 +375,7 @@ pub fn register(registry: &mut Registry) {
             PORTS
                 .lock()
                 .unwrap()
-                .insert((e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z), RedstonePort { output: false, name: String::new() });
+                .insert((e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z), RedstonePort::new());
         }
         if phase == EventPhase::Post && is_cable(&e.block_id) {
             CABLES_CHANGED.store(true, Ordering::Relaxed);
