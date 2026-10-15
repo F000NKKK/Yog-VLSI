@@ -63,7 +63,7 @@ impl Mod for YogVlsi {
             Some((Some(bp.name), vec![format!("§7{info}")]))
         });
         // A fabricated chip names its design and shows its tier, speed and ports.
-        for tier in tier::Tier::ALL {
+        for tier in content::Tier::ALL {
             registry.on_item_text(tier.chip(), |_, snbt| {
                 let meta = chip::ChipMeta::from_nbt(snbt)?;
                 let ports: Vec<String> = meta
