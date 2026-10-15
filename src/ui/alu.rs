@@ -73,6 +73,8 @@ const HEAD: f32 = 12.0;
 const SIDE_MIN_W: f32 = 40.0;
 const CHIP_W: f32 = 100.0;
 const GAP: f32 = 10.0;
+/// Room between the In/Out panels and the chips: the wires' curves.
+const SIDE_GAP: f32 = 24.0;
 /// A bus node's width and the height of the bar that pulls it open.
 const BUS_W: f32 = 64.0;
 const GRIP: f32 = 4.0;
@@ -277,8 +279,11 @@ fn layout(
     // The width laid out in: the box's (at zoom 1 — the default places
     // don't move as the view zooms), and at least room for a column of
     // chips between the panels.
+    // The chips' columns: spread across the box, closer when it's narrow.
     let columns = flow_depths(view).values().copied().max().map_or(1, |d| d + 1) as f32;
-    let room = w.max(in_w + out_w + columns * (CHIP_W + 2.0 * GAP) + 4.0);
+    let free = w - in_w - out_w - 4.0 - 2.0 * SIDE_GAP;
+    let pitch = if columns > 1.0 { ((free - CHIP_W) / (columns - 1.0)).clamp(CHIP_W + GAP, CHIP_W + 4.0 * GAP) } else { CHIP_W };
+    let room = w.max(in_w + out_w + 4.0 + 2.0 * SIDE_GAP + CHIP_W + (columns - 1.0) * pitch);
     for (node, default_x, pw) in [(Node::In, 2.0, in_w), (Node::Out, room - out_w - 2.0, out_w)] {
         let (x, y) = placed(node).unwrap_or((default_x, 2.0));
         let mut labels = Vec::new();
@@ -348,7 +353,7 @@ fn layout(
     // down the flow each is (what feeds a chip stands left of it), each
     // column in the order of where what feeds its chips is — wires run
     // left to right and cross little.
-    let auto = flow_layout(view, &placed, in_w + 2.0 + GAP, &|pin| {
+    let auto = flow_layout(view, &placed, in_w + 2.0 + SIDE_GAP, pitch, &|pin| {
         match pin.node {
             Node::In => view.sides.iter().position(|s| s.side == pin.name).map(|r| {
                 let (_, y) = placed(Node::In).unwrap_or((2.0, 2.0));
@@ -366,7 +371,7 @@ fn layout(
         let ins: Vec<_> = chip.pins.iter().filter(|(_, m)| m.inputs()).collect();
         let outs: Vec<_> = chip.pins.iter().filter(|(_, m)| m.outputs()).collect();
         let nh = HEAD + ins.len().max(outs.len()).max(1) as f32 * ROW + 2.0;
-        let (x, y) = placed(Node::Chip(chip.slot)).or_else(|| auto.get(&chip.slot).copied()).unwrap_or((in_w + 2.0 + GAP, 2.0));
+        let (x, y) = placed(Node::Chip(chip.slot)).or_else(|| auto.get(&chip.slot).copied()).unwrap_or((in_w + 2.0 + SIDE_GAP, 2.0));
         // Laid out in the world, drawn where the camera shows it.
         let mut labels = Vec::new();
         for (row, (name, _)) in ins.iter().enumerate() {
@@ -450,6 +455,7 @@ fn flow_layout(
     view: &BoardView,
     placed: &dyn Fn(Node) -> Option<(f32, f32)>,
     x0: f32,
+    pitch: f32,
     source_y: &dyn Fn(&Pin) -> Option<f32>,
 ) -> HashMap<u8, (f32, f32)> {
     let depth = flow_depths(view);
@@ -484,7 +490,7 @@ fn flow_layout(
             })
             .collect();
         column.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.slot.cmp(&b.0.slot)));
-        let x = x0 + d as f32 * (CHIP_W + 2.0 * GAP);
+        let x = x0 + d as f32 * pitch;
         let mut y = 2.0f32;
         for (c, mean) in column {
             // Level with what feeds it where there's room.
@@ -611,7 +617,8 @@ impl Clip<'_> {
 /// on a left edge): a smooth curve leaving and entering level — drawn as a
 /// run of small squares `width` across.
 fn trace(c: &Clip<'_>, (x1, y1): (f32, f32), (x2, y2): (f32, f32), color: u32, width: f32) {
-    let pull = ((x2 - x1).abs() * 0.5).max(24.0);
+    // Forward, a gentle S as long as the gap; backward, a loop out and round.
+    let pull = if x2 >= x1 { ((x2 - x1) * 0.5).clamp(6.0, 60.0) } else { ((x1 - x2) * 0.5).clamp(30.0, 80.0) };
     let (cx1, cx2) = (x1 + pull, x2 - pull);
     let at = |t: f32| {
         let u = 1.0 - t;
@@ -706,11 +713,6 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
     for p in &g.layout.pins {
         let (x, y) = at(p.x, p.y);
         c.dot(x, y, pin_color(&view, p), p.usable && !wired.contains(&(&p.pin, p.source)));
-        if p.source
-            && let Some(level) = levels.get(&p.pin).filter(|l| **l > 0)
-        {
-            c.text(&level.to_string(), x + 3.0, y - 8.0, 1.0, 0xFFFFD0D0);
-        }
     }
 
     // The wire being drawn.
@@ -1066,7 +1068,7 @@ mod tests {
         for (name, v) in boards {
             let mut g = Graph { view: Some(v), layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default() };
             let rec = Recorder::new();
-            draw(&rec, &mut g, Rect { x: 0.0, y: 0.0, w: 420.0, h: 200.0 });
+            draw(&rec, &mut g, Rect { x: 0.0, y: 0.0, w: 460.0, h: 170.0 });
             std::fs::write(format!("{dir}/{name}.jsonl"), rec.0.borrow().join("\n")).unwrap();
         }
     }
