@@ -388,6 +388,12 @@ pub struct RedstoneVM {
     logic: Vec<u32>,
     /// Bumped whenever an ALU's faces change: part of the fingerprint.
     alu_changes: u64,
+    /// `logic` by what each pass looks at: wire, solid blocks, what reads
+    /// power (lamps, output ports), containers that move items.
+    wires: Vec<u32>,
+    solids: Vec<u32>,
+    readers: Vec<u32>,
+    movers: Vec<u32>,
     pub tick: u64,
     /// The items of every container, by cell: (item, count) per slot.
     inventories: HashMap<u32, Vec<(u16, u8)>>,
@@ -437,6 +443,10 @@ impl RedstoneVM {
             active: Vec::new(),
             logic: Vec::new(),
             alu_changes: 0,
+            wires: Vec::new(),
+            solids: Vec::new(),
+            readers: Vec::new(),
+            movers: Vec::new(),
             tick: 0,
             inventories: HashMap::new(),
             nested: HashMap::new(),
@@ -549,6 +559,23 @@ impl RedstoneVM {
     fn put(&mut self, i: u32, cell: Cell) {
         self.buses = None;
         let found = self.active.binary_search(&i);
+        // Its place in the passes' lists.
+        let air = cell.is_air();
+        let kinds = [
+            !air && cell.is_wire(),
+            !air && cell.is_solid(),
+            !air && matches!(cell.block, BlockType::RedstoneLamp | BlockType::Port(PortMode::Output | PortMode::Bidirectional)),
+            !air && matches!(cell.block, BlockType::Hopper { .. } | BlockType::Dropper { .. }),
+        ];
+        for (list, want) in [&mut self.wires, &mut self.solids, &mut self.readers, &mut self.movers].into_iter().zip(kinds) {
+            match (list.binary_search(&i), want) {
+                (Ok(at), false) => {
+                    list.remove(at);
+                }
+                (Err(at), true) => list.insert(at, i),
+                _ => {}
+            }
+        }
         let in_logic = self.logic.binary_search(&i);
         let logic = !cell.is_air() && !matches!(cell.block, BlockType::Alu | BlockType::Bus);
         match (in_logic, logic) {
@@ -823,8 +850,8 @@ impl RedstoneVM {
 
     /// 0. Every wire's shape, for this step.
     fn shape_wire(&mut self) {
-        for k in 0..self.logic.len() {
-            let i = self.logic[k];
+        for k in 0..self.wires.len() {
+            let i = self.wires[k];
             if self.get(i).is_wire() {
                 let shape = self.wire_shape(i);
                 self.get_mut(i).points = shape;
@@ -860,8 +887,8 @@ impl RedstoneVM {
 
     /// 1. Solid blocks take the strong power going into them.
     fn strong_power(&mut self) {
-        for k in 0..self.logic.len() {
-            let i = self.logic[k];
+        for k in 0..self.solids.len() {
+            let i = self.solids[k];
             if !self.get(i).is_solid() {
                 continue;
             }
@@ -883,8 +910,8 @@ impl RedstoneVM {
     ///    along it strongest first, one less per block.
     fn settle_wire(&mut self) {
         let mut buckets: [Vec<u32>; 16] = Default::default();
-        for k in 0..self.logic.len() {
-            let i = self.logic[k];
+        for k in 0..self.wires.len() {
+            let i = self.wires[k];
             if !self.get(i).is_wire() {
                 continue;
             }
@@ -911,8 +938,8 @@ impl RedstoneVM {
 
     /// 3. Solid blocks add the wire leading into them.
     fn wire_power(&mut self) {
-        for k in 0..self.logic.len() {
-            let i = self.logic[k];
+        for k in 0..self.solids.len() {
+            let i = self.solids[k];
             if !self.get(i).is_solid() {
                 continue;
             }
@@ -931,8 +958,8 @@ impl RedstoneVM {
 
     /// 4. Lamps and output ports read what's around them.
     fn read_power(&mut self) {
-        for k in 0..self.logic.len() {
-            let i = self.logic[k];
+        for k in 0..self.readers.len() {
+            let i = self.readers[k];
             let cell = *self.get(i);
             let level = match cell.block {
                 BlockType::RedstoneLamp => {
@@ -1146,27 +1173,22 @@ impl RedstoneVM {
                 [0; 6]
             };
             let levels = self.buses.as_ref().map(|b| &b.levels);
-            let reads = alu
-                .reads
-                .iter()
-                .map(|&(f, ch)| {
-                    runs[f as usize % 6].and_then(|r| levels.and_then(|l| l[r].get(ch as usize)).copied()).unwrap_or(0)
-                })
-                .collect();
             let alu = self.nested.get_mut(&i).expect("there");
-            let before = alu.drives.clone();
-            let outputs = alu.run(inputs, runs.map(|r| r.is_some()), reads);
-            let changed: Vec<(u8, u16)> = alu
-                .drives
-                .iter()
-                .filter(|(k, v)| before.get(k) != Some(v))
-                .map(|(k, _)| *k)
-                .chain(before.keys().filter(|k| !alu.drives.contains_key(k)).copied())
-                .collect();
-            for (f, ch) in changed {
+            // The channels its board reads, into its own buffer.
+            alu.read_now.clear();
+            alu.read_now.extend(alu.reads.iter().map(|&(f, ch)| {
+                runs[f as usize % 6].and_then(|r| levels.and_then(|l| l[r].get(ch as usize)).copied()).unwrap_or(0)
+            }));
+            let outputs = alu.run(inputs, runs.map(|r| r.is_some()));
+            let changed = std::mem::take(&mut alu.changed);
+            for &(f, ch) in &changed {
                 if let Some(r) = runs[f as usize % 6] {
                     self.update_channel(r, ch);
                 }
+            }
+            if let Some(alu) = self.nested.get_mut(&i) {
+                alu.changed = changed;
+                alu.changed.clear();
             }
             let packed = outputs.iter().enumerate().fold(0u32, |p, (k, &l)| p | u32::from(l.min(15)) << (4 * k));
             let cell = *self.get(i);
@@ -1390,8 +1412,8 @@ impl RedstoneVM {
     /// Hoppers move an item every 4 steps unless powered; droppers drop
     /// theirs.
     fn move_items(&mut self) {
-        for k in 0..self.logic.len() {
-            let Some(&i) = self.logic.get(k) else { break };
+        for k in 0..self.movers.len() {
+            let Some(&i) = self.movers.get(k) else { break };
             let cell = *self.get(i);
             match cell.block {
                 BlockType::Hopper { facing } => {
@@ -1547,9 +1569,14 @@ pub struct NestedAlu {
     board: Board,
     levels: Vec<u8>,
     scratch: Vec<u8>,
+    /// The bus channels it reads now (filled by the VM before a run).
+    read_now: Vec<u8>,
+    /// The bus channels whose level it drives changed in its last run.
+    changed: Vec<(u8, u16)>,
     /// What it last ran on, and what came out: run again on the same, its
     /// chips settled, nothing would change.
-    last: Option<([u8; 6], [bool; 6], Vec<u8>)>,
+    last: Option<([u8; 6], [bool; 6])>,
+    last_reads: Vec<u8>,
     out: [u8; 6],
     /// Its chips settled on what they get now.
     stable: bool,
@@ -1629,7 +1656,10 @@ impl NestedAlu {
             board,
             levels,
             scratch: Vec::new(),
+            read_now: Vec::new(),
+            changed: Vec::new(),
             last: None,
+            last_reads: Vec::new(),
             out: [0; 6],
             stable: false,
         }
@@ -1637,16 +1667,14 @@ impl NestedAlu {
 
     /// One run: the faces' power and buses in, the chips settle, the
     /// faces' levels out (and what it drives onto the buses, in `drives`).
-    fn run(&mut self, inputs: [u8; 6], buses: [bool; 6], reads: Vec<u8>) -> [u8; 6] {
-        let now = (inputs, buses, reads);
-        if self.stable && self.last.as_ref() == Some(&now) {
+    fn run(&mut self, inputs: [u8; 6], buses: [bool; 6]) -> [u8; 6] {
+        if self.stable && self.last == Some((inputs, buses)) && self.last_reads == self.read_now {
             return self.out;
         }
-        let (inputs, buses, reads) = &now;
         let b = &self.board;
         let lv = &mut self.levels;
-        lv[..6].copy_from_slice(inputs);
-        lv[6..6 + reads.len()].copy_from_slice(reads);
+        lv[..6].copy_from_slice(&inputs);
+        lv[6..6 + self.read_now.len()].copy_from_slice(&self.read_now);
         let get = |lv: &[u8], src: Option<usize>| src.map_or(0, |i| lv[i]);
         let outputs = |chips: &[NestedChip], lv: &mut [u8]| {
             for (c, outs) in chips.iter().zip(&b.chip_outs) {
@@ -1676,11 +1704,16 @@ impl NestedAlu {
             c.settled_on = settled.then(|| ins.clone());
         }
         outputs(&self.chips, lv);
-        // Onto a bus only where there is one.
-        self.drives.clear();
+        // Onto a bus only where there is one; what changed, noted.
         for &((f, ch), src) in &b.drives {
-            if buses[f as usize % 6] {
-                self.drives.insert((f, ch), get(lv, src));
+            let now = buses[f as usize % 6].then(|| get(lv, src));
+            let was = self.drives.get(&(f, ch)).copied();
+            if now != was {
+                match now {
+                    Some(l) => self.drives.insert((f, ch), l),
+                    None => self.drives.remove(&(f, ch)),
+                };
+                self.changed.push((f, ch));
             }
         }
         // Settled: every chip settled on what it gets now.
@@ -1688,7 +1721,8 @@ impl NestedAlu {
             c.settled_on.as_ref().is_some_and(|s| s.len() == srcs.len() && s.iter().zip(srcs).all(|(&v, &src)| v == get(lv, src)))
         });
         self.out = std::array::from_fn(|f| get(lv, b.faces_out[f]));
-        self.last = Some(now);
+        self.last = Some((inputs, buses));
+        self.last_reads.clone_from(&self.read_now);
         self.out
     }
 }
