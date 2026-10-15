@@ -2088,7 +2088,7 @@ mod tests {
             (NestedPin::Chip(0, "OUT".into()), NestedPin::Out(e)),
         ];
         vm.set_nested(5, 0, 0, NestedAlu::new(vec![not_chip(8)], wires));
-        let mut run = |vm: &mut RedstoneVM| {
+        let run = |vm: &mut RedstoneVM| {
             for _ in 0..3 {
                 vm.new_tick();
                 vm.settle(128);
