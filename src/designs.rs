@@ -344,6 +344,24 @@ mod tests {
         }
     }
 
+    /// In the editor a design's blocks are real: what needs a block under
+    /// it (wire, repeaters, comparators, standing torches) has one.
+    #[test]
+    fn nothing_hangs_in_the_air() {
+        for d in all() {
+            for (y, layer) in d.layers.iter().enumerate().skip(1) {
+                for (z, row) in layer.iter().enumerate() {
+                    for (x, &c) in row.iter().enumerate() {
+                        if matches!(c, '-' | 'T' | '↑' | '→' | '↓' | '←' | '△' | '▷' | '▽' | '◁') {
+                            let below = d.at(x as i32, y as i32 - 1, z as i32);
+                            assert!(below == '#' || d.alus.contains_key(&below), "{}: {c} at {x},{y},{z} on {below:?}", d.name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn not() {
         let mut b = Bench::new("NOT");
