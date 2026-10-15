@@ -1038,7 +1038,7 @@ impl RedstoneVM {
         self.cable_networks();
         let mut pistons = Vec::new();
         let changes: Vec<(u32, Cell)> = self
-            .active
+            .logic
             .iter()
             .filter_map(|&i| {
                 let cell = *self.get(i);
