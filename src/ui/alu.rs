@@ -79,16 +79,27 @@ const GRIP: f32 = 4.0;
 /// How near a pin the pointer has to be to take it.
 const REACH: f32 = 6.0;
 
-const BG: u32 = 0xFF1A2B20;
-const NODE: u32 = 0xEE2C2C2C;
-const HEADER: u32 = 0xFF4A4A4A;
-const HEADER_SLEEPING: u32 = 0xFF3A2626;
+const BG: u32 = 0xFF141B17;
+const GRID: u32 = 0xFF26332C;
+/// The grid's spacing, in the graph's own units.
+const GRID_STEP: f32 = 10.0;
+const NODE: u32 = 0xF0232629;
+const BORDER: u32 = 0xFF3D444B;
+const SHADOW: u32 = 0x60000000;
+/// Title bars: a chip, a sleeping chip, the In and Out panels, a bus.
+const HEAD_CHIP: u32 = 0xFF2E5E8C;
+const HEAD_SLEEPING: u32 = 0xFF6B3232;
+const HEAD_IN: u32 = 0xFF2F6F45;
+const HEAD_OUT: u32 = 0xFF8A5A22;
+const HEAD_BUS: u32 = 0xFF5D4290;
 const TEXT: u32 = 0xFFFFFFFF;
 const TEXT_DIM: u32 = 0xFF8A8A8A;
 const PIN_IN: u32 = Colors::PIN_INPUT;
 const PIN_OUT: u32 = Colors::PIN_OUTPUT;
-const WIRE_OFF: u32 = 0xFF5A1818;
-const WIRE_ON: u32 = 0xFFFF3A3A;
+const PIN_RIM: u32 = 0xFF101214;
+const WIRE_OFF: u32 = 0xFF6A2424;
+const WIRE_ON: u32 = 0xFFFF4040;
+const WIRE_GLOW: u32 = 0x50FF4040;
 const WIRE_NEW: u32 = 0xFFFFE070;
 
 /// The view of the chips: their place `(x, y)` is drawn at
@@ -266,7 +277,8 @@ fn layout(
     // The width laid out in: the box's (at zoom 1 — the default places
     // don't move as the view zooms), and at least room for a column of
     // chips between the panels.
-    let room = w.max(in_w + out_w + CHIP_W + 2.0 * GAP + 4.0);
+    let columns = flow_depths(view).values().copied().max().map_or(1, |d| d + 1) as f32;
+    let room = w.max(in_w + out_w + columns * (CHIP_W + 2.0 * GAP) + 4.0);
     for (node, default_x, pw) in [(Node::In, 2.0, in_w), (Node::Out, room - out_w - 2.0, out_w)] {
         let (x, y) = placed(node).unwrap_or((default_x, 2.0));
         let mut labels = Vec::new();
@@ -298,11 +310,13 @@ fn layout(
 
     // The buses, under the In panel unless moved.
     let mut bus_y = 2.0 + HEAD + view.sides.len() as f32 * ROW + 2.0 + GAP;
+    let mut bus_at: HashMap<u8, (f32, f32)> = HashMap::new();
     for bus in &view.buses {
         let node = Node::Bus(bus.index);
         let n_rows = rows.get(&bus.index).copied().unwrap_or(bus.rows).clamp(1, bus.channels.max(1));
         let nh = HEAD + n_rows as f32 * ROW + 2.0 + GRIP;
         let (x, y) = placed(node).unwrap_or((2.0, bus_y));
+        bus_at.insert(bus.index, (x, y));
         bus_y += nh + GAP;
         let mut labels = Vec::new();
         for n in 1..=n_rows {
@@ -330,23 +344,29 @@ fn layout(
         });
     }
 
-    // The chips, in columns between them unless moved.
-    let (x0, x1) = (in_w + 2.0 + GAP, room - out_w - 2.0 - GAP);
-    let cols = (((x1 - x0 + GAP) / (CHIP_W + GAP)).floor() as usize).max(1);
-    let mut col_y = vec![2.0f32; cols];
-    for (i, chip) in view.chips.iter().enumerate() {
+    // The chips: where the player put them, else in columns by how far
+    // down the flow each is (what feeds a chip stands left of it), each
+    // column in the order of where what feeds its chips is — wires run
+    // left to right and cross little.
+    let auto = flow_layout(view, &placed, in_w + 2.0 + GAP, &|pin| {
+        match pin.node {
+            Node::In => view.sides.iter().position(|s| s.side == pin.name).map(|r| {
+                let (_, y) = placed(Node::In).unwrap_or((2.0, 2.0));
+                y + HEAD + r as f32 * ROW + ROW / 2.0
+            }),
+            Node::Bus(i) => {
+                let (_, y) = *bus_at.get(&i)?;
+                let n: f32 = pin.name.parse().ok()?;
+                Some(y + HEAD + (n - 1.0) * ROW + ROW / 2.0)
+            }
+            _ => None,
+        }
+    });
+    for chip in &view.chips {
         let ins: Vec<_> = chip.pins.iter().filter(|(_, m)| m.inputs()).collect();
         let outs: Vec<_> = chip.pins.iter().filter(|(_, m)| m.outputs()).collect();
         let nh = HEAD + ins.len().max(outs.len()).max(1) as f32 * ROW + 2.0;
-        let (x, y) = match placed(Node::Chip(chip.slot)) {
-            Some(p) => p,
-            None => {
-                let col = i % cols;
-                let p = (x0 + col as f32 * (CHIP_W + GAP), col_y[col]);
-                col_y[col] += nh + GAP;
-                p
-            }
-        };
+        let (x, y) = placed(Node::Chip(chip.slot)).or_else(|| auto.get(&chip.slot).copied()).unwrap_or((in_w + 2.0 + GAP, 2.0));
         // Laid out in the world, drawn where the camera shows it.
         let mut labels = Vec::new();
         for (row, (name, _)) in ins.iter().enumerate() {
@@ -394,6 +414,89 @@ fn layout(
     out
 }
 
+/// How far down the flow each chip is: 0 fed only by the board's sides
+/// and buses, else one more than the farthest chip feeding it (a loop
+/// doesn't count twice).
+fn flow_depths(view: &BoardView) -> HashMap<u8, usize> {
+    let mut depth: HashMap<u8, usize> = view.chips.iter().map(|c| (c.slot, 0)).collect();
+    for _ in 0..view.chips.len() {
+        let mut changed = false;
+        for w in &view.wires {
+            if let (Node::Chip(a), Node::Chip(b)) = (w.from.node, w.to.node)
+                && a != b
+            {
+                let d = depth.get(&a).copied().unwrap_or(0) + 1;
+                if let Some(e) = depth.get_mut(&b)
+                    && *e < d
+                    && d < view.chips.len()
+                {
+                    *e = d;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    depth
+}
+
+/// Where the chips the player hasn't placed go: a column each depth
+/// ([`flow_depths`]) from `x0`, each column sorted by the mean height of
+/// what feeds its chips (`source_y` for the sides' and buses' pins; a
+/// chip's own outputs where it was put).
+fn flow_layout(
+    view: &BoardView,
+    placed: &dyn Fn(Node) -> Option<(f32, f32)>,
+    x0: f32,
+    source_y: &dyn Fn(&Pin) -> Option<f32>,
+) -> HashMap<u8, (f32, f32)> {
+    let depth = flow_depths(view);
+    let height = |c: &crate::board::ChipView| {
+        let ins = c.pins.iter().filter(|(_, m)| m.inputs()).count();
+        let outs = c.pins.iter().filter(|(_, m)| m.outputs()).count();
+        HEAD + ins.max(outs).max(1) as f32 * ROW + 2.0
+    };
+    let mut at: HashMap<u8, (f32, f32)> = HashMap::new();
+    let chip_out_y = |at: &HashMap<u8, (f32, f32)>, pin: &Pin| -> Option<f32> {
+        let Node::Chip(slot) = pin.node else { return None };
+        let chip = view.chips.iter().find(|c| c.slot == slot)?;
+        let row = chip.pins.iter().filter(|(_, m)| m.outputs()).position(|(n, _)| *n == pin.name)?;
+        let (_, y) = placed(pin.node).or_else(|| at.get(&slot).copied())?;
+        Some(y + HEAD + row as f32 * ROW + ROW / 2.0)
+    };
+    let max_depth = depth.values().copied().max().unwrap_or(0);
+    for d in 0..=max_depth {
+        let mut column: Vec<(&crate::board::ChipView, f32)> = view
+            .chips
+            .iter()
+            .filter(|c| depth.get(&c.slot) == Some(&d) && placed(Node::Chip(c.slot)).is_none())
+            .map(|c| {
+                let ys: Vec<f32> = view
+                    .wires
+                    .iter()
+                    .filter(|w| w.to.node == Node::Chip(c.slot))
+                    .filter_map(|w| source_y(&w.from).or_else(|| chip_out_y(&at, &w.from)))
+                    .collect();
+                let mean = if ys.is_empty() { f32::MAX } else { ys.iter().sum::<f32>() / ys.len() as f32 };
+                (c, mean)
+            })
+            .collect();
+        column.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.slot.cmp(&b.0.slot)));
+        let x = x0 + d as f32 * (CHIP_W + 2.0 * GAP);
+        let mut y = 2.0f32;
+        for (c, mean) in column {
+            // Level with what feeds it where there's room.
+            let h = height(c);
+            let want = if mean.is_finite() && mean < f32::MAX { (mean - HEAD - ROW / 2.0).max(y) } else { y };
+            at.insert(c.slot, (x, want));
+            y = want + h + GAP;
+        }
+    }
+    at
+}
+
 /// The pin's mode color.
 fn pin_color(view: &BoardView, p: &PinAt) -> u32 {
     if !p.usable {
@@ -419,10 +522,30 @@ fn pin_color(view: &BoardView, p: &PinAt) -> u32 {
     }
 }
 
+/// What the graph is drawn on: the game's 2D drawing, or (in tests) a
+/// recording of it.
+trait Canvas {
+    fn rect(&self, x0: f32, y0: f32, x1: f32, y1: f32, color: u32);
+    fn text(&self, text: &str, x: f32, y: f32, scale: f32, color: u32);
+    fn text_width(&self, text: &str) -> f32;
+}
+
+impl Canvas for Draw2D<'_> {
+    fn rect(&self, x0: f32, y0: f32, x1: f32, y1: f32, color: u32) {
+        Draw2D::rect(self, x0, y0, x1, y1, color);
+    }
+    fn text(&self, text: &str, x: f32, y: f32, scale: f32, color: u32) {
+        self.text_scaled(text, "", x, y, scale, color, false);
+    }
+    fn text_width(&self, text: &str) -> f32 {
+        Draw2D::text_width(self, text, "")
+    }
+}
+
 /// Drawing cut to the graph's box: rects are cut, text that doesn't fit
 /// whole isn't drawn (as yog-ui clips; 2D drawing has no scissor).
 struct Clip<'a> {
-    d2: &'a Draw2D<'a>,
+    d2: &'a dyn Canvas,
     x0: f32,
     y0: f32,
     x1: f32,
@@ -444,7 +567,7 @@ impl Clip<'_> {
         if y < self.y0 - 0.5 || y + 8.0 * scale > self.y1 + 0.5 {
             return;
         }
-        let width = |t: &str| self.d2.text_width(t, "") * scale;
+        let width = |t: &str| self.d2.text_width(t) * scale;
         let (mut start, mut x) = (0, x);
         let chars: Vec<(usize, char)> = text.char_indices().collect();
         // Drop what's left of the box.
@@ -461,31 +584,161 @@ impl Clip<'_> {
         }
         if end > start {
             let to = chars.get(end).map_or(text.len(), |(i, _)| *i);
-            self.d2.text_scaled(&text[from..to], "", x, y, scale, color, false);
+            self.d2.text(&text[from..to], x, y, scale, color);
+        }
+    }
+
+    /// A box with its corners cut (rounded at this size).
+    fn panel(&self, x0: f32, y0: f32, x1: f32, y1: f32, color: u32) {
+        self.rect(x0 + 1.0, y0, x1 - 1.0, y1, color);
+        self.rect(x0, y0 + 1.0, x0 + 1.0, y1 - 1.0, color);
+        self.rect(x1 - 1.0, y0 + 1.0, x1, y1 - 1.0, color);
+    }
+
+    /// A round dot of radius 2.5 at `(x, y)`; `hollow`, a ring.
+    fn dot(&self, x: f32, y: f32, color: u32, hollow: bool) {
+        self.rect(x - 1.5, y - 2.5, x + 1.5, y + 2.5, PIN_RIM);
+        self.rect(x - 2.5, y - 1.5, x + 2.5, y + 1.5, PIN_RIM);
+        self.rect(x - 1.0, y - 2.0, x + 1.0, y + 2.0, color);
+        self.rect(x - 2.0, y - 1.0, x + 2.0, y + 1.0, color);
+        if hollow {
+            self.rect(x - 0.75, y - 0.75, x + 0.75, y + 0.75, NODE);
         }
     }
 }
 
-/// A wire from `(x1, y1)` (a right edge) to `(x2, y2)` (a left edge), in
-/// right-angled runs like a board's traces.
-fn trace(d2: &Clip<'_>, (x1, y1): (f32, f32), (x2, y2): (f32, f32), color: u32) {
-    let hline = |xa: f32, xb: f32, y: f32| d2.rect(xa.min(xb), y - 0.5, xa.max(xb) + 1.0, y + 0.5, color);
-    let vline = |x: f32, ya: f32, yb: f32| d2.rect(x - 0.5, ya.min(yb), x + 0.5, ya.max(yb) + 1.0, color);
-    if x2 >= x1 + 8.0 {
-        let mx = ((x1 + x2) / 2.0).round();
-        hline(x1, mx, y1);
-        vline(mx, y1, y2);
-        hline(mx, x2, y2);
-    } else {
-        // Backwards: out to the right, across, and in from the left.
-        let (ra, lb) = (x1 + 5.0, x2 - 5.0);
-        let my = ((y1 + y2) / 2.0).round();
-        hline(x1, ra, y1);
-        vline(ra, y1, my);
-        hline(lb, ra, my);
-        vline(lb, my, y2);
-        hline(lb, x2, y2);
+/// A wire from `(x1, y1)` (a source on a right edge) to `(x2, y2)` (a sink
+/// on a left edge): a smooth curve leaving and entering level — drawn as a
+/// run of small squares `width` across.
+fn trace(c: &Clip<'_>, (x1, y1): (f32, f32), (x2, y2): (f32, f32), color: u32, width: f32) {
+    let pull = ((x2 - x1).abs() * 0.5).max(24.0);
+    let (cx1, cx2) = (x1 + pull, x2 - pull);
+    let at = |t: f32| {
+        let u = 1.0 - t;
+        let (a, b, cc, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+        (a * x1 + b * cx1 + cc * cx2 + d * x2, a * y1 + b * y1 + cc * y2 + d * y2)
+    };
+    // Roughly its length, a square every pixel.
+    let len = (pull * 2.0 + (x2 - x1).abs() + (y2 - y1).abs()).max(1.0);
+    let steps = (len / 1.0).clamp(8.0, 2000.0) as usize;
+    let h = width / 2.0;
+    for k in 0..=steps {
+        let (x, y) = at(k as f32 / steps as f32);
+        c.rect(x - h, y - h, x + h, y + h, color);
     }
+}
+
+/// Draws the graph `g` into `rect`.
+fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
+    d2.rect(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, BG);
+    let Some(view) = g.view.clone() else { return };
+    let width_of = |t: &str| d2.text_width(t);
+    g.layout = layout(&view, &g.moved, &g.rows, rect.w, rect.h, g.camera, &width_of);
+    let (ox, oy) = (rect.x, rect.y);
+    let at = |x: f32, y: f32| (ox + x, oy + y);
+    let levels: HashMap<&Pin, u8> = view.levels.iter().map(|(p, l)| (p, *l)).collect();
+    let lifted = match &g.drag {
+        Drag::FromSource { lifted, .. } => lifted.clone(),
+        _ => None,
+    };
+    // Nothing drawn past the graph's box, however the view is moved.
+    let c = Clip { d2, x0: rect.x, y0: rect.y, x1: rect.x + rect.w, y1: rect.y + rect.h };
+
+    // A grid under it all, moving with the view.
+    let step = GRID_STEP * g.camera.zoom;
+    if step >= 6.0 {
+        let (sx, sy) = (g.camera.pan.0.rem_euclid(step), g.camera.pan.1.rem_euclid(step));
+        let mut x = rect.x + sx;
+        while x < rect.x + rect.w {
+            let mut y = rect.y + sy;
+            while y < rect.y + rect.h {
+                c.rect(x, y, x + 1.0, y + 1.0, GRID);
+                y += step;
+            }
+            x += step;
+        }
+    }
+
+    let wired: std::collections::HashSet<(&Pin, bool)> =
+        view.wires.iter().flat_map(|w| [(&w.from, true), (&w.to, false)]).collect();
+    let node = |n: &NodeAt| {
+        let (x, y) = at(n.x, n.y);
+        let s = n.scale;
+        c.panel(x + 2.0 * s, y + 2.0 * s, x + n.w + 2.0 * s, y + n.h + 2.0 * s, SHADOW);
+        c.panel(x, y, x + n.w, y + n.h, BORDER);
+        c.rect(x + 1.0, y + 1.0, x + n.w - 1.0, y + n.h - 1.0, NODE);
+        let head = match n.node {
+            Node::In => HEAD_IN,
+            Node::Out => HEAD_OUT,
+            Node::Bus(_) => HEAD_BUS,
+            Node::Chip(_) if n.awake => HEAD_CHIP,
+            Node::Chip(_) => HEAD_SLEEPING,
+        };
+        c.rect(x + 1.0, y + 1.0, x + n.w - 1.0, y + n.head - s, head);
+        c.rect(x + 1.0, y + n.head - s, x + n.w - 1.0, y + n.head, shade(head));
+        let color = if n.awake { TEXT } else { TEXT_DIM };
+        c.text(&n.title, x + 3.0 * s, y + 2.0 * s, s, color);
+        for (text, tx, ty, color) in &n.labels {
+            c.text(text, ox + tx, oy + ty, s, *color);
+        }
+        if matches!(n.node, Node::Bus(_)) {
+            let gy = y + n.h - GRIP * s;
+            c.rect(x + n.w / 3.0, gy + s, x + 2.0 * n.w / 3.0, gy + 2.0 * s, HEAD_BUS);
+        }
+    };
+    // The nodes, under the wires.
+    for n in &g.layout.nodes {
+        node(n);
+    }
+
+    // Wires: a glow under those carrying a signal.
+    for Wire { from, to } in &view.wires {
+        if lifted.as_ref() == Some(to) {
+            continue;
+        }
+        let (Some(a), Some(b)) = (g.layout.pin(from, true), g.layout.pin(to, false)) else { continue };
+        let level = levels.get(from).copied().unwrap_or(0);
+        if level > 0 {
+            trace(&c, at(a.x, a.y), at(b.x, b.y), WIRE_GLOW, 3.5);
+        }
+        trace(&c, at(a.x, a.y), at(b.x, b.y), level_color(level), 1.5);
+    }
+    for p in &g.layout.pins {
+        let (x, y) = at(p.x, p.y);
+        c.dot(x, y, pin_color(&view, p), p.usable && !wired.contains(&(&p.pin, p.source)));
+        if p.source
+            && let Some(level) = levels.get(&p.pin).filter(|l| **l > 0)
+        {
+            c.text(&level.to_string(), x + 3.0, y - 8.0, 1.0, 0xFFFFD0D0);
+        }
+    }
+
+    // The wire being drawn.
+    let (px, py) = g.pointer;
+    match &g.drag {
+        Drag::FromSource { from, .. } => {
+            if let Some(a) = g.layout.pin(from, true) {
+                trace(&c, at(a.x, a.y), at(px, py), WIRE_NEW, 1.5);
+            }
+        }
+        Drag::FromSink { to } => {
+            if let Some(b) = g.layout.pin(to, false) {
+                trace(&c, at(px, py), at(b.x, b.y), WIRE_NEW, 1.5);
+            }
+        }
+        _ => {}
+    }
+    if view.chips.is_empty() {
+        let hint = Strings::screen_alu_empty();
+        let w = width_of(&hint);
+        d2.text(&hint, ox + (rect.w - w) / 2.0, oy + rect.h / 2.0 - 4.0, 1.0, TEXT_DIM);
+    }
+}
+
+/// A color a little darker.
+fn shade(c: u32) -> u32 {
+    let ch = |shift: u32| ((((c >> shift) & 0xFF) * 3 / 4) & 0xFF) << shift;
+    (c & 0xFF00_0000) | ch(16) | ch(8) | ch(0)
 }
 
 struct GraphSurface;
@@ -493,82 +746,7 @@ struct GraphSurface;
 impl Surface for GraphSurface {
     fn paint(&self, gfx: &GfxContext, rect: Rect) {
         let mut g = GRAPH.lock().unwrap();
-        let d2 = gfx.draw2d();
-        d2.rect(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, BG);
-        let Some(view) = g.view.clone() else { return };
-        let width_of = |t: &str| d2.text_width(t, "");
-        g.layout = layout(&view, &g.moved, &g.rows, rect.w, rect.h, g.camera, &width_of);
-        let (ox, oy) = (rect.x, rect.y);
-        let at = |x: f32, y: f32| (ox + x, oy + y);
-        let levels: HashMap<&Pin, u8> = view.levels.iter().map(|(p, l)| (p, *l)).collect();
-        let lifted = match &g.drag {
-            Drag::FromSource { lifted, .. } => lifted.clone(),
-            _ => None,
-        };
-        // Nothing drawn past the graph's box, however the view is moved.
-        let c = Clip { d2: &d2, x0: rect.x, y0: rect.y, x1: rect.x + rect.w, y1: rect.y + rect.h };
-
-        let node = |n: &NodeAt| {
-            let (x, y) = at(n.x, n.y);
-            c.rect(x, y, x + n.w, y + n.h, NODE);
-            c.rect(x, y, x + n.w, y + n.head - n.scale, if n.awake { HEADER } else { HEADER_SLEEPING });
-            let color = if n.awake { TEXT } else { TEXT_DIM };
-            c.text(&n.title, x + 3.0 * n.scale, y + 2.0 * n.scale, n.scale, color);
-            for (text, tx, ty, color) in &n.labels {
-                c.text(text, ox + tx, oy + ty, n.scale, *color);
-            }
-            if matches!(n.node, Node::Bus(_)) {
-                let gy = y + n.h - GRIP * n.scale;
-                c.rect(x + n.w / 3.0, gy + n.scale, x + 2.0 * n.w / 3.0, gy + 2.0 * n.scale, HEADER);
-            }
-        };
-        let pin = |p: &PinAt| {
-            let (x, y) = at(p.x, p.y);
-            c.rect(x - 2.0, y - 2.0, x + 2.0, y + 2.0, pin_color(&view, p));
-            if p.source
-                && let Some(level) = levels.get(&p.pin).filter(|l| **l > 0)
-            {
-                c.text(&level.to_string(), x + 3.0, y - 8.0, 1.0, 0xFFFFD0D0);
-            }
-        };
-        // The nodes, under the wires.
-        for n in &g.layout.nodes {
-            node(n);
-        }
-
-        // Wires.
-        for Wire { from, to } in &view.wires {
-            if lifted.as_ref() == Some(to) {
-                continue;
-            }
-            let (Some(a), Some(b)) = (g.layout.pin(from, true), g.layout.pin(to, false)) else { continue };
-            let level = levels.get(from).copied().unwrap_or(0);
-            trace(&c, at(a.x, a.y), at(b.x, b.y), level_color(level));
-        }
-        for p in &g.layout.pins {
-            pin(p);
-        }
-
-        // The wire being drawn.
-        let (px, py) = g.pointer;
-        match &g.drag {
-            Drag::FromSource { from, .. } => {
-                if let Some(a) = g.layout.pin(from, true) {
-                    trace(&c, at(a.x, a.y), at(px, py), WIRE_NEW);
-                }
-            }
-            Drag::FromSink { to } => {
-                if let Some(b) = g.layout.pin(to, false) {
-                    trace(&c, at(px, py), at(b.x, b.y), WIRE_NEW);
-                }
-            }
-            _ => {}
-        }
-        if g.view.as_ref().is_some_and(|v| v.chips.is_empty()) {
-            let hint = Strings::screen_alu_empty();
-            let w = width_of(&hint);
-            d2.text(&hint, ox + (rect.w - w) / 2.0, oy + rect.h / 2.0 - 4.0, TEXT_DIM, false);
-        }
+        draw(&gfx.draw2d(), &mut g, rect);
     }
 
     /// The wheel zooms the view about the pointer.
