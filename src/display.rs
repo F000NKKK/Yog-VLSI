@@ -63,7 +63,9 @@ pub struct Display {
     /// The first bus channel (from 1).
     pub channel: u16,
     /// TOGGLE as last taken.
+    #[serde(default)]
     toggle: bool,
+    #[serde(default)]
     gpu: Gpu,
     /// The tick what it shows was swapped in (not kept).
     #[serde(skip)]

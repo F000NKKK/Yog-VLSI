@@ -122,6 +122,7 @@ pub enum Op {
 
 /// The GPU's state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Gpu {
     pub regs: Vec<u16>,
     /// A high byte waiting for the next write.
