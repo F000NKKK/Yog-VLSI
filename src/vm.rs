@@ -374,12 +374,10 @@ pub struct RedstoneVM {
     /// Settled, and nothing from outside changed since: another step would
     /// change nothing either, so [`settle`](Self::settle) skips it.
     quiet: bool,
-    /// Each bus cell's run (an index into `bus_levels`), and the ALU faces
-    /// on each run — worked out again when a block changes (`None`).
-    bus_run: HashMap<u32, usize>,
-    bus_faces: Option<Vec<Vec<(u32, u8)>>>,
-    /// Each bus run's channels: the strongest level any ALU on it drives.
-    bus_levels: Vec<HashMap<u16, u8>>,
+    /// The buses: worked out again when a block changes (`None`).
+    buses: Option<Buses>,
+    /// Nested ALUs to run next step: a channel they read changed.
+    dirty: std::collections::BTreeSet<u32>,
 }
 
 /// One slot's item: (index into `items`, count); count 0 = empty.
@@ -418,9 +416,8 @@ impl RedstoneVM {
             items: Vec::new(),
             rng: 0x9E37_79B9_7F4A_7C15,
             quiet: false,
-            bus_run: HashMap::new(),
-            bus_faces: None,
-            bus_levels: Vec::new(),
+            buses: None,
+            dirty: std::collections::BTreeSet::new(),
         }
     }
 
@@ -523,7 +520,7 @@ impl RedstoneVM {
 
     /// Writes `cell` at `i` (air removes it).
     fn put(&mut self, i: u32, cell: Cell) {
-        self.bus_faces = None;
+        self.buses = None;
         let found = self.active.binary_search(&i);
         if cell.is_air() {
             if let Ok(at) = found {
@@ -587,6 +584,7 @@ impl RedstoneVM {
         let i = self.idx(x, y, z);
         if self.get(i).block == BlockType::Alu {
             self.nested.insert(i, alu);
+            self.buses = None;
         }
     }
 
@@ -923,61 +921,80 @@ impl RedstoneVM {
         for (i, level) in changes {
             self.get_mut(i).power = level;
         }
-        self.bus_networks();
     }
 
-    /// 5b. Buses: each run carries, per channel, the strongest level the
-    /// ALUs on it drove last step.
-    fn bus_networks(&mut self) {
-        if self.bus_faces.is_none() {
-            self.bus_run.clear();
-            let mut runs: Vec<Vec<(u32, u8)>> = Vec::new();
-            for k in 0..self.active.len() {
-                let start = self.active[k];
-                if self.get(start).block != BlockType::Bus || self.bus_run.contains_key(&start) {
-                    continue;
-                }
-                let run = runs.len();
-                let mut faces = Vec::new();
-                self.bus_run.insert(start, run);
-                let mut queue = VecDeque::from([start]);
-                while let Some(i) = queue.pop_front() {
-                    for d in Facing::ALL {
-                        let Some(n) = self.at(i, d) else { continue };
-                        match self.get(n).block {
-                            BlockType::Bus if !self.bus_run.contains_key(&n) => {
-                                self.bus_run.insert(n, run);
-                                queue.push_back(n);
-                            }
-                            // The face of that ALU this cable touches.
-                            BlockType::Alu => faces.push((n, d.opposite().index() as u8)),
-                            _ => {}
+    /// The buses' runs, which ALU faces are on them, and who drives and
+    /// reads each channel — worked out when blocks change; then every ALU
+    /// runs once.
+    fn ensure_buses(&mut self) {
+        if self.buses.is_some() {
+            return;
+        }
+        let mut b = Buses::default();
+        for k in 0..self.active.len() {
+            let start = self.active[k];
+            if self.get(start).block != BlockType::Bus || b.run.contains_key(&start) {
+                continue;
+            }
+            let run = b.levels.len();
+            b.levels.push(Vec::new());
+            b.drivers.push(HashMap::new());
+            b.readers.push(HashMap::new());
+            b.run.insert(start, run);
+            let mut queue = VecDeque::from([start]);
+            while let Some(i) = queue.pop_front() {
+                for d in Facing::ALL {
+                    let Some(n) = self.at(i, d) else { continue };
+                    match self.get(n).block {
+                        BlockType::Bus if !b.run.contains_key(&n) => {
+                            b.run.insert(n, run);
+                            queue.push_back(n);
                         }
-                    }
-                }
-                runs.push(faces);
-            }
-            self.bus_faces = Some(runs);
-        }
-        let runs = self.bus_faces.as_ref().map_or(0, Vec::len);
-        self.bus_levels.resize_with(runs, HashMap::new);
-        for (run, faces) in self.bus_faces.iter().flatten().enumerate() {
-            let levels = &mut self.bus_levels[run];
-            levels.clear();
-            for &(alu, face) in faces {
-                for (&(f, ch), &l) in self.nested.get(&alu).map(|a| &a.drives).into_iter().flatten() {
-                    if f == face && l > 0 {
-                        let e = levels.entry(ch).or_insert(0);
-                        *e = (*e).max(l);
+                        // The face of that ALU this cable touches.
+                        BlockType::Alu => b.alu_runs.entry(n).or_insert([None; 6])[d.opposite().index()] = Some(run),
+                        _ => {}
                     }
                 }
             }
         }
+        for (&i, alu) in &self.nested {
+            let Some(runs) = b.alu_runs.get(&i) else { continue };
+            for &(f, ch) in &alu.reads {
+                if let Some(r) = runs[f as usize % 6] {
+                    b.readers[r].entry(ch).or_default().push(i);
+                }
+            }
+            for (f, ch) in alu.sinks.iter().filter_map(|p| match *p {
+                NestedPin::Bus(f, ch) => Some((f, ch)),
+                _ => None,
+            }) {
+                if let Some(r) = runs[f as usize % 6] {
+                    b.drivers[r].entry(ch).or_default().push((i, f));
+                }
+            }
+        }
+        self.dirty.extend(self.nested.keys().copied());
+        self.buses = Some(b);
     }
 
-    /// The bus run on face `f` of the cell `i`, if one's there.
-    fn bus_on(&self, i: u32, f: Facing) -> Option<usize> {
-        self.bus_run.get(&self.at(i, f)?).copied()
+    /// Channel `ch` of run `r` again, from its drivers; who reads it, if it changed.
+    fn update_channel(&mut self, r: usize, ch: u16) {
+        let Some(b) = &mut self.buses else { return };
+        let level = b.drivers[r]
+            .get(&ch)
+            .into_iter()
+            .flatten()
+            .map(|(alu, f)| self.nested.get(alu).and_then(|a| a.drives.get(&(*f, ch))).copied().unwrap_or(0))
+            .max()
+            .unwrap_or(0);
+        let levels = &mut b.levels[r];
+        if levels.len() <= ch as usize {
+            levels.resize(ch as usize + 1, 0);
+        }
+        if levels[ch as usize] != level {
+            levels[ch as usize] = level;
+            self.dirty.extend(b.readers[r].get(&ch).into_iter().flatten().copied());
+        }
     }
 
     /// 5. Every component decides its next output.
@@ -1032,30 +1049,50 @@ impl RedstoneVM {
             .collect();
         // Nested ALUs: their faces' power in, their chips run, their faces' levels out.
         let mut changes = changes;
-        type FaceIn = ([u8; 6], [bool; 6], Vec<u8>);
-        let alus: Vec<(u32, FaceIn)> = self
-            .nested
-            .iter()
-            .filter(|&(&i, _)| self.get(i).block == BlockType::Alu)
-            .map(|(&i, alu)| {
-                // From a cable, its level; else the redstone into that face.
-                let face = |f| match self.next(i, f).block {
+        // Only those a read channel changed for, still settling, or reading their faces.
+        self.ensure_buses();
+        let mut run: Vec<u32> = std::mem::take(&mut self.dirty).into_iter().collect();
+        run.extend(self.nested.iter().filter(|(_, a)| !a.stable || a.reads_faces).map(|(&i, _)| i));
+        run.sort_unstable();
+        run.dedup();
+        for i in run {
+            if self.get(i).block != BlockType::Alu {
+                continue;
+            }
+            let Some(alu) = self.nested.get(&i) else { continue };
+            let runs = self.buses.as_ref().and_then(|b| b.alu_runs.get(&i)).copied().unwrap_or([None; 6]);
+            // From a cable, its level; else the redstone into that face.
+            let inputs = if alu.reads_faces {
+                Facing::ALL.map(|f| match self.next(i, f).block {
                     BlockType::Cable => self.next(i, f).power,
                     _ => self.input_from(i, f, true),
-                };
-                let runs = Facing::ALL.map(|f| self.bus_on(i, f));
-                // Only the channels its board reads.
-                let reads = alu
-                    .reads
-                    .iter()
-                    .map(|&(f, ch)| runs[f as usize % 6].and_then(|r| self.bus_levels[r].get(&ch).copied()).unwrap_or(0))
-                    .collect();
-                (i, (Facing::ALL.map(face), runs.map(|r| r.is_some()), reads))
-            })
-            .collect();
-        for (i, (inputs, buses, reads)) in alus {
-            let Some(alu) = self.nested.get_mut(&i) else { continue };
-            let outputs = alu.run(inputs, buses, reads);
+                })
+            } else {
+                [0; 6]
+            };
+            let levels = self.buses.as_ref().map(|b| &b.levels);
+            let reads = alu
+                .reads
+                .iter()
+                .map(|&(f, ch)| {
+                    runs[f as usize % 6].and_then(|r| levels.and_then(|l| l[r].get(ch as usize)).copied()).unwrap_or(0)
+                })
+                .collect();
+            let alu = self.nested.get_mut(&i).expect("there");
+            let before = alu.drives.clone();
+            let outputs = alu.run(inputs, runs.map(|r| r.is_some()), reads);
+            let changed: Vec<(u8, u16)> = alu
+                .drives
+                .iter()
+                .filter(|(k, v)| before.get(k) != Some(v))
+                .map(|(k, _)| *k)
+                .chain(before.keys().filter(|k| !alu.drives.contains_key(k)).copied())
+                .collect();
+            for (f, ch) in changed {
+                if let Some(r) = runs[f as usize % 6] {
+                    self.update_channel(r, ch);
+                }
+            }
             let packed = outputs.iter().enumerate().fold(0u32, |p, (k, &l)| p | u32::from(l.min(15)) << (4 * k));
             let cell = *self.get(i);
             if cell.watched != packed {
@@ -1393,6 +1430,20 @@ impl NestedChip {
     }
 }
 
+/// A circuit's buses (digital cable runs).
+#[derive(Default)]
+struct Buses {
+    /// Each bus cell's run.
+    run: HashMap<u32, usize>,
+    /// Each ALU's faces' runs.
+    alu_runs: HashMap<u32, [Option<usize>; 6]>,
+    /// Each run's channels' levels.
+    levels: Vec<Vec<u8>>,
+    /// Each run's channels' drivers (ALU, its face) and readers.
+    drivers: Vec<HashMap<u16, Vec<(u32, u8)>>>,
+    readers: Vec<HashMap<u16, Vec<u32>>>,
+}
+
 /// An ALU inside a circuit: its chips and the wires of its board, run each
 /// step of the circuit around it — as the ALU it was in the world.
 pub struct NestedAlu {
@@ -1404,6 +1455,10 @@ pub struct NestedAlu {
     sources: HashMap<NestedPin, NestedPin>,
     /// The bus channels its board reads, (face, channel).
     reads: Vec<(u8, u16)>,
+    /// Every pin its board drives.
+    sinks: Vec<NestedPin>,
+    /// Its board reads its faces (`In`): they're looked at every step.
+    reads_faces: bool,
     /// What it last ran on, and what came out: run again on the same, its
     /// chips settled, nothing would change.
     last: Option<([u8; 6], [bool; 6], Vec<u8>)>,
@@ -1424,7 +1479,9 @@ impl NestedAlu {
             .collect();
         reads.sort_unstable();
         reads.dedup();
-        NestedAlu { chips, wires, drives: HashMap::new(), sources, reads, last: None, out: [0; 6], stable: false }
+        let sinks = wires.iter().map(|(_, t)| t.clone()).collect();
+        let reads_faces = wires.iter().any(|(f, _)| matches!(f, NestedPin::In(_)));
+        NestedAlu { chips, wires, drives: HashMap::new(), sources, reads, sinks, reads_faces, last: None, out: [0; 6], stable: false }
     }
 }
 
