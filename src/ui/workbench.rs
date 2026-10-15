@@ -28,7 +28,7 @@ use crate::editor;
 use crate::res::Strings;
 use crate::resources::{Amounts, Resource, compact};
 use crate::designs;
-use crate::tier::Tier;
+use crate::content::Tier;
 
 pub const WORKBENCH_ID: &str = crate::content::Blocks::VLSI_WORKBENCH;
 pub const BLUEPRINT_ID: &str = Items::BLUEPRINT;
@@ -386,7 +386,7 @@ fn fabricate(srv: &dyn yog_api::Server, bench: &BenchId) -> String {
     }
     let meta = ChipMeta { id: crate::chip::new_id(), tier: bp.tier, name: bp.name.clone(), ports: bp.circuit.ports.clone() };
     bp.circuit.save_for_chip(&srv.game_dir(), &meta.id);
-    if !srv.set_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT, bp.tier.chip_item(), 1, &meta.to_nbt()) {
+    if !srv.set_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT, bp.tier.chip(), 1, &meta.to_nbt()) {
         return "§cCouldn't put the chip in the chip slot.".into();
     }
     let mut stores = STORES.lock().unwrap();

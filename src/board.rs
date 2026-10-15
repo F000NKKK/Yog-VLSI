@@ -31,7 +31,7 @@ use yog_api::{BlockPos, EventPhase, Registry, Server, Storage};
 
 use crate::cables;
 use crate::chip::{ChipMeta, CircuitData};
-use crate::tier::Tier;
+use crate::content::Tier;
 use crate::vm::{NestedPin, PortMode, RedstoneVM};
 
 /// The six sides, in the order the graph lists them.
@@ -235,7 +235,7 @@ impl Board {
         for slot in 0..CHIP_SLOTS {
             let meta = srv
                 .get_inventory_slot(&alu.dimension, alu.pos(), slot as u32)
-                .filter(|(id, _, _)| Tier::from_chip_item(id).is_some())
+                .filter(|(id, _, _)| Tier::from_chip(id).is_some())
                 .and_then(|(_, _, nbt)| ChipMeta::from_nbt(&nbt));
             let entry = &mut self.chips[slot as usize];
             match meta {
@@ -601,7 +601,7 @@ pub fn save(srv: &dyn yog_api::Server) {
 pub fn setup(registry: &mut Registry) {
     // Opening an ALU: it gets a board (if new) and the player watches it.
     registry.on_use_block(|e, phase, srv| -> bool {
-        let Some(tier) = Tier::from_alu_block(&e.block_id) else { return true };
+        let Some(tier) = Tier::from_alu(&e.block_id) else { return true };
         if phase != EventPhase::Pre {
             return true;
         }
@@ -617,7 +617,7 @@ pub fn setup(registry: &mut Registry) {
     });
 
     registry.on_block_break(|e, phase, _srv| {
-        if phase == EventPhase::Post && Tier::from_alu_block(&e.block_id).is_some() {
+        if phase == EventPhase::Post && Tier::from_alu(&e.block_id).is_some() {
             let alu = AluId { dimension: e.dimension.clone(), x: e.pos.x, y: e.pos.y, z: e.pos.z };
             BOARDS.lock().unwrap().remove(&alu);
         }

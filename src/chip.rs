@@ -6,7 +6,7 @@ use yog_api::Storage;
 
 use crate::nbt;
 use crate::res::Strings;
-use crate::tier::Tier;
+use crate::content::Tier;
 use crate::port;
 use crate::vm::{BlockType, ComparatorMode, Facing, NestedAlu, NestedChip, NestedPin, NestedPort, PortMode, RedstoneVM};
 use crate::MOD_ID;
@@ -227,7 +227,7 @@ impl CircuitBlock {
                 || p.contains("rail")
                 || p.contains("carpet")
                 || p == "barrier" => BlockType::Transparent,
-            _ if Tier::from_alu_block(id).is_some() => BlockType::Alu,
+            _ if Tier::from_alu(id).is_some() => BlockType::Alu,
             _ => port::dir_for_block(id).map_or(BlockType::Solid, BlockType::Port),
         }
     }

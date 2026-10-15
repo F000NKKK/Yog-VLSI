@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::chip::{CircuitBlock, CircuitData, Port};
-use crate::tier::Tier;
+use crate::content::Tier;
 use crate::vm::PortMode;
 
 const FILES: [&str; 11] = [

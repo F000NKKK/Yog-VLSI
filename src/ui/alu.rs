@@ -705,7 +705,7 @@ mod tests {
     use super::*;
     use crate::vm::PortMode;
     use crate::board::{ChipView, SideView};
-    use crate::tier::Tier;
+    use crate::content::Tier;
 
     fn view() -> BoardView {
         BoardView {

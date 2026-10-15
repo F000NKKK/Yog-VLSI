@@ -33,7 +33,7 @@ use crate::chip::{Blueprint, ChipMeta, CircuitBlock, CircuitData, Port, SavedAlu
 use crate::cables::{self, RedstonePort};
 use crate::content::{Blocks, Items};
 use crate::port;
-use crate::tier::Tier;
+use crate::content::Tier;
 
 /// Id of the pocket dimension the editor runs in — declared via
 /// `Registry::register_dimension` in `lib.rs`.
@@ -294,7 +294,7 @@ pub fn enter(
     for a in &blueprint.circuit.alus {
         let pos = at(a.x, a.y, a.z);
         for (slot, meta) in &a.chips {
-            srv.set_inventory_slot(DIMENSION_ID, pos, *slot as u32, meta.tier.chip_item(), 1, &meta.to_nbt());
+            srv.set_inventory_slot(DIMENSION_ID, pos, *slot as u32, meta.tier.chip(), 1, &meta.to_nbt());
         }
         board::restore(board::AluId { dimension: DIMENSION_ID.to_string(), x: pos.x, y: pos.y, z: pos.z }, a.tier, &a.wires);
     }
@@ -362,7 +362,7 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
             continue;
         }
         // An ALU: its chips and its board go into the design with it.
-        if let Some(tier) = Tier::from_alu_block(id) {
+        if let Some(tier) = Tier::from_alu(id) {
             let chips = (0..board::CHIP_SLOTS)
                 .filter_map(|slot| {
                     let (_, _, nbt) = srv.get_inventory_slot(DIMENSION_ID, p, slot as u32)?;

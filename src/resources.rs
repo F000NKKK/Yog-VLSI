@@ -170,9 +170,9 @@ fn add_block(id: &str, n: f64, total: &mut [f64; 6]) {
         }
         // An ALU (in a design): its recipe — four of its tier's material,
         // four copper, a repeater, its core block.
-        id if crate::tier::Tier::from_alu_block(id).is_some() => {
-            use crate::tier::Tier::*;
-            let (material, core) = match crate::tier::Tier::from_alu_block(id).unwrap_or(Wood) {
+        id if crate::content::Tier::from_alu(id).is_some() => {
+            use crate::content::Tier::*;
+            let (material, core) = match crate::content::Tier::from_alu(id).unwrap_or(Wood) {
                 Wood => ("minecraft:oak_planks", "minecraft:redstone_block"),
                 Stone => ("minecraft:cobblestone", "minecraft:redstone_block"),
                 Gold => ("minecraft:gold_ingot", "minecraft:diamond"),
@@ -361,7 +361,7 @@ mod tests {
     #[test]
     fn a_chip_in_an_alu_in_the_design_costs_another_half() {
         use crate::chip::{ChipMeta, CircuitData, SavedAlu};
-        use crate::tier::Tier;
+        use crate::content::Tier;
         let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new(), redstone_port: None };
         // The inner chip: 64 dust — 32 redstone printed alone, 16 inside an ALU.
         let inner = CircuitData { size: 16, blocks: vec![block("minecraft:redstone_wire"); 64], ..Default::default() };

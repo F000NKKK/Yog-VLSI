@@ -8,7 +8,6 @@ mod designs;
 mod editor;
 mod nbt;
 mod resources;
-pub mod tier;
 pub mod vm;
 mod ui;
 
@@ -65,7 +64,7 @@ impl Mod for YogVlsi {
         });
         // A fabricated chip names its design and shows its tier, speed and ports.
         for tier in tier::Tier::ALL {
-            registry.on_item_text(tier.chip_item(), |_, snbt| {
+            registry.on_item_text(tier.chip(), |_, snbt| {
                 let meta = chip::ChipMeta::from_nbt(snbt)?;
                 let ports: Vec<String> = meta
                     .ports
