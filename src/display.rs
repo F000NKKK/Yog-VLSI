@@ -194,17 +194,6 @@ pub fn owner(dim: &str, pos: BlockPos) -> Option<BlockPos> {
         (d == dim && inside(area(at, disp.facing, disp.size), pos)).then_some(at)
     })
 }
-
-/// The way a player looks, as the block they place faces back at them.
-fn facing_toward(srv: &dyn yog_api::Server, player: &str) -> Facing {
-    let yaw = srv.player_info(player).and_then(|p| srv.entity_rotation(&p.uuid)).map_or(0.0, |r| r.0);
-    // Yaw 0 looks south, 90 west, 180 north, 270 east; the block faces back.
-    match ((yaw / 90.0).round() as i32).rem_euclid(4) {
-        0 => Facing::N,
-        1 => Facing::E,
-        2 => Facing::S,
-        _ => Facing::W,
-    }
 }
 
 /// The bus's writes into the GPUs, after the ALUs stepped; then what they
@@ -321,21 +310,22 @@ pub fn register(registry: &mut Registry) {
         if e.block_id != Blocks::DISPLAY {
             return true;
         }
-        match phase {
-            EventPhase::Pre => {
-                let fits = fits(srv, &e.dimension, e.pos, facing_toward(srv, &e.player_name), DEFAULT_SIZE, None);
-                if !fits {
-                    srv.send_actionbar(&e.player_name, &crate::res::Strings::display_no_room(DEFAULT_SIZE));
-                }
-                fits
-            }
-            _ => {
-                let d = Display::new(facing_of(srv, &e.dimension, e.pos));
-                stand(srv, &e.dimension, e.pos, &d);
-                DISPLAYS.lock().unwrap().insert((e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z), d);
-                true
-            }
+        if phase != EventPhase::Post {
+            return true;
         }
+        // It faces as it was placed; without room for the picture it comes back off.
+        let d = Display::new(facing_of(srv, &e.dimension, e.pos));
+        if !fits(srv, &e.dimension, e.pos, d.facing, d.size, None) {
+            srv.set_block_state(&e.dimension, e.pos, "minecraft:air");
+            if srv.player_info(&e.player_name).is_none_or(|p| p.gamemode != "creative") {
+                srv.give_item(&e.player_name, Blocks::DISPLAY, 1);
+            }
+            srv.send_actionbar(&e.player_name, &crate::res::Strings::display_no_room(DEFAULT_SIZE));
+            return true;
+        }
+        stand(srv, &e.dimension, e.pos, &d);
+        DISPLAYS.lock().unwrap().insert((e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z), d);
+        true
     });
     // Breaking any block of it takes the whole Display down; a part drops
     // the Display (the Display's own block drops itself).
