@@ -107,22 +107,29 @@ def build(program, debug=True):
     load_a = n.any([op[o] for o in ["LDI", "LD", "LDX", "ADD", "ADDI", "SUB", "SUBI", "ANDI", "ORI", "XORI", "IN", "RND", "TEST", "TXA"]])
 
     # ── Registers ─────────────────────────────────────────────────────────
-    for ph, q in zip(A, n.register(result, load_a, clk)):
+    new = n.register(result, load_a, clk)
+    for ph, q in zip(A, new):
         n.alias(ph, q)
-    for ph, q in zip(X, n.register(A, op["TAX"], clk)):
+    A[:] = new
+    new = n.register(A, op["TAX"], clk)
+    for ph, q in zip(X, new):
         n.alias(ph, q)
+    X[:] = new
     c_new = n.register([carry], arith, clk)[0]
     n.alias(C, c_new)
 
     jump = n.any([op["JMP"], n.AND(op["JZ"], z), n.AND(op["JNZ"], n.NOT(z)), n.AND(op["JC"], c_new)])
     next_pc = n.mux_word(jump, n.inc(PC), k)
-    for ph, q in zip(PC, n.register(next_pc, n.ONE, clk)):
+    new = n.register(next_pc, n.ONE, clk)
+    for ph, q in zip(PC, new):
         n.alias(ph, q)
+    PC[:] = new
 
     # LFSR (x^8 + x^6 + x^5 + x^4 + 1), never all zero: a zero state shifts in a one.
     fb = n.XOR(n.XOR(R[7], R[5]), n.XOR(R[4], R[3]))
     fb = n.OR(fb, n.NOT(n.any(R)))
-    for ph, q in zip(R, n.register([fb] + R[:7], n.ONE, clk)):
+    new = n.register([fb] + R[:7], n.ONE, clk)
+    for ph, q in zip(R, new):
         n.alias(ph, q)
 
     if debug:
