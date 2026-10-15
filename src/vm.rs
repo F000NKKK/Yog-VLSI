@@ -1076,7 +1076,6 @@ impl RedstoneVM {
         run.sort_unstable();
         run.dedup();
         COUNTS[0].fetch_add(run.len() as u64, std::sync::atomic::Ordering::Relaxed);
-        COUNTS[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         for i in run {
             if self.get(i).block != BlockType::Alu {
                 continue;
@@ -1552,7 +1551,9 @@ impl NestedAlu {
                 continue;
             }
             COUNTS[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let t0 = std::time::Instant::now();
             let used = c.vm.settle(c.left);
+            COUNTS[1].fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
             COUNTS[3].fetch_add(used as u64, std::sync::atomic::Ordering::Relaxed);
             let settled = used < c.left;
             c.left -= used;
