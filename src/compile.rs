@@ -231,12 +231,30 @@ impl ChipSim {
             self.vm_mut().set_port_input(x, y, z, level);
             return;
         };
+        self.set_input_at(i, level);
+    }
+
+    /// [`set_input`](Self::set_input) of its `i`-th input port.
+    pub fn set_input_at(&mut self, i: usize, level: u8) {
+        let (x, y, z) = self.ins[i];
         if self.place.is_none() {
             self.vm.set_port_input(x, y, z, level);
         }
         if self.given[i] != level {
             self.given[i] = level;
             self.touched = true;
+        }
+    }
+
+    /// [`output`](Self::output) of its `o`-th output port.
+    pub fn output_at(&self, o: usize) -> u8 {
+        let Some(p) = &self.place else {
+            let (x, y, z) = self.outs[o];
+            return self.vm.get_port_output(x, y, z);
+        };
+        match p.moving {
+            Some((m, k)) if k > 0 => p.table.moves[p.state][m as usize].outputs[k as usize - 1][o],
+            _ => p.table.outputs[p.state][o],
         }
     }
 
@@ -276,27 +294,27 @@ impl ChipSim {
             self.unpack();
             return self.vm.settle(budget);
         };
-        let t = p.table.clone();
-        let (total, done) = match p.moving {
-            Some((mm, k)) if mm == m => (t.moves[p.state][m as usize].steps, k),
+        let mv = &p.table.moves[p.state][m as usize];
+        let (total, next, done) = match p.moving {
+            Some((mm, k)) if mm == m => (mv.steps, mv.next, k),
             // Inputs changed in the middle: step it.
             Some(_) => {
                 self.unpack();
                 return self.vm.settle(budget);
             }
             // Its own inputs again, but changed and changed back: one step to see.
-            None if touched && m == t.inputs[p.state] && t.moves[p.state][m as usize].steps == 0 => {
+            None if touched && m == p.table.inputs[p.state] && mv.steps == 0 => {
                 if budget == 0 {
                     p.moving = None;
                     return 0;
                 }
                 return 1;
             }
-            None => (t.moves[p.state][m as usize].steps, 0),
+            None => (mv.steps, mv.next, 0),
         };
         let left = total - done;
         if left <= budget {
-            p.state = t.moves[p.state][m as usize].next;
+            p.state = next;
             p.moving = None;
             left
         } else {

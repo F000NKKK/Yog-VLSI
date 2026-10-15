@@ -145,6 +145,46 @@ pub enum BlockType {
     Bus,
 }
 
+impl BlockType {
+    /// A number for the block: the same for equal blocks, different for
+    /// different ones — what a fingerprint takes (cheaper than hashing it).
+    fn code(self) -> u64 {
+        use BlockType::*;
+        let f = |d: Facing| d.index() as u64;
+        let b = |v: bool| v as u64;
+        match self {
+            Air => 0,
+            Solid => 1,
+            Transparent => 2,
+            RedstoneWire => 3,
+            RedstoneTorch { lit, attach } => 4 | b(lit) << 8 | f(attach) << 9,
+            Repeater { delay_ticks, facing } => 5 | u64::from(delay_ticks) << 8 | f(facing) << 16,
+            Comparator { mode, facing } => 6 | (mode as u64) << 8 | f(facing) << 9,
+            RedstoneLamp => 7,
+            RedstoneBlock => 8,
+            Lever { on, attach } => 9 | b(on) << 8 | f(attach) << 9,
+            Button { pressed, attach } => 10 | b(pressed) << 8 | f(attach) << 9,
+            PressurePlate { power } => 11 | u64::from(power) << 8,
+            Observer { facing } => 12 | f(facing) << 8,
+            TargetBlock { power } => 13 | u64::from(power) << 8,
+            Source { power } => 14 | u64::from(power) << 8,
+            Slime => 15,
+            Honey => 16,
+            Immovable => 17,
+            Piston { facing, sticky, extended } => 18 | f(facing) << 8 | b(sticky) << 12 | b(extended) << 13,
+            PistonHead { facing, sticky } => 19 | f(facing) << 8 | b(sticky) << 12,
+            Container { slots, solid, partner } => 20 | u64::from(slots) << 8 | b(solid) << 16 | partner.map_or(7, f) << 17,
+            Hopper { facing } => 21 | f(facing) << 8,
+            Dropper { facing, triggered } => 22 | f(facing) << 8 | b(triggered) << 12,
+            Port(mode) => 23 | (mode as u64) << 8,
+            Alu => 24,
+            Cable => 25,
+            RedstonePort { output } => 26 | b(output) << 8,
+            Bus => 27,
+        }
+    }
+}
+
 /// What a piston does to a block in its way.
 enum Push {
     Move,
@@ -367,13 +407,12 @@ impl Cell {
 
     /// What an observer sees of this cell.
     fn looks(&self) -> u32 {
-        let mut h = Fnv::default();
-        std::hash::Hash::hash(&self.block, &mut h);
         let shown = match self.block {
             BlockType::Solid | BlockType::Transparent | BlockType::Air | BlockType::Immovable => 0,
-            _ => self.power as u64,
+            _ => self.power as u32,
         };
-        (std::hash::Hasher::finish(&h) as u32) ^ (shown as u32) << 24
+        let c = self.block.code();
+        ((c ^ c >> 32) as u32).wrapping_mul(0x9E37_79B9) ^ shown << 24
     }
 }
 
@@ -863,13 +902,12 @@ impl RedstoneVM {
         mix(self.alu_changes);
         for &i in &self.logic {
             let c = self.get(i);
-            let mut bh = Fnv::default();
-            std::hash::Hash::hash(&c.block, &mut bh);
-            mix(std::hash::Hasher::finish(&bh));
+            let code = c.block.code();
+            mix(code);
             let untimed = u64::from(c.power) | u64::from(c.strong) << 8 | u64::from(c.weak) << 16 | u64::from(i) << 32;
             mix(untimed | u64::from(c.timer) << 24);
             mix(u64::from(c.watched));
-            u = (u ^ untimed ^ u64::from(c.watched) << 40 ^ std::hash::Hasher::finish(&bh)).wrapping_mul(0x0100_0000_01b3);
+            u = (u ^ untimed ^ u64::from(c.watched) << 40 ^ code.rotate_left(17)).wrapping_mul(0x0100_0000_01b3);
         }
         // A nested ALU still running (a clock in a chip, a chip out of
         // steps): the circuit isn't settled.
@@ -1856,8 +1894,8 @@ impl NestedAlu {
         };
         if !self.primed {
             for (c, outs) in self.chips.iter().zip(&b.chip_outs) {
-                for (p, &i) in c.ports.iter().filter(|p| p.mode.outputs()).zip(outs) {
-                    lv[i] = c.sim.output(p.x, p.y, p.z);
+                for (k, &i) in outs.iter().enumerate() {
+                    lv[i] = c.sim.output_at(k);
                 }
             }
             self.primed = true;
@@ -1882,8 +1920,8 @@ impl NestedAlu {
             if c.settled_on.as_deref() == Some(&ins[..]) {
                 continue;
             }
-            for (p, &level) in c.ports.iter().filter(|p| p.mode.inputs()).zip(ins.iter()) {
-                c.sim.set_input(p.x, p.y, p.z, level);
+            for (k, &level) in ins.iter().enumerate() {
+                c.sim.set_input_at(k, level);
             }
             // Out of steps this tick: it waits for the next, as it would in the world.
             if c.left == 0 {
@@ -1902,8 +1940,8 @@ impl NestedAlu {
         // What the chips that stepped put out now.
         for ci in stepped {
             let c = &self.chips[ci];
-            for (p, &i) in c.ports.iter().filter(|p| p.mode.outputs()).zip(&b.chip_outs[ci]) {
-                set(lv, pending, i, c.sim.output(p.x, p.y, p.z));
+            for (k, &i) in b.chip_outs[ci].iter().enumerate() {
+                set(lv, pending, i, c.sim.output_at(k));
             }
         }
         // Onto a bus only where there is one; what changed, noted.
