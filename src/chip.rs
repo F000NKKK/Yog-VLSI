@@ -16,6 +16,9 @@ use crate::content::Blocks;
 const CHIP_TAG: &str = "YogVlsiChip";
 /// NBT tag of a written blueprint's [`CircuitData`].
 const BLUEPRINT_TAG: &str = "YogVlsiBlueprint";
+/// A Blueprint's design longer than this is packed (an NBT string holds 64 KiB).
+const PACK_OVER: usize = 30_000;
+const PACKED: &str = "z:";
 /// Storage key prefix of fabricated chips' circuits.
 const CIRCUIT_KEY: &str = "circuit/";
 
@@ -351,13 +354,31 @@ impl Blueprint {
         Blueprint { name: name.into(), tier, circuit: CircuitData::empty(tier) }
     }
 
+    /// Its NBT: the design as JSON — packed (`z:` and deflated, base64)
+    /// when it's long, an NBT string holding at most 64 KiB.
     pub fn to_nbt(&self) -> String {
-        nbt::wrap(BLUEPRINT_TAG, &serde_json::to_string(self).unwrap_or_default())
+        let json = serde_json::to_string(self).unwrap_or_default();
+        let text = if json.len() > PACK_OVER {
+            use base64::Engine as _;
+            format!("{PACKED}{}", base64::engine::general_purpose::STANDARD.encode(miniz_oxide::deflate::compress_to_vec(json.as_bytes(), 9)))
+        } else {
+            json
+        };
+        nbt::wrap(BLUEPRINT_TAG, &text)
     }
 
     /// The design on a Blueprint's NBT; `None` for a blank one.
     pub fn from_nbt(snbt: &str) -> Option<Self> {
-        serde_json::from_str(&nbt::read(snbt, BLUEPRINT_TAG)?).ok()
+        let text = nbt::read(snbt, BLUEPRINT_TAG)?;
+        match text.strip_prefix(PACKED) {
+            Some(packed) => {
+                use base64::Engine as _;
+                let bytes = base64::engine::general_purpose::STANDARD.decode(packed).ok()?;
+                let json = miniz_oxide::inflate::decompress_to_vec(&bytes).ok()?;
+                serde_json::from_slice(&json).ok()
+            }
+            None => serde_json::from_str(&text).ok(),
+        }
     }
 }
 
@@ -471,5 +492,18 @@ mod tests {
                 .collect();
             println!("{row}");
         }
+    }
+
+    #[test]
+    fn a_big_design_is_packed_and_read_back() {
+        let block = |x| CircuitBlock { x, y: 0, z: 0, state: "minecraft:redstone_wire".into(), items: Vec::new(), redstone_port: None };
+        let bp = Blueprint { name: "Big".into(), tier: Tier::Netherite, circuit: CircuitData { size: 256, blocks: (0..4000).map(block).collect(), ..Default::default() } };
+        let nbt = bp.to_nbt();
+        assert!(nbt.len() < 60_000, "{}", nbt.len());
+        assert!(nbt.contains(PACKED));
+        assert_eq!(Blueprint::from_nbt(&nbt), Some(bp));
+        let small = Blueprint::new("Small", Tier::Wood);
+        assert!(!small.to_nbt().contains(PACKED));
+        assert_eq!(Blueprint::from_nbt(&small.to_nbt()), Some(small));
     }
 }
