@@ -30,7 +30,7 @@ class Emu:
         elif op == "JZ" and a == 0: pc = k
         elif op == "JNZ" and a != 0: pc = k
         elif op == "JC" and self.c: pc = k
-        elif op == "IN": a = self.btn
+        elif op == "IN": a, self.btn = self.btn, 0
         elif op == "RND": a = self.r
         elif op == "PLOT": self.px[a & 63] = a >> 6 & 1
         elif op == "TEST": a = self.px[a & 63]

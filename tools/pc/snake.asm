@@ -7,6 +7,7 @@
 .equ TP 4
 .equ GROW 5
 .equ T 6
+.equ BTN 7
 
 start:
     LDI 36 | ST HEAD
@@ -18,17 +19,18 @@ start:
     JMP newfood
 
 loop:
-    ; Buttons: a new direction, never straight back.
-    IN | ANDI 1 | JZ n1
+    ; The buttons pressed since last time: a new direction, never straight back.
+    IN | ST BTN | JZ move
+    ANDI 1 | JZ n1
     LD DIR | SUBI 1 | JZ move
     LDI 0 | ST DIR | JMP move
-n1: IN | ANDI 2 | JZ n2
+n1: LD BTN | ANDI 2 | JZ n2
     LD DIR | JZ move
     LDI 1 | ST DIR | JMP move
-n2: IN | ANDI 4 | JZ n3
+n2: LD BTN | ANDI 4 | JZ n3
     LD DIR | SUBI 3 | JZ move
     LDI 2 | ST DIR | JMP move
-n3: IN | ANDI 8 | JZ move
+n3: LD BTN | ANDI 8 | JZ move
     LD DIR | SUBI 2 | JZ move
     LDI 3 | ST DIR
 

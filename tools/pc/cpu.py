@@ -25,7 +25,7 @@ OPS = [
     "JZ",    # if A == 0
     "JNZ",   # if A != 0
     "JC",    # if C
-    "IN",    # A = buttons (bit 0 up, 1 down, 2 left, 3 right)
+    "IN",    # A = the buttons pressed since the last IN (bit 0 up, 1 down, 2 left, 3 right)
     "RND",   # A = an 8-bit LFSR, stepping every clock
     "PLOT",  # pixel A[5:0] = A[6]
     "TEST",  # A = pixel A[5:0]
@@ -83,6 +83,12 @@ def build(program, debug=True):
     for p in range(64):
         n.output(f"PX{p // 8}{p % 8}", pixels[p])
 
+    # ── Buttons: a press is kept till an IN has read it ──────────────────
+    # (cleared in the first half of the cycle after the IN — A has it by then).
+    after_in = n.DFF(op["IN"], clk)
+    clear = n.AND(after_in, clk)
+    pressed = [n.LATCH(b, n.OR(b, clear)) for b in btn]
+
     # ── ALU ───────────────────────────────────────────────────────────────
     sub = n.OR(op["SUB"], op["SUBI"])
     imm = n.OR(op["ADDI"], op["SUBI"])
@@ -99,7 +105,7 @@ def build(program, debug=True):
         (op["ANDI"], [n.AND(a, b) for a, b in zip(A, k)]),
         (op["ORI"], [n.OR(a, b) for a, b in zip(A, k)]),
         (op["XORI"], [n.XOR(a, b) for a, b in zip(A, k)]),
-        (op["IN"], btn + [n.ZERO] * 4),
+        (op["IN"], pressed + [n.ZERO] * 4),
         (op["RND"], R),
         (op["TEST"], [test] + [n.ZERO] * 7),
         (op["TXA"], X),
