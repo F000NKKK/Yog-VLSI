@@ -318,7 +318,10 @@ mod tests {
 
         fn out(&self, label: &str) -> bool {
             let (x, y, z) = self.ports[label];
-            self.vm.get_port_output(x, y, z) > 0
+            let level = self.vm.get_port_output(x, y, z);
+            // Full levels only: a table takes a chip's inputs as off or on.
+            assert!(level == 0 || level == 15, "{label} at {level}");
+            level > 0
         }
     }
 
