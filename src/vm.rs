@@ -1722,6 +1722,10 @@ pub struct NestedAlu {
     board: Board,
     levels: Vec<u8>,
     scratch: Vec<u8>,
+    /// The chips to look at next run: what they read changed, or they
+    /// haven't settled. (`levels` holds every chip's outputs from its first run.)
+    pending: Vec<bool>,
+    primed: bool,
     /// The bus channels it reads now (filled by the VM before a run).
     read_now: Vec<u8>,
     /// The bus channels whose level it drives changed in its last run.
@@ -1746,6 +1750,8 @@ struct Board {
     /// Each bus channel it drives and where from.
     drives: Vec<((u8, u16), Option<usize>)>,
     size: usize,
+    /// The chips reading each slot.
+    readers: Vec<Vec<usize>>,
 }
 
 impl NestedAlu {
@@ -1791,6 +1797,14 @@ impl NestedAlu {
             );
         }
         board.faces_out = std::array::from_fn(|f| from.get(&NestedPin::Out(f as u8)).copied());
+        board.readers = vec![Vec::new(); board.size];
+        for (ci, srcs) in board.chip_ins.iter().enumerate() {
+            for &src in srcs.iter().flatten() {
+                if !board.readers[src].contains(&ci) {
+                    board.readers[src].push(ci);
+                }
+            }
+        }
         board.drives = wires
             .iter()
             .filter_map(|(_, t)| match *t {
@@ -1807,6 +1821,8 @@ impl NestedAlu {
             sinks,
             reads_faces,
             board,
+            pending: vec![true; chips.len()],
+            primed: false,
             levels,
             scratch: Vec::new(),
             read_now: Vec::new(),
@@ -1826,19 +1842,40 @@ impl NestedAlu {
         }
         let b = &self.board;
         let lv = &mut self.levels;
-        lv[..6].copy_from_slice(&inputs);
-        lv[6..6 + self.read_now.len()].copy_from_slice(&self.read_now);
+        let pending = &mut self.pending;
         let get = |lv: &[u8], src: Option<usize>| src.map_or(0, |i| lv[i]);
-        let outputs = |chips: &[NestedChip], lv: &mut [u8]| {
-            for (c, outs) in chips.iter().zip(&b.chip_outs) {
+        // A slot's new level: the chips reading it look again.
+        let mut set = |lv: &mut [u8], pending: &mut [bool], slot: usize, level: u8| {
+            if lv[slot] != level {
+                lv[slot] = level;
+                for &ci in &b.readers[slot] {
+                    pending[ci] = true;
+                }
+            }
+        };
+        if !self.primed {
+            for (c, outs) in self.chips.iter().zip(&b.chip_outs) {
                 for (p, &i) in c.ports.iter().filter(|p| p.mode.outputs()).zip(outs) {
                     lv[i] = c.sim.output(p.x, p.y, p.z);
                 }
             }
-        };
-        outputs(&self.chips, lv);
+            self.primed = true;
+        }
+        for (f, &l) in inputs.iter().enumerate() {
+            set(lv, pending, f, l);
+        }
+        for (k, &l) in self.read_now.iter().enumerate() {
+            set(lv, pending, 6 + k, l);
+        }
+        // Only the chips whose inputs changed or that haven't settled —
+        // reading what the others put out as it was.
         let ins = &mut self.scratch;
-        for (c, srcs) in self.chips.iter_mut().zip(&b.chip_ins) {
+        let mut stepped = Vec::new();
+        for (ci, (c, srcs)) in self.chips.iter_mut().zip(&b.chip_ins).enumerate() {
+            if !pending[ci] {
+                continue;
+            }
+            pending[ci] = false;
             ins.clear();
             ins.extend(srcs.iter().map(|&s| get(lv, s)));
             if c.settled_on.as_deref() == Some(&ins[..]) {
@@ -1849,14 +1886,25 @@ impl NestedAlu {
             }
             // Out of steps this tick: it waits for the next, as it would in the world.
             if c.left == 0 {
+                pending[ci] = true;
                 continue;
             }
             let used = c.sim.settle(c.left);
             let settled = used < c.left;
             c.left -= used;
             c.settled_on = settled.then(|| ins.clone());
+            if !settled {
+                pending[ci] = true;
+            }
+            stepped.push(ci);
         }
-        outputs(&self.chips, lv);
+        // What the chips that stepped put out now.
+        for ci in stepped {
+            let c = &self.chips[ci];
+            for (p, &i) in c.ports.iter().filter(|p| p.mode.outputs()).zip(&b.chip_outs[ci]) {
+                set(lv, pending, i, c.sim.output(p.x, p.y, p.z));
+            }
+        }
         // Onto a bus only where there is one; what changed, noted.
         for &((f, ch), src) in &b.drives {
             let now = buses[f as usize % 6].then(|| get(lv, src));
@@ -1869,10 +1917,8 @@ impl NestedAlu {
                 self.changed.push((f, ch));
             }
         }
-        // Settled: every chip settled on what it gets now.
-        self.stable = self.chips.iter().zip(&b.chip_ins).all(|(c, srcs)| {
-            c.settled_on.as_ref().is_some_and(|s| s.len() == srcs.len() && s.iter().zip(srcs).all(|(&v, &src)| v == get(lv, src)))
-        });
+        // Settled: no chip left to look at.
+        self.stable = !self.pending.iter().any(|&p| p);
         self.out = std::array::from_fn(|f| get(lv, b.faces_out[f]));
         self.last = Some((inputs, buses));
         self.last_reads.clone_from(&self.read_now);
