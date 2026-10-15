@@ -982,4 +982,69 @@ mod tests {
         assert_eq!(l.hit(s.x + 3.0, s.y - 2.0).map(|p| &p.pin), Some(&s.pin));
         assert!(l.hit(180.0, 139.0).is_none());
     }
+
+    /// A recording of what's drawn: one JSON line a rect or a text.
+    struct Recorder(std::cell::RefCell<Vec<String>>);
+
+    impl Canvas for Recorder {
+        fn rect(&self, x0: f32, y0: f32, x1: f32, y1: f32, color: u32) {
+            self.0.borrow_mut().push(format!("{{\"r\":[{x0},{y0},{x1},{y1},{color}]}}"));
+        }
+        fn text(&self, text: &str, x: f32, y: f32, scale: f32, color: u32) {
+            self.0.borrow_mut().push(format!("{{\"t\":[{:?},{x},{y},{scale},{color}]}}", text));
+        }
+        fn text_width(&self, text: &str) -> f32 {
+            text.chars().count() as f32 * 6.0
+        }
+    }
+
+    /// The board of a ready-made design's ALU, as the screen gets it.
+    fn design_board(name: &str) -> BoardView {
+        let d = crate::designs::named(name).unwrap();
+        let c = d.circuit(d.tier());
+        let alu = &c.alus[0];
+        let pin = |p: &crate::vm::NestedPin| match p {
+            crate::vm::NestedPin::In(i) => Pin::new(Node::In, board::SIDES[*i as usize]),
+            crate::vm::NestedPin::Out(i) => Pin::new(Node::Out, board::SIDES[*i as usize]),
+            crate::vm::NestedPin::Chip(slot, name) => Pin::new(Node::Chip(*slot), name.as_str()),
+            crate::vm::NestedPin::Bus(i, ch) => Pin::new(Node::Bus(*i), (ch + 1).to_string()),
+        };
+        let outs: Vec<&str> = alu.wires.iter().filter_map(|(_, t)| match t {
+            crate::vm::NestedPin::Out(i) => Some(board::SIDES[*i as usize]),
+            _ => None,
+        }).collect();
+        BoardView {
+            alu: board::AluId { dimension: String::new(), x: 0, y: 0, z: 0 },
+            tier: alu.tier,
+            chips: alu
+                .chips
+                .iter()
+                .map(|(slot, m)| ChipView { slot: *slot, name: m.name.clone(), tier: m.tier, pins: m.ports.iter().map(|p| (p.label.clone(), p.dir)).collect(), active: true })
+                .collect(),
+            sides: board::SIDES
+                .iter()
+                .filter(|s| alu.wires.iter().any(|(f, t)| [f, t].iter().any(|p| matches!(p, crate::vm::NestedPin::In(i) | crate::vm::NestedPin::Out(i) if board::SIDES[*i as usize] == **s))))
+                .map(|s| SideView { side: s.to_string(), name: None, output: outs.contains(s) })
+                .collect(),
+            buses: Vec::new(),
+            wires: alu.wires.iter().map(|(f, t)| Wire { from: pin(f), to: pin(t) }).collect(),
+            layout: Vec::new(),
+            levels: alu.wires.iter().enumerate().filter(|(k, _)| k % 3 == 0).map(|(_, (f, _))| (pin(f), 15)).collect(),
+        }
+    }
+
+    /// Draws a few boards into `OUT` (a directory), a JSON-lines file each,
+    /// for `tools/render_board.py` to make pictures of.
+    #[test]
+    #[ignore]
+    fn render_boards() {
+        let Ok(dir) = std::env::var("OUT") else { return };
+        let boards = [("simple", view()), ("full_adder", design_board("Full adder")), ("decoder", design_board("Decoder 2:4"))];
+        for (name, v) in boards {
+            let mut g = Graph { view: Some(v), layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default() };
+            let rec = Recorder(Default::default());
+            draw(&rec, &mut g, Rect { x: 0.0, y: 0.0, w: 420.0, h: 200.0 });
+            std::fs::write(format!("{dir}/{name}.jsonl"), rec.0.borrow().join("\n")).unwrap();
+        }
+    }
 }
