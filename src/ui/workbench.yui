@@ -68,7 +68,7 @@
                             <Label style="@Count" text="{x:Bind amount(Resource::Quartz)}" />
                         </Row>
                         <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Wood)}">
-                            <Slot index="5" accepts="minecraft:oak_log" />
+                            <Slot index="5" accepts="#minecraft:logs" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column style="@Fill" h="{x:Bind vial(Resource::Wood)}" bg="@Colors.vial.wood" />

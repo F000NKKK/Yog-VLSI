@@ -1,0 +1,533 @@
+// What crafting a block takes, down to the six resources (resource.ydef):
+// what a design's blocks cost to fabricate. Anything not here costs a
+// cobblestone; `*` in an id is any run of letters.
+{
+ "kind": "table",
+ "id": "cost",
+ "columns": {
+  "of": "[string]",
+  "takes": "{string: f64}"
+ },
+ "rows": {
+  "planks": {
+   "of": [
+    "minecraft:*_planks"
+   ],
+   "takes": {
+    "minecraft:oak_log": 0.25
+   }
+  },
+  "stick": {
+   "of": [
+    "minecraft:stick"
+   ],
+   "takes": {
+    "minecraft:oak_log": 0.125
+   }
+  },
+  "stone": {
+   "of": [
+    "minecraft:stone",
+    "minecraft:smooth_stone",
+    "minecraft:stone_button"
+   ],
+   "takes": {
+    "minecraft:cobblestone": 1
+   }
+  },
+  "stone_pressure_plate": {
+   "of": [
+    "minecraft:stone_pressure_plate"
+   ],
+   "takes": {
+    "minecraft:cobblestone": 2
+   }
+  },
+  "gold_nugget": {
+   "of": [
+    "minecraft:gold_nugget"
+   ],
+   "takes": {
+    "minecraft:gold_ingot": 0.1111111111111111
+   }
+  },
+  "copper_ingot": {
+   "of": [
+    "minecraft:copper_ingot"
+   ],
+   "takes": {
+    "minecraft:iron_ingot": 0.5
+   }
+  },
+  "redstone_block": {
+   "of": [
+    "minecraft:redstone_block"
+   ],
+   "takes": {
+    "minecraft:redstone": 9
+   }
+  },
+  "diamond_block": {
+   "of": [
+    "minecraft:diamond_block"
+   ],
+   "takes": {
+    "minecraft:diamond": 9
+   }
+  },
+  "netherite_ingot": {
+   "of": [
+    "minecraft:netherite_ingot"
+   ],
+   "takes": {
+    "minecraft:gold_ingot": 4,
+    "minecraft:quartz": 4
+   }
+  },
+  "alu_wood": {
+   "of": [
+    "yog-vlsi:alu_wood"
+   ],
+   "takes": {
+    "minecraft:oak_planks": 4,
+    "minecraft:copper_ingot": 4,
+    "minecraft:repeater": 1,
+    "minecraft:redstone_block": 1
+   }
+  },
+  "alu_stone": {
+   "of": [
+    "yog-vlsi:alu_stone"
+   ],
+   "takes": {
+    "minecraft:cobblestone": 4,
+    "minecraft:copper_ingot": 4,
+    "minecraft:repeater": 1,
+    "minecraft:redstone_block": 1
+   }
+  },
+  "alu_gold": {
+   "of": [
+    "yog-vlsi:alu_gold"
+   ],
+   "takes": {
+    "minecraft:gold_ingot": 4,
+    "minecraft:copper_ingot": 4,
+    "minecraft:repeater": 1,
+    "minecraft:diamond": 1
+   }
+  },
+  "alu_iron": {
+   "of": [
+    "yog-vlsi:alu_iron"
+   ],
+   "takes": {
+    "minecraft:iron_ingot": 4,
+    "minecraft:copper_ingot": 4,
+    "minecraft:repeater": 1,
+    "minecraft:diamond": 1
+   }
+  },
+  "alu_diamond": {
+   "of": [
+    "yog-vlsi:alu_diamond"
+   ],
+   "takes": {
+    "minecraft:diamond": 4,
+    "minecraft:copper_ingot": 4,
+    "minecraft:repeater": 1,
+    "minecraft:diamond_block": 1
+   }
+  },
+  "alu_netherite": {
+   "of": [
+    "yog-vlsi:alu_netherite"
+   ],
+   "takes": {
+    "minecraft:netherite_ingot": 4,
+    "minecraft:copper_ingot": 4,
+    "minecraft:repeater": 1,
+    "minecraft:diamond_block": 1
+   }
+  },
+  "like_redstone": {
+   "of": [
+    "minecraft:glowstone_dust",
+    "minecraft:gunpowder"
+   ],
+   "takes": {
+    "minecraft:redstone": 1
+   }
+  },
+  "like_wood": {
+   "of": [
+    "minecraft:slime_ball",
+    "minecraft:honey_bottle",
+    "minecraft:hay_block",
+    "minecraft:sand",
+    "minecraft:bow",
+    "minecraft:blaze_rod"
+   ],
+   "takes": {
+    "minecraft:oak_log": 1
+   }
+  },
+  "obsidian": {
+   "of": [
+    "minecraft:obsidian"
+   ],
+   "takes": {
+    "minecraft:cobblestone": 4
+   }
+  },
+  "like_quartz": {
+   "of": [
+    "minecraft:prismarine_shard",
+    "minecraft:prismarine_crystals",
+    "minecraft:ender_eye",
+    "minecraft:diamond"
+   ],
+   "takes": {
+    "minecraft:quartz": 1
+   }
+  },
+  "tripwire_hook": {
+   "of": [
+    "minecraft:tripwire_hook"
+   ],
+   "takes": {
+    "minecraft:iron_ingot": 1,
+    "minecraft:stick": 1
+   }
+  },
+  "redstone_torch": {
+   "of": [
+    "minecraft:redstone_torch",
+    "minecraft:redstone_wall_torch"
+   ],
+   "takes": {
+    "minecraft:redstone": 1,
+    "minecraft:stick": 1
+   }
+  },
+  "repeater": {
+   "of": [
+    "minecraft:repeater"
+   ],
+   "takes": {
+    "minecraft:redstone_torch": 2,
+    "minecraft:redstone": 1,
+    "minecraft:stone": 3
+   }
+  },
+  "comparator": {
+   "of": [
+    "minecraft:comparator"
+   ],
+   "takes": {
+    "minecraft:redstone_torch": 3,
+    "minecraft:quartz": 1,
+    "minecraft:stone": 3
+   }
+  },
+  "redstone_lamp": {
+   "of": [
+    "minecraft:redstone_lamp"
+   ],
+   "takes": {
+    "minecraft:redstone": 4,
+    "minecraft:glowstone_dust": 4
+   }
+  },
+  "lever": {
+   "of": [
+    "minecraft:lever"
+   ],
+   "takes": {
+    "minecraft:stick": 1,
+    "minecraft:cobblestone": 1
+   }
+  },
+  "observer": {
+   "of": [
+    "minecraft:observer"
+   ],
+   "takes": {
+    "minecraft:cobblestone": 6,
+    "minecraft:redstone": 2,
+    "minecraft:quartz": 1
+   }
+  },
+  "note_block": {
+   "of": [
+    "minecraft:note_block"
+   ],
+   "takes": {
+    "minecraft:oak_planks": 8,
+    "minecraft:redstone": 1
+   }
+  },
+  "target": {
+   "of": [
+    "minecraft:target"
+   ],
+   "takes": {
+    "minecraft:redstone": 4,
+    "minecraft:hay_block": 1
+   }
+  },
+  "piston": {
+   "of": [
+    "minecraft:piston"
+   ],
+   "takes": {
+    "minecraft:oak_planks": 3,
+    "minecraft:cobblestone": 4,
+    "minecraft:iron_ingot": 1,
+    "minecraft:redstone": 1
+   }
+  },
+  "sticky_piston": {
+   "of": [
+    "minecraft:sticky_piston"
+   ],
+   "takes": {
+    "minecraft:piston": 1,
+    "minecraft:slime_ball": 1
+   }
+  },
+  "chest": {
+   "of": [
+    "minecraft:chest",
+    "minecraft:barrel"
+   ],
+   "takes": {
+    "minecraft:oak_planks": 8
+   }
+  },
+  "trapped_chest": {
+   "of": [
+    "minecraft:trapped_chest"
+   ],
+   "takes": {
+    "minecraft:chest": 1,
+    "minecraft:tripwire_hook": 1
+   }
+  },
+  "ender_chest": {
+   "of": [
+    "minecraft:ender_chest"
+   ],
+   "takes": {
+    "minecraft:obsidian": 8,
+    "minecraft:ender_eye": 1
+   }
+  },
+  "hopper": {
+   "of": [
+    "minecraft:hopper"
+   ],
+   "takes": {
+    "minecraft:iron_ingot": 5,
+    "minecraft:chest": 1
+   }
+  },
+  "dropper": {
+   "of": [
+    "minecraft:dropper"
+   ],
+   "takes": {
+    "minecraft:cobblestone": 7,
+    "minecraft:redstone": 1
+   }
+  },
+  "dispenser": {
+   "of": [
+    "minecraft:dispenser"
+   ],
+   "takes": {
+    "minecraft:dropper": 1,
+    "minecraft:bow": 1
+   }
+  },
+  "furnace": {
+   "of": [
+    "minecraft:furnace"
+   ],
+   "takes": {
+    "minecraft:cobblestone": 8
+   }
+  },
+  "blast_furnace": {
+   "of": [
+    "minecraft:blast_furnace"
+   ],
+   "takes": {
+    "minecraft:smooth_stone": 3,
+    "minecraft:furnace": 1,
+    "minecraft:iron_ingot": 5
+   }
+  },
+  "smoker": {
+   "of": [
+    "minecraft:smoker"
+   ],
+   "takes": {
+    "minecraft:oak_log": 4,
+    "minecraft:furnace": 1
+   }
+  },
+  "brewing_stand": {
+   "of": [
+    "minecraft:brewing_stand"
+   ],
+   "takes": {
+    "minecraft:blaze_rod": 1,
+    "minecraft:cobblestone": 3
+   }
+  },
+  "slime_block": {
+   "of": [
+    "minecraft:slime_block"
+   ],
+   "takes": {
+    "minecraft:slime_ball": 9
+   }
+  },
+  "honey_block": {
+   "of": [
+    "minecraft:honey_block"
+   ],
+   "takes": {
+    "minecraft:honey_bottle": 4
+   }
+  },
+  "tnt": {
+   "of": [
+    "minecraft:tnt"
+   ],
+   "takes": {
+    "minecraft:sand": 4,
+    "minecraft:gunpowder": 5
+   }
+  },
+  "rail": {
+   "of": [
+    "minecraft:rail"
+   ],
+   "takes": {
+    "minecraft:iron_ingot": 0.375,
+    "minecraft:stick": 0.0625
+   }
+  },
+  "powered_rail": {
+   "of": [
+    "minecraft:powered_rail"
+   ],
+   "takes": {
+    "minecraft:gold_ingot": 1,
+    "minecraft:stick": 0.16666666666666666,
+    "minecraft:redstone": 0.16666666666666666
+   }
+  },
+  "detector_rail": {
+   "of": [
+    "minecraft:detector_rail"
+   ],
+   "takes": {
+    "minecraft:iron_ingot": 1,
+    "minecraft:stone_pressure_plate": 0.16666666666666666,
+    "minecraft:redstone": 0.16666666666666666
+   }
+  },
+  "activator_rail": {
+   "of": [
+    "minecraft:activator_rail"
+   ],
+   "takes": {
+    "minecraft:iron_ingot": 1,
+    "minecraft:stick": 0.3333333333333333,
+    "minecraft:redstone_torch": 0.16666666666666666
+   }
+  },
+  "iron_door": {
+   "of": [
+    "minecraft:iron_door"
+   ],
+   "takes": {
+    "minecraft:iron_ingot": 2
+   }
+  },
+  "iron_trapdoor": {
+   "of": [
+    "minecraft:iron_trapdoor"
+   ],
+   "takes": {
+    "minecraft:iron_ingot": 4
+   }
+  },
+  "glass": {
+   "of": [
+    "minecraft:glass"
+   ],
+   "takes": {
+    "minecraft:sand": 1
+   }
+  },
+  "glowstone": {
+   "of": [
+    "minecraft:glowstone"
+   ],
+   "takes": {
+    "minecraft:glowstone_dust": 4
+   }
+  },
+  "sea_lantern": {
+   "of": [
+    "minecraft:sea_lantern"
+   ],
+   "takes": {
+    "minecraft:prismarine_shard": 4,
+    "minecraft:prismarine_crystals": 5
+   }
+  },
+  "port": {
+   "of": [
+    "yog-vlsi:port_input",
+    "yog-vlsi:port_output",
+    "yog-vlsi:port_bidi"
+   ],
+   "takes": {
+    "minecraft:redstone": 2,
+    "minecraft:stone": 4
+   }
+  },
+  "analog_cable": {
+   "of": [
+    "yog-vlsi:analog_cable"
+   ],
+   "takes": {
+    "minecraft:redstone": 0.3333333333333333
+   }
+  },
+  "digital_cable": {
+   "of": [
+    "yog-vlsi:digital_cable"
+   ],
+   "takes": {
+    "minecraft:gold_nugget": 1,
+    "minecraft:redstone": 1,
+    "minecraft:iron_ingot": 0.25
+   }
+  },
+  "redstone_port": {
+   "of": [
+    "yog-vlsi:redstone_port"
+   ],
+   "takes": {
+    "minecraft:smooth_stone": 8,
+    "minecraft:redstone": 1
+   }
+  }
+ }
+}

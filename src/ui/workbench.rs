@@ -137,9 +137,13 @@ impl WorkbenchVm {
         let inputs: Vec<String> = r
             .inputs()
             .iter()
-            .map(|(id, units)| match units {
-                1 => item_name(id),
-                n => format!("{} ×{n}", item_name(id)),
+            .map(|(id, units)| {
+                // A tag: any of the resource.
+                let name = if id.starts_with('#') { r.name() } else { crate::resources::item_name(id) };
+                match units {
+                    1 => name,
+                    n => format!("{name} ×{n}"),
+                }
             })
             .collect();
         Strings::screen_workbench_resource_tooltip(r.name(), self.stored(r), inputs.join(", "))
@@ -234,12 +238,6 @@ impl WorkbenchVm {
 }
 
 /// The game's name of item or block `id`.
-fn item_name(id: &str) -> String {
-    let path = id.strip_prefix("minecraft:").unwrap_or(id);
-    let block = path.ends_with("_block") || matches!(path, "oak_log" | "cobblestone");
-    yog_api::tr(&format!("{}.minecraft.{path}", if block { "block" } else { "item" }))
-}
-
 fn send(request: &Request) {
     if let (Some(srv), Ok(json)) = (yog_api::server(), serde_json::to_string(request)) {
         srv.send_to_server(REQUEST_CHANNEL, json.as_bytes());
@@ -263,7 +261,7 @@ fn absorb(srv: &dyn yog_api::Server, bench: &BenchId) {
         let Some((item, count, _)) = srv.get_inventory_slot(&bench.dimension, bench.pos(), r.slot()) else {
             continue;
         };
-        if let Some(units) = r.units_of(&item)
+        if let Some(units) = r.units_of(srv, &item)
             && srv.set_inventory_slot(&bench.dimension, bench.pos(), r.slot(), &item, 0, "")
         {
             gained[r.index()] += units * count as u64;

@@ -10,7 +10,7 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use criterion::{BatchSize, BenchmarkId, Criterion};
-use yog_vlsi::tier::Tier;
+use yog_vlsi::content::Tier;
 use yog_vlsi::vm::{BlockType, Facing, RedstoneVM};
 
 /// Each world size once (Gold and Iron share 64).

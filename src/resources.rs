@@ -2,74 +2,50 @@
 //! resource slots take (items and their storage blocks), and what a circuit
 //! costs in them.
 
-use serde::{Deserialize, Serialize};
-
 use crate::chip::CircuitBlock;
-
-/// One stored material.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Resource {
-    Redstone,
-    Iron,
-    Gold,
-    Quartz,
-    Wood,
-    Stone,
-}
+pub use crate::content::Resource;
+use crate::content::Cost;
 
 /// An amount of each [`Resource`], in [`Resource::ALL`] order.
 pub type Amounts = [u64; 6];
 
 impl Resource {
-    pub const ALL: [Resource; 6] = [
-        Resource::Redstone,
-        Resource::Iron,
-        Resource::Gold,
-        Resource::Quartz,
-        Resource::Wood,
-        Resource::Stone,
-    ];
-
-    pub fn index(self) -> usize {
-        self as usize
-    }
-
     /// The workbench slot it's fed through (1–6; 0 is the chip, 7 the blueprint).
     pub fn slot(self) -> u32 {
         self.index() as u32 + 1
     }
 
-    /// What its slot takes and how many units each item is worth.
-    pub fn inputs(self) -> &'static [(&'static str, u64)] {
-        match self {
-            Resource::Redstone => &[("minecraft:redstone", 1), ("minecraft:redstone_block", 9)],
-            Resource::Iron => &[("minecraft:iron_ingot", 1), ("minecraft:iron_block", 9)],
-            Resource::Gold => &[("minecraft:gold_ingot", 1), ("minecraft:gold_block", 9)],
-            Resource::Quartz => &[("minecraft:quartz", 1), ("minecraft:quartz_block", 4)],
-            Resource::Wood => &[("minecraft:oak_log", 1)],
-            Resource::Stone => &[("minecraft:cobblestone", 1)],
-        }
+    /// Units `item` is worth in this resource's slot, if it takes it (an
+    /// input is an item or `#` a tag of them).
+    pub fn units_of(self, srv: &dyn yog_api::Server, item: &str) -> Option<u64> {
+        self.inputs()
+            .iter()
+            .find(|(input, _)| match input.strip_prefix('#') {
+                Some(tag) => srv.has_item_tag(item, tag),
+                None => *input == item,
+            })
+            .map(|(_, n)| *n)
     }
 
-    /// Units `item` is worth in this resource's slot, if it takes it.
-    pub fn units_of(self, item: &str) -> Option<u64> {
-        self.inputs().iter().find(|(id, _)| *id == item).map(|(_, n)| *n)
+    /// Whether `id` is this resource itself in a design.
+    fn is(self, id: &str) -> bool {
+        self.base().iter().any(|p| fits(p, id))
     }
+}
 
-
-    /// The game's name for it (the base item's translation).
-    pub fn name(self) -> String {
-        let key = match self {
-            Resource::Redstone => "item.minecraft.redstone",
-            Resource::Iron => "item.minecraft.iron_ingot",
-            Resource::Gold => "item.minecraft.gold_ingot",
-            Resource::Quartz => "item.minecraft.quartz",
-            Resource::Wood => "block.minecraft.oak_log",
-            Resource::Stone => "block.minecraft.cobblestone",
-        };
-        yog_api::tr(key)
+/// Whether `id` is `pattern` — `*` in it any run of letters.
+fn fits(pattern: &str, id: &str) -> bool {
+    match pattern.split_once('*') {
+        Some((pre, post)) => id.len() >= pre.len() + post.len() && id.starts_with(pre) && id.ends_with(post),
+        None => pattern == id,
     }
+}
 
+/// The game's name for one of the resources' inputs.
+pub fn item_name(id: &str) -> String {
+    let path = id.strip_prefix("minecraft:").unwrap_or(id);
+    let block = path.ends_with("_block") || path == "cobblestone";
+    yog_api::tr(&format!("{}.minecraft.{path}", if block { "block" } else { "item" }))
 }
 
 /// `n` short: `999`, `1.2k`, `15k`, `1.5m`, `2b`, `3t`.
@@ -139,194 +115,18 @@ pub fn circuit_cost(circuit: &crate::chip::CircuitData, load: &dyn Fn(&str) -> O
     total.map(|units| units.ceil() as u64)
 }
 
-fn add(r: Resource, n: f64, total: &mut [f64; 6]) {
-    total[r.index()] += n;
-}
-
-/// Adds what `n` of item/block `id` takes in crafting to `total`.
+/// Adds what `n` of item/block `id` takes in crafting to `total`
+/// (`cost.ydef`, down to the resources themselves).
 fn add_block(id: &str, n: f64, total: &mut [f64; 6]) {
-    use Resource::*;
-    let mut item = |id: &str, k: f64| add_block(id, n * k, total);
-    match id {
-        // The six materials themselves.
-        "minecraft:redstone" | "minecraft:redstone_wire" => add(Redstone, n, total),
-        "minecraft:iron_ingot" => add(Iron, n, total),
-        "minecraft:gold_ingot" => add(Gold, n, total),
-        "minecraft:quartz" => add(Quartz, n, total),
-        "minecraft:oak_log" => add(Wood, n, total),
-        "minecraft:cobblestone" => add(Stone, n, total),
-        // Plain intermediates.
-        "minecraft:oak_planks" => item("minecraft:oak_log", 0.25),
-        "minecraft:stick" => item("minecraft:oak_log", 0.125),
-        "minecraft:stone" | "minecraft:smooth_stone" | "minecraft:stone_button" => item("minecraft:cobblestone", 1.0),
-        "minecraft:stone_pressure_plate" => item("minecraft:cobblestone", 2.0),
-        "minecraft:gold_nugget" => item("minecraft:gold_ingot", 1.0 / 9.0),
-        "minecraft:copper_ingot" => item("minecraft:iron_ingot", 0.5),
-        "minecraft:redstone_block" => item("minecraft:redstone", 9.0),
-        "minecraft:diamond_block" => item("minecraft:diamond", 9.0),
-        "minecraft:netherite_ingot" => {
-            item("minecraft:gold_ingot", 4.0);
-            item("minecraft:quartz", 4.0);
+    if let Some(r) = Resource::ALL.into_iter().find(|r| r.is(id)) {
+        total[r.index()] += n;
+    } else if let Some(c) = Cost::ALL.into_iter().find(|c| c.of().iter().any(|p| fits(p, id))) {
+        for (what, k) in c.takes() {
+            add_block(what, n * k, total);
         }
-        // An ALU (in a design): its recipe — four of its tier's material,
-        // four copper, a repeater, its core block.
-        id if crate::content::Tier::from_alu(id).is_some() => {
-            use crate::content::Tier::*;
-            let (material, core) = match crate::content::Tier::from_alu(id).unwrap_or(Wood) {
-                Wood => ("minecraft:oak_planks", "minecraft:redstone_block"),
-                Stone => ("minecraft:cobblestone", "minecraft:redstone_block"),
-                Gold => ("minecraft:gold_ingot", "minecraft:diamond"),
-                Iron => ("minecraft:iron_ingot", "minecraft:diamond"),
-                Diamond => ("minecraft:diamond", "minecraft:diamond_block"),
-                Netherite => ("minecraft:netherite_ingot", "minecraft:diamond_block"),
-            };
-            item(material, 4.0);
-            item("minecraft:copper_ingot", 4.0);
-            item("minecraft:repeater", 1.0);
-            item(core, 1.0);
-        }
-        // No resource of their own: the nearest one.
-        "minecraft:glowstone_dust" | "minecraft:gunpowder" => item("minecraft:redstone", 1.0),
-        "minecraft:slime_ball" | "minecraft:honey_bottle" | "minecraft:hay_block" | "minecraft:sand"
-        | "minecraft:bow" | "minecraft:blaze_rod" => item("minecraft:oak_log", 1.0),
-        "minecraft:obsidian" => item("minecraft:cobblestone", 4.0),
-        "minecraft:prismarine_shard" | "minecraft:prismarine_crystals" | "minecraft:ender_eye"
-        | "minecraft:diamond" => item("minecraft:quartz", 1.0),
-        "minecraft:tripwire_hook" => {
-            item("minecraft:iron_ingot", 1.0);
-            item("minecraft:stick", 1.0);
-        }
-        // Components.
-        "minecraft:redstone_torch" | "minecraft:redstone_wall_torch" => {
-            item("minecraft:redstone", 1.0);
-            item("minecraft:stick", 1.0);
-        }
-        "minecraft:repeater" => {
-            item("minecraft:redstone_torch", 2.0);
-            item("minecraft:redstone", 1.0);
-            item("minecraft:stone", 3.0);
-        }
-        "minecraft:comparator" => {
-            item("minecraft:redstone_torch", 3.0);
-            item("minecraft:quartz", 1.0);
-            item("minecraft:stone", 3.0);
-        }
-        "minecraft:redstone_lamp" => {
-            item("minecraft:redstone", 4.0);
-            item("minecraft:glowstone_dust", 4.0);
-        }
-        "minecraft:lever" => {
-            item("minecraft:stick", 1.0);
-            item("minecraft:cobblestone", 1.0);
-        }
-        "minecraft:observer" => {
-            item("minecraft:cobblestone", 6.0);
-            item("minecraft:redstone", 2.0);
-            item("minecraft:quartz", 1.0);
-        }
-        "minecraft:note_block" => {
-            item("minecraft:oak_planks", 8.0);
-            item("minecraft:redstone", 1.0);
-        }
-        "minecraft:target" => {
-            item("minecraft:redstone", 4.0);
-            item("minecraft:hay_block", 1.0);
-        }
-        "minecraft:piston" => {
-            item("minecraft:oak_planks", 3.0);
-            item("minecraft:cobblestone", 4.0);
-            item("minecraft:iron_ingot", 1.0);
-            item("minecraft:redstone", 1.0);
-        }
-        "minecraft:sticky_piston" => {
-            item("minecraft:piston", 1.0);
-            item("minecraft:slime_ball", 1.0);
-        }
-        "minecraft:chest" | "minecraft:barrel" => item("minecraft:oak_planks", 8.0),
-        "minecraft:trapped_chest" => {
-            item("minecraft:chest", 1.0);
-            item("minecraft:tripwire_hook", 1.0);
-        }
-        "minecraft:ender_chest" => {
-            item("minecraft:obsidian", 8.0);
-            item("minecraft:ender_eye", 1.0);
-        }
-        "minecraft:hopper" => {
-            item("minecraft:iron_ingot", 5.0);
-            item("minecraft:chest", 1.0);
-        }
-        "minecraft:dropper" => {
-            item("minecraft:cobblestone", 7.0);
-            item("minecraft:redstone", 1.0);
-        }
-        "minecraft:dispenser" => {
-            item("minecraft:dropper", 1.0);
-            item("minecraft:bow", 1.0);
-        }
-        "minecraft:furnace" => item("minecraft:cobblestone", 8.0),
-        "minecraft:blast_furnace" => {
-            item("minecraft:smooth_stone", 3.0);
-            item("minecraft:furnace", 1.0);
-            item("minecraft:iron_ingot", 5.0);
-        }
-        "minecraft:smoker" => {
-            item("minecraft:oak_log", 4.0);
-            item("minecraft:furnace", 1.0);
-        }
-        "minecraft:brewing_stand" => {
-            item("minecraft:blaze_rod", 1.0);
-            item("minecraft:cobblestone", 3.0);
-        }
-        "minecraft:slime_block" => item("minecraft:slime_ball", 9.0),
-        "minecraft:honey_block" => item("minecraft:honey_bottle", 4.0),
-        "minecraft:tnt" => {
-            item("minecraft:sand", 4.0);
-            item("minecraft:gunpowder", 5.0);
-        }
-        "minecraft:rail" => {
-            item("minecraft:iron_ingot", 6.0 / 16.0);
-            item("minecraft:stick", 1.0 / 16.0);
-        }
-        "minecraft:powered_rail" => {
-            item("minecraft:gold_ingot", 1.0);
-            item("minecraft:stick", 1.0 / 6.0);
-            item("minecraft:redstone", 1.0 / 6.0);
-        }
-        "minecraft:detector_rail" => {
-            item("minecraft:iron_ingot", 1.0);
-            item("minecraft:stone_pressure_plate", 1.0 / 6.0);
-            item("minecraft:redstone", 1.0 / 6.0);
-        }
-        "minecraft:activator_rail" => {
-            item("minecraft:iron_ingot", 1.0);
-            item("minecraft:stick", 2.0 / 6.0);
-            item("minecraft:redstone_torch", 1.0 / 6.0);
-        }
-        "minecraft:iron_door" => item("minecraft:iron_ingot", 2.0),
-        "minecraft:iron_trapdoor" => item("minecraft:iron_ingot", 4.0),
-        "minecraft:glass" => item("minecraft:sand", 1.0),
-        "minecraft:glowstone" => item("minecraft:glowstone_dust", 4.0),
-        "minecraft:sea_lantern" => {
-            item("minecraft:prismarine_shard", 4.0);
-            item("minecraft:prismarine_crystals", 5.0);
-        }
-        // VLSI's own blocks.
-        "yog-vlsi:port_input" | "yog-vlsi:port_output" | "yog-vlsi:port_bidi" => {
-            item("minecraft:redstone", 2.0);
-            item("minecraft:stone", 4.0);
-        }
-        "yog-vlsi:analog_cable" => item("minecraft:redstone", 1.0 / 3.0),
-        "yog-vlsi:digital_cable" => {
-            item("minecraft:gold_nugget", 1.0);
-            item("minecraft:redstone", 1.0);
-            item("minecraft:iron_ingot", 0.25);
-        }
-        "yog-vlsi:redstone_port" => {
-            item("minecraft:smooth_stone", 8.0);
-            item("minecraft:redstone", 1.0);
-        }
+    } else {
         // Anything else: a block of stone.
-        _ => add(Stone, n, total),
+        total[Resource::Stone.index()] += n;
     }
 }
 
@@ -356,6 +156,13 @@ mod tests {
         assert_eq!(c[Resource::Redstone.index()], 6);
         assert_eq!(c[Resource::Stone.index()], 6);
         assert_eq!(c[Resource::Wood.index()], 1);
+    }
+
+    #[test]
+    fn any_wood_is_wood() {
+        let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new(), redstone_port: None };
+        assert_eq!(cost(&[block("minecraft:spruce_planks"), block("minecraft:cherry_planks")]), [0, 0, 0, 0, 1, 0]);
+        assert_eq!(cost(&[block("minecraft:stripped_birch_log"), block("minecraft:crimson_stem")]), [0, 0, 0, 0, 1, 0]);
     }
 
     #[test]

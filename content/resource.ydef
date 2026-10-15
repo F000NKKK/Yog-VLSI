@@ -1,0 +1,77 @@
+// The six materials a workbench stores: what its slot for each takes (an
+// item, or `#` a tag of them, and how many units it's worth), and the ids
+// that are it in a design (`*` any run of letters).
+{
+  "kind": "table",
+  "id": "resource",
+  "serde": true,
+  "columns": {
+    "name": "text",
+    "inputs": "{string: u64}",
+    "base": "[string]"
+  },
+  "rows": {
+    "redstone": {
+      "name": "@Strings.resource_redstone",
+      "inputs": {
+        "minecraft:redstone": 1,
+        "minecraft:redstone_block": 9
+      },
+      "base": [
+        "minecraft:redstone",
+        "minecraft:redstone_wire"
+      ]
+    },
+    "iron": {
+      "name": "@Strings.resource_iron",
+      "inputs": {
+        "minecraft:iron_ingot": 1,
+        "minecraft:iron_block": 9
+      },
+      "base": [
+        "minecraft:iron_ingot"
+      ]
+    },
+    "gold": {
+      "name": "@Strings.resource_gold",
+      "inputs": {
+        "minecraft:gold_ingot": 1,
+        "minecraft:gold_block": 9
+      },
+      "base": [
+        "minecraft:gold_ingot"
+      ]
+    },
+    "quartz": {
+      "name": "@Strings.resource_quartz",
+      "inputs": {
+        "minecraft:quartz": 1,
+        "minecraft:quartz_block": 4
+      },
+      "base": [
+        "minecraft:quartz"
+      ]
+    },
+    "wood": {
+      "name": "@Strings.resource_wood",
+      "inputs": {
+        "#minecraft:logs": 1
+      },
+      "base": [
+        "minecraft:*_log",
+        "minecraft:*_wood",
+        "minecraft:*_stem",
+        "minecraft:*_hyphae"
+      ]
+    },
+    "stone": {
+      "name": "@Strings.resource_stone",
+      "inputs": {
+        "minecraft:cobblestone": 1
+      },
+      "base": [
+        "minecraft:cobblestone"
+      ]
+    }
+  }
+}
