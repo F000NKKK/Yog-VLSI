@@ -194,7 +194,6 @@ pub fn owner(dim: &str, pos: BlockPos) -> Option<BlockPos> {
         (d == dim && inside(area(at, disp.facing, disp.size), pos)).then_some(at)
     })
 }
-}
 
 /// The bus's writes into the GPUs, after the ALUs stepped; then what they
 /// show out to the players near them.
