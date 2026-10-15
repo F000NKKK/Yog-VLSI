@@ -185,16 +185,14 @@ fn send(srv: &dyn yog_api::Server, n: u64) {
     }
 }
 
-/// The way from the block to the player who placed it, the nearest of four.
-fn facing_toward(srv: &dyn yog_api::Server, player: &str, pos: BlockPos) -> Facing {
-    let Some(info) = srv.player_info(player).and_then(|p| srv.entity_info(&p.uuid)) else { return Facing::S };
-    let (dx, dz) = (info.pos.0 - (pos.x as f64 + 0.5), info.pos.2 - (pos.z as f64 + 0.5));
-    if dx.abs() > dz.abs() {
-        if dx > 0.0 { Facing::E } else { Facing::W }
-    } else if dz > 0.0 {
-        Facing::S
-    } else {
-        Facing::N
+/// The way a Display's front faces: its block's `facing`.
+fn facing_of(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) -> Facing {
+    let state = srv.get_block_state(dim, pos).unwrap_or_default();
+    match state.split("facing=").nth(1).and_then(|r| r.split([',', ']']).next()) {
+        Some("north") => Facing::N,
+        Some("east") => Facing::E,
+        Some("west") => Facing::W,
+        _ => Facing::S,
     }
 }
 
@@ -224,7 +222,7 @@ pub fn save(srv: &dyn yog_api::Server) {
 pub fn register(registry: &mut Registry) {
     registry.on_player_place_block(|e, phase, srv| {
         if phase == EventPhase::Post && e.block_id == Blocks::DISPLAY {
-            let facing = facing_toward(srv, &e.player_name, e.pos);
+            let facing = facing_of(srv, &e.dimension, e.pos);
             DISPLAYS
                 .lock()
                 .unwrap()
