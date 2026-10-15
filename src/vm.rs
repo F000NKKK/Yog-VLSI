@@ -374,8 +374,10 @@ pub struct RedstoneVM {
     /// Settled, and nothing from outside changed since: another step would
     /// change nothing either, so [`settle`](Self::settle) skips it.
     quiet: bool,
-    /// Each bus cell's run (an index into `bus_levels`).
+    /// Each bus cell's run (an index into `bus_levels`), and the ALU faces
+    /// on each run — worked out again when a block changes (`None`).
     bus_run: HashMap<u32, usize>,
+    bus_faces: Option<Vec<Vec<(u32, u8)>>>,
     /// Each bus run's channels: the strongest level any ALU on it drives.
     bus_levels: Vec<HashMap<u16, u8>>,
 }
@@ -417,6 +419,7 @@ impl RedstoneVM {
             rng: 0x9E37_79B9_7F4A_7C15,
             quiet: false,
             bus_run: HashMap::new(),
+            bus_faces: None,
             bus_levels: Vec::new(),
         }
     }
@@ -520,6 +523,7 @@ impl RedstoneVM {
 
     /// Writes `cell` at `i` (air removes it).
     fn put(&mut self, i: u32, cell: Cell) {
+        self.bus_faces = None;
         let found = self.active.binary_search(&i);
         if cell.is_air() {
             if let Ok(at) = found {
@@ -643,7 +647,7 @@ impl RedstoneVM {
             let now = self.state();
             if now == before {
                 // Not while a nested ALU's chip waits for its next tick's steps.
-                self.quiet = self.nested.values().all(|a| a.chips.iter().all(|c| c.settled_on.is_some()));
+                self.quiet = self.nested.values().all(|a| a.stable);
                 return n;
             }
             before = now;
@@ -666,11 +670,10 @@ impl RedstoneVM {
             mix(u64::from(c.power) | u64::from(c.strong) << 8 | u64::from(c.weak) << 16 | u64::from(c.timer) << 24 | u64::from(i) << 32);
             mix(u64::from(c.watched));
         }
-        // A nested ALU's chips settle inside a step; still running (a clock), the circuit isn't settled.
-        for alu in self.nested.values() {
-            for chip in &alu.chips {
-                mix(chip.vm.state());
-            }
+        // A nested ALU still running (a clock in a chip, a chip out of
+        // steps): the circuit isn't settled.
+        if self.nested.values().any(|a| !a.stable) {
+            mix(self.tick);
         }
         h
     }
@@ -926,47 +929,55 @@ impl RedstoneVM {
     /// 5b. Buses: each run carries, per channel, the strongest level the
     /// ALUs on it drove last step.
     fn bus_networks(&mut self) {
-        self.bus_run.clear();
-        self.bus_levels.clear();
-        for k in 0..self.active.len() {
-            let start = self.active[k];
-            if self.get(start).block != BlockType::Bus || self.bus_run.contains_key(&start) {
-                continue;
-            }
-            let run = self.bus_levels.len();
-            let mut levels: HashMap<u16, u8> = HashMap::new();
-            self.bus_run.insert(start, run);
-            let mut queue = VecDeque::from([start]);
-            while let Some(i) = queue.pop_front() {
-                for d in Facing::ALL {
-                    let Some(n) = self.at(i, d) else { continue };
-                    match self.get(n).block {
-                        BlockType::Bus if !self.bus_run.contains_key(&n) => {
-                            self.bus_run.insert(n, run);
-                            queue.push_back(n);
-                        }
-                        BlockType::Alu => {
-                            // The face of that ALU this cable touches.
-                            let face = d.opposite().index() as u8;
-                            for (&(f, ch), &l) in self.nested.get(&n).map(|a| &a.drives).into_iter().flatten() {
-                                if f == face {
-                                    let e = levels.entry(ch).or_insert(0);
-                                    *e = (*e).max(l);
-                                }
+        if self.bus_faces.is_none() {
+            self.bus_run.clear();
+            let mut runs: Vec<Vec<(u32, u8)>> = Vec::new();
+            for k in 0..self.active.len() {
+                let start = self.active[k];
+                if self.get(start).block != BlockType::Bus || self.bus_run.contains_key(&start) {
+                    continue;
+                }
+                let run = runs.len();
+                let mut faces = Vec::new();
+                self.bus_run.insert(start, run);
+                let mut queue = VecDeque::from([start]);
+                while let Some(i) = queue.pop_front() {
+                    for d in Facing::ALL {
+                        let Some(n) = self.at(i, d) else { continue };
+                        match self.get(n).block {
+                            BlockType::Bus if !self.bus_run.contains_key(&n) => {
+                                self.bus_run.insert(n, run);
+                                queue.push_back(n);
                             }
+                            // The face of that ALU this cable touches.
+                            BlockType::Alu => faces.push((n, d.opposite().index() as u8)),
+                            _ => {}
                         }
-                        _ => {}
+                    }
+                }
+                runs.push(faces);
+            }
+            self.bus_faces = Some(runs);
+        }
+        let runs = self.bus_faces.as_ref().map_or(0, Vec::len);
+        self.bus_levels.resize_with(runs, HashMap::new);
+        for (run, faces) in self.bus_faces.iter().flatten().enumerate() {
+            let levels = &mut self.bus_levels[run];
+            levels.clear();
+            for &(alu, face) in faces {
+                for (&(f, ch), &l) in self.nested.get(&alu).map(|a| &a.drives).into_iter().flatten() {
+                    if f == face && l > 0 {
+                        let e = levels.entry(ch).or_insert(0);
+                        *e = (*e).max(l);
                     }
                 }
             }
-            self.bus_levels.push(levels);
         }
     }
 
-    /// The channels of the bus on face `f` of the cell `i`, if one's there.
-    fn bus_on(&self, i: u32, f: Facing) -> Option<HashMap<u16, u8>> {
-        let n = self.at(i, f)?;
-        self.bus_run.get(&n).and_then(|&r| self.bus_levels.get(r)).cloned()
+    /// The bus run on face `f` of the cell `i`, if one's there.
+    fn bus_on(&self, i: u32, f: Facing) -> Option<usize> {
+        self.bus_run.get(&self.at(i, f)?).copied()
     }
 
     /// 5. Every component decides its next output.
@@ -1021,23 +1032,30 @@ impl RedstoneVM {
             .collect();
         // Nested ALUs: their faces' power in, their chips run, their faces' levels out.
         let mut changes = changes;
-        type FaceIn = ([u8; 6], [Option<HashMap<u16, u8>>; 6]);
+        type FaceIn = ([u8; 6], [bool; 6], Vec<u8>);
         let alus: Vec<(u32, FaceIn)> = self
             .nested
-            .keys()
-            .filter(|&&i| self.get(i).block == BlockType::Alu)
-            .map(|&i| {
+            .iter()
+            .filter(|&(&i, _)| self.get(i).block == BlockType::Alu)
+            .map(|(&i, alu)| {
                 // From a cable, its level; else the redstone into that face.
                 let face = |f| match self.next(i, f).block {
                     BlockType::Cable => self.next(i, f).power,
                     _ => self.input_from(i, f, true),
                 };
-                (i, (Facing::ALL.map(face), Facing::ALL.map(|f| self.bus_on(i, f))))
+                let runs = Facing::ALL.map(|f| self.bus_on(i, f));
+                // Only the channels its board reads.
+                let reads = alu
+                    .reads
+                    .iter()
+                    .map(|&(f, ch)| runs[f as usize % 6].and_then(|r| self.bus_levels[r].get(&ch).copied()).unwrap_or(0))
+                    .collect();
+                (i, (Facing::ALL.map(face), runs.map(|r| r.is_some()), reads))
             })
             .collect();
-        for (i, (inputs, buses)) in alus {
+        for (i, (inputs, buses, reads)) in alus {
             let Some(alu) = self.nested.get_mut(&i) else { continue };
-            let outputs = alu.run(inputs, &buses);
+            let outputs = alu.run(inputs, buses, reads);
             let packed = outputs.iter().enumerate().fold(0u32, |p, (k, &l)| p | u32::from(l.min(15)) << (4 * k));
             let cell = *self.get(i);
             if cell.watched != packed {
@@ -1382,26 +1400,49 @@ pub struct NestedAlu {
     pub wires: Vec<(NestedPin, NestedPin)>,
     /// What it drives onto the buses on its faces: (face, channel) → level.
     pub drives: HashMap<(u8, u16), u8>,
+    /// What feeds each sink: the board's wires, to → from.
+    sources: HashMap<NestedPin, NestedPin>,
+    /// The bus channels its board reads, (face, channel).
+    reads: Vec<(u8, u16)>,
+    /// What it last ran on, and what came out: run again on the same, its
+    /// chips settled, nothing would change.
+    last: Option<([u8; 6], [bool; 6], Vec<u8>)>,
+    out: [u8; 6],
+    /// Its chips settled on what they get now.
+    stable: bool,
 }
 
 impl NestedAlu {
     pub fn new(chips: Vec<NestedChip>, wires: Vec<(NestedPin, NestedPin)>) -> Self {
-        NestedAlu { chips, wires, drives: HashMap::new() }
+        let sources = wires.iter().map(|(f, t)| (t.clone(), f.clone())).collect();
+        let mut reads: Vec<(u8, u16)> = wires
+            .iter()
+            .filter_map(|(f, _)| match *f {
+                NestedPin::Bus(face, ch) => Some((face, ch)),
+                _ => None,
+            })
+            .collect();
+        reads.sort_unstable();
+        reads.dedup();
+        NestedAlu { chips, wires, drives: HashMap::new(), sources, reads, last: None, out: [0; 6], stable: false }
     }
 }
 
 impl NestedAlu {
     /// One run: the faces' power and buses in, the chips settle, the
     /// faces' levels out (and what it drives onto the buses, in `drives`).
-    fn run(&mut self, inputs: [u8; 6], buses: &[Option<HashMap<u16, u8>>; 6]) -> [u8; 6] {
+    fn run(&mut self, inputs: [u8; 6], buses: [bool; 6], reads: Vec<u8>) -> [u8; 6] {
+        let now = (inputs, buses, reads);
+        if self.stable && self.last.as_ref() == Some(&now) {
+            return self.out;
+        }
+        let (inputs, buses, reads) = &now;
         let mut levels: HashMap<NestedPin, u8> = HashMap::new();
         for (f, &l) in inputs.iter().enumerate() {
             levels.insert(NestedPin::In(f as u8), l);
         }
-        for (f, bus) in buses.iter().enumerate() {
-            for (&ch, &l) in bus.iter().flatten() {
-                levels.insert(NestedPin::Bus(f as u8, ch), l);
-            }
+        for (&(f, ch), &l) in self.reads.iter().zip(reads) {
+            levels.insert(NestedPin::Bus(f, ch), l);
         }
         let outputs = |chips: &[NestedChip], levels: &mut HashMap<NestedPin, u8>| {
             for c in chips {
@@ -1411,15 +1452,15 @@ impl NestedAlu {
             }
         };
         outputs(&self.chips, &mut levels);
-        let into = |wires: &[(NestedPin, NestedPin)], levels: &HashMap<NestedPin, u8>, to: &NestedPin| {
-            wires.iter().find(|(_, t)| t == to).and_then(|(f, _)| levels.get(f)).copied().unwrap_or(0)
+        let into = |sources: &HashMap<NestedPin, NestedPin>, levels: &HashMap<NestedPin, u8>, to: &NestedPin| {
+            sources.get(to).and_then(|f| levels.get(f)).copied().unwrap_or(0)
         };
         for c in &mut self.chips {
             let ins: Vec<u8> = c
                 .ports
                 .iter()
                 .filter(|p| p.mode.inputs())
-                .map(|p| into(&self.wires, &levels, &NestedPin::Chip(c.slot, p.label.clone())))
+                .map(|p| into(&self.sources, &levels, &NestedPin::Chip(c.slot, p.label.clone())))
                 .collect();
             if c.settled_on.as_ref() == Some(&ins) {
                 continue;
@@ -1442,11 +1483,23 @@ impl NestedAlu {
             .wires
             .iter()
             .filter_map(|(_, to)| match *to {
-                NestedPin::Bus(f, ch) if buses[f as usize % 6].is_some() => Some(((f, ch), into(&self.wires, &levels, to))),
+                NestedPin::Bus(f, ch) if buses[f as usize % 6] => Some(((f, ch), into(&self.sources, &levels, to))),
                 _ => None,
             })
             .collect();
-        std::array::from_fn(|f| into(&self.wires, &levels, &NestedPin::Out(f as u8)))
+        // Settled: every chip settled on what it gets now.
+        self.stable = self.chips.iter().all(|c| {
+            let ins: Vec<u8> = c
+                .ports
+                .iter()
+                .filter(|p| p.mode.inputs())
+                .map(|p| into(&self.sources, &levels, &NestedPin::Chip(c.slot, p.label.clone())))
+                .collect();
+            c.settled_on.as_ref() == Some(&ins)
+        });
+        self.out = std::array::from_fn(|f| into(&self.sources, &levels, &NestedPin::Out(f as u8)));
+        self.last = Some(now);
+        self.out
     }
 }
 
