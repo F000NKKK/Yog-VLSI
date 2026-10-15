@@ -1535,14 +1535,18 @@ pub struct NestedAlu {
     pub wires: Vec<(NestedPin, NestedPin)>,
     /// What it drives onto the buses on its faces: (face, channel) → level.
     pub drives: HashMap<(u8, u16), u8>,
-    /// What feeds each sink: the board's wires, to → from.
-    sources: HashMap<NestedPin, NestedPin>,
     /// The bus channels its board reads, (face, channel).
     reads: Vec<(u8, u16)>,
     /// Every pin its board drives.
     sinks: Vec<NestedPin>,
     /// Its board reads its faces (`In`): they're looked at every step.
     reads_faces: bool,
+    /// Its board, numbered: every source a slot of `levels` (the six faces,
+    /// the bus channels it reads, its chips' outputs), every sink the slot
+    /// it reads from.
+    board: Board,
+    levels: Vec<u8>,
+    scratch: Vec<u8>,
     /// What it last ran on, and what came out: run again on the same, its
     /// chips settled, nothing would change.
     last: Option<([u8; 6], [bool; 6], Vec<u8>)>,
@@ -1551,9 +1555,21 @@ pub struct NestedAlu {
     stable: bool,
 }
 
+/// A nested ALU's board as indices into its `levels`.
+#[derive(Clone, Default)]
+struct Board {
+    /// Where each chip's outputs go, in its ports' order.
+    chip_outs: Vec<Vec<usize>>,
+    /// Where each chip's inputs come from (`None`: nothing wired).
+    chip_ins: Vec<Vec<Option<usize>>>,
+    faces_out: [Option<usize>; 6],
+    /// Each bus channel it drives and where from.
+    drives: Vec<((u8, u16), Option<usize>)>,
+    size: usize,
+}
+
 impl NestedAlu {
     pub fn new(chips: Vec<NestedChip>, wires: Vec<(NestedPin, NestedPin)>) -> Self {
-        let sources = wires.iter().map(|(f, t)| (t.clone(), f.clone())).collect();
         let mut reads: Vec<(u8, u16)> = wires
             .iter()
             .filter_map(|(f, _)| match *f {
@@ -1565,11 +1581,60 @@ impl NestedAlu {
         reads.dedup();
         let sinks = wires.iter().map(|(_, t)| t.clone()).collect();
         let reads_faces = wires.iter().any(|(f, _)| matches!(f, NestedPin::In(_)));
-        NestedAlu { chips, wires, drives: HashMap::new(), sources, reads, sinks, reads_faces, last: None, out: [0; 6], stable: false }
-    }
-}
 
-impl NestedAlu {
+        // Number the sources: faces, read channels, chip outputs.
+        let mut at: HashMap<NestedPin, usize> = HashMap::new();
+        for f in 0..6u8 {
+            at.insert(NestedPin::In(f), f as usize);
+        }
+        for (k, &(f, ch)) in reads.iter().enumerate() {
+            at.insert(NestedPin::Bus(f, ch), 6 + k);
+        }
+        let mut board = Board { size: 6 + reads.len(), ..Default::default() };
+        for c in &chips {
+            let outs = c
+                .ports
+                .iter()
+                .filter(|p| p.mode.outputs())
+                .map(|p| {
+                    at.insert(NestedPin::Chip(c.slot, p.label.clone()), board.size);
+                    board.size += 1;
+                    board.size - 1
+                })
+                .collect();
+            board.chip_outs.push(outs);
+        }
+        let from: HashMap<&NestedPin, usize> = wires.iter().filter_map(|(f, t)| Some((t, *at.get(f)?))).collect();
+        for c in &chips {
+            board.chip_ins.push(
+                c.ports.iter().filter(|p| p.mode.inputs()).map(|p| from.get(&NestedPin::Chip(c.slot, p.label.clone())).copied()).collect(),
+            );
+        }
+        board.faces_out = std::array::from_fn(|f| from.get(&NestedPin::Out(f as u8)).copied());
+        board.drives = wires
+            .iter()
+            .filter_map(|(_, t)| match *t {
+                NestedPin::Bus(f, ch) => Some(((f, ch), from.get(t).copied())),
+                _ => None,
+            })
+            .collect();
+        let levels = vec![0; board.size];
+        NestedAlu {
+            chips,
+            wires,
+            drives: HashMap::new(),
+            reads,
+            sinks,
+            reads_faces,
+            board,
+            levels,
+            scratch: Vec::new(),
+            last: None,
+            out: [0; 6],
+            stable: false,
+        }
+    }
+
     /// One run: the faces' power and buses in, the chips settle, the
     /// faces' levels out (and what it drives onto the buses, in `drives`).
     fn run(&mut self, inputs: [u8; 6], buses: [bool; 6], reads: Vec<u8>) -> [u8; 6] {
@@ -1578,35 +1643,27 @@ impl NestedAlu {
             return self.out;
         }
         let (inputs, buses, reads) = &now;
-        let mut levels: HashMap<NestedPin, u8> = HashMap::new();
-        for (f, &l) in inputs.iter().enumerate() {
-            levels.insert(NestedPin::In(f as u8), l);
-        }
-        for (&(f, ch), &l) in self.reads.iter().zip(reads) {
-            levels.insert(NestedPin::Bus(f, ch), l);
-        }
-        let outputs = |chips: &[NestedChip], levels: &mut HashMap<NestedPin, u8>| {
-            for c in chips {
-                for p in c.ports.iter().filter(|p| p.mode.outputs()) {
-                    levels.insert(NestedPin::Chip(c.slot, p.label.clone()), c.sim.output(p.x, p.y, p.z));
+        let b = &self.board;
+        let lv = &mut self.levels;
+        lv[..6].copy_from_slice(inputs);
+        lv[6..6 + reads.len()].copy_from_slice(reads);
+        let get = |lv: &[u8], src: Option<usize>| src.map_or(0, |i| lv[i]);
+        let outputs = |chips: &[NestedChip], lv: &mut [u8]| {
+            for (c, outs) in chips.iter().zip(&b.chip_outs) {
+                for (p, &i) in c.ports.iter().filter(|p| p.mode.outputs()).zip(outs) {
+                    lv[i] = c.sim.output(p.x, p.y, p.z);
                 }
             }
         };
-        outputs(&self.chips, &mut levels);
-        let into = |sources: &HashMap<NestedPin, NestedPin>, levels: &HashMap<NestedPin, u8>, to: &NestedPin| {
-            sources.get(to).and_then(|f| levels.get(f)).copied().unwrap_or(0)
-        };
-        for c in &mut self.chips {
-            let ins: Vec<u8> = c
-                .ports
-                .iter()
-                .filter(|p| p.mode.inputs())
-                .map(|p| into(&self.sources, &levels, &NestedPin::Chip(c.slot, p.label.clone())))
-                .collect();
-            if c.settled_on.as_ref() == Some(&ins) {
+        outputs(&self.chips, lv);
+        let ins = &mut self.scratch;
+        for (c, srcs) in self.chips.iter_mut().zip(&b.chip_ins) {
+            ins.clear();
+            ins.extend(srcs.iter().map(|&s| get(lv, s)));
+            if c.settled_on.as_deref() == Some(&ins[..]) {
                 continue;
             }
-            for (p, &level) in c.ports.iter().filter(|p| p.mode.inputs()).zip(&ins) {
+            for (p, &level) in c.ports.iter().filter(|p| p.mode.inputs()).zip(ins.iter()) {
                 c.sim.set_input(p.x, p.y, p.z, level);
             }
             // Out of steps this tick: it waits for the next, as it would in the world.
@@ -1616,29 +1673,21 @@ impl NestedAlu {
             let used = c.sim.settle(c.left);
             let settled = used < c.left;
             c.left -= used;
-            c.settled_on = settled.then_some(ins);
+            c.settled_on = settled.then(|| ins.clone());
         }
-        outputs(&self.chips, &mut levels);
+        outputs(&self.chips, lv);
         // Onto a bus only where there is one.
-        self.drives = self
-            .wires
-            .iter()
-            .filter_map(|(_, to)| match *to {
-                NestedPin::Bus(f, ch) if buses[f as usize % 6] => Some(((f, ch), into(&self.sources, &levels, to))),
-                _ => None,
-            })
-            .collect();
+        self.drives.clear();
+        for &((f, ch), src) in &b.drives {
+            if buses[f as usize % 6] {
+                self.drives.insert((f, ch), get(lv, src));
+            }
+        }
         // Settled: every chip settled on what it gets now.
-        self.stable = self.chips.iter().all(|c| {
-            let ins: Vec<u8> = c
-                .ports
-                .iter()
-                .filter(|p| p.mode.inputs())
-                .map(|p| into(&self.sources, &levels, &NestedPin::Chip(c.slot, p.label.clone())))
-                .collect();
-            c.settled_on.as_ref() == Some(&ins)
+        self.stable = self.chips.iter().zip(&b.chip_ins).all(|(c, srcs)| {
+            c.settled_on.as_ref().is_some_and(|s| s.len() == srcs.len() && s.iter().zip(srcs).all(|(&v, &src)| v == get(lv, src)))
         });
-        self.out = std::array::from_fn(|f| into(&self.sources, &levels, &NestedPin::Out(f as u8)));
+        self.out = std::array::from_fn(|f| get(lv, b.faces_out[f]));
         self.last = Some(now);
         self.out
     }
