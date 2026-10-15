@@ -327,6 +327,10 @@ impl CircuitData {
     }
 
     pub fn load_for_chip(game_dir: &str, chip: &str) -> Option<Self> {
+        // A ready-made design's chip (in a ready-made design's ALU).
+        if let Some(name) = chip.strip_prefix(crate::designs::CHIP_PREFIX) {
+            return crate::designs::named(name).map(|d| d.circuit(d.tier()));
+        }
         let store = Storage::open(game_dir, MOD_ID);
         serde_json::from_str(store.get_str(&format!("{CIRCUIT_KEY}{chip}"))?).ok()
     }
