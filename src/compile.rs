@@ -212,6 +212,7 @@ impl ChipSim {
     /// Back to stepping: the VM where the table has it.
     fn unpack(&mut self) {
         let Some(p) = self.place.take() else { return };
+        crate::vm::PROF[2].fetch_add(1_000_000_000, std::sync::atomic::Ordering::Relaxed);
         let mut vm = p.table.snapshots[p.state].clone();
         if let Some((m, k)) = p.moving {
             for (i, &(x, y, z)) in self.ins.iter().enumerate() {
@@ -262,7 +263,10 @@ impl ChipSim {
     /// [`RedstoneVM::settle`].
     pub fn settle(&mut self, budget: u32) -> u32 {
         let touched = std::mem::take(&mut self.touched);
-        let Some(p) = &mut self.place else { return self.vm.settle(budget) };
+        let Some(p) = &mut self.place else {
+            crate::vm::PROF[5].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return self.vm.settle(budget);
+        };
         let Some(m) = mask_of(&self.given) else {
             self.unpack();
             return self.vm.settle(budget);
