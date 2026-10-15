@@ -18,7 +18,7 @@ const CHANNEL: &str = "yog-vlsi:display";
 struct DisplayEdit {
     dimension: String,
     pos: (i32, i32, i32),
-    size: u8,
+    size: u16,
     channel: u16,
 }
 
@@ -47,7 +47,7 @@ impl DisplayVm {
     }
     pub fn done(&mut self) {
         if let Some(edit) = &self.edit {
-            let size = self.size.trim().parse::<u8>().unwrap_or(edit.size);
+            let size = self.size.trim().parse::<u16>().unwrap_or(edit.size);
             let out = DisplayEdit { size, channel: self.first(), ..edit.clone() };
             if let (Some(srv), Ok(json)) = (yog_api::server(), serde_json::to_string(&out)) {
                 srv.send_to_server(CHANNEL, json.as_bytes());

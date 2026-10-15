@@ -98,7 +98,7 @@
   "block.display": "Дисплей",
   "block.display.desc": "§7Экран 256×256 с видеопроцессором, управляемый по цифровому кабелю.\n§7Буферы вершин и индексов, линии и закрашенные грани.\n§7ПКМ — размер и каналы шины.",
   "screen.display.title": "Дисплей",
-  "screen.display.size_placeholder": "Размер в блоках (1–32)",
+  "screen.display.size_placeholder": "Размер в блоках (1–1024)",
   "screen.display.channel_placeholder": "Первый канал шины",
   "screen.display.channels": "Каналы {first}–{last}: данные 8, регистр 8, переключатель, подтверждение"
 }

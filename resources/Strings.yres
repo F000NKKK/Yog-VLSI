@@ -156,7 +156,7 @@
   "block.display": "Display",
   "block.display.desc": "§7A 256×256 screen with a GPU, driven over a Digital Cable.\n§7Vertex and index buffers, lines and shaded faces.\n§7Right-click to set its size and bus channels.",
   "screen.display.title": "Display",
-  "screen.display.size_placeholder": "Size in blocks (1–32)",
+  "screen.display.size_placeholder": "Size in blocks (1–1024)",
   "screen.display.channel_placeholder": "First bus channel",
   "screen.display.channels": "Channels {first}–{last}: data 8, register 8, toggle, acknowledge"
 }

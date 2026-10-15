@@ -31,11 +31,12 @@ pub const CHANNELS: u16 = 18;
 const TOGGLE: u16 = 16;
 const ACK: u16 = 17;
 /// Size, in blocks, a new Display shows its picture at.
-const DEFAULT_SIZE: u8 = 8;
-pub const MAX_SIZE: u8 = 32;
+const DEFAULT_SIZE: u16 = 16;
+/// The biggest picture, in blocks a side.
+pub const MAX_SIZE: u16 = 1024;
 /// Server → client: what a Display shows.
 const FRAME_CHANNEL: &str = "yog-vlsi:display_frame";
-/// How far players see a Display from, in blocks.
+/// How far past its picture's middle players see a Display from, in blocks.
 const VIEW_DISTANCE: f64 = 160.0;
 /// Every so many ticks a player near a Display is sent it again (one who
 /// came near, or a client that dropped it).
@@ -57,7 +58,7 @@ pub enum Facing {
 pub struct Display {
     pub facing: Facing,
     /// The picture's side, in blocks.
-    pub size: u8,
+    pub size: u16,
     /// The first bus channel (from 1).
     pub channel: u16,
     /// TOGGLE as last taken.
@@ -92,7 +93,7 @@ pub struct Frame {
     pub pos: (i32, i32, i32),
     pub facing: Facing,
     /// 0: it's gone.
-    pub size: u8,
+    pub size: u16,
     pub version: u64,
     /// Ticks since it was shown (its spin has gone on that long).
     pub age: u64,
@@ -104,7 +105,7 @@ pub fn get(dim: &str, pos: BlockPos) -> Option<Display> {
 }
 
 /// Sets a Display's size and first channel.
-pub fn configure(dim: &str, pos: BlockPos, size: u8, channel: u16) {
+pub fn configure(dim: &str, pos: BlockPos, size: u16, channel: u16) {
     if let Some(d) = DISPLAYS.lock().unwrap().get_mut(&(dim.to_string(), pos.x, pos.y, pos.z)) {
         d.size = size.clamp(1, MAX_SIZE);
         d.channel = channel.clamp(1, cables::BUS_CHANNELS - CHANNELS + 1);
@@ -157,8 +158,11 @@ fn send(srv: &dyn yog_api::Server, n: u64) {
         let Some(info) = srv.player_info(&player).and_then(|p| srv.entity_info(&p.uuid)) else { continue };
         for (key, d) in displays.iter() {
             let (dim, x, y, z) = key;
-            let (dx, dy, dz) = (info.pos.0 - *x as f64, info.pos.1 - *y as f64, info.pos.2 - *z as f64);
-            if *dim != info.dimension || dx * dx + dy * dy + dz * dz > VIEW_DISTANCE * VIEW_DISTANCE {
+            // From the picture's middle (roughly: it spreads up and to one side).
+            let half = d.size as f64 / 2.0;
+            let (dx, dy, dz) = (info.pos.0 - *x as f64, info.pos.1 - (*y as f64 + half), info.pos.2 - *z as f64);
+            let reach = VIEW_DISTANCE + d.size as f64;
+            if *dim != info.dimension || dx * dx + dy * dy + dz * dz > reach * reach {
                 continue;
             }
             let id = (player.clone(), key.clone());

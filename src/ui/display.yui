@@ -11,7 +11,7 @@
         <TextBox x:Name="size"
                  w="100%"
                  h="14"
-                 max_length="2"
+                 max_length="4"
                  text="{x:Bind size, Mode=TwoWay}"
                  placeholder="@Strings.screen.display.size_placeholder" />
         <TextBox x:Name="channel"
