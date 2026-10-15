@@ -1,6 +1,7 @@
 {
   "name": "@Strings.block.alu_diamond",
   "tooltip": "@Strings.block.alu_diamond.desc",
+  "tags": ["alus"],
   "block": {
     "hardness": 5,
     "resistance": 12,

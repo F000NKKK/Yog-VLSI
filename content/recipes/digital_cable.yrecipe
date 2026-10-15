@@ -6,9 +6,9 @@
     "GRG"
   ],
   "key": {
-    "G": "@item:minecraft:gold_nugget",
-    "R": "@item:minecraft:redstone",
-    "I": "@item:minecraft:iron_ingot"
+    "G": "@tag:item:yog:nuggets/gold",
+    "R": "@tag:item:yog:dusts/redstone",
+    "I": "@tag:item:yog:ingots/iron"
   },
   "result": "@item:yog-vlsi:digital_cable",
   "count": 4

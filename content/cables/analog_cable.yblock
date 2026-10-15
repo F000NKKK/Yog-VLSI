@@ -1,6 +1,7 @@
 {
   "name": "@Strings.block.analog_cable",
   "tooltip": "@Strings.block.analog_cable.desc",
+  "tags": ["cables"],
   "block": {
     "hardness": 0.5,
     "resistance": 0.5,

@@ -1,6 +1,7 @@
 {
   "name": "@Strings.block.alu_netherite",
   "tooltip": "@Strings.block.alu_netherite.desc",
+  "tags": ["alus"],
   "block": {
     "hardness": 5,
     "resistance": 12,

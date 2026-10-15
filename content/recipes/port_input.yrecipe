@@ -6,7 +6,7 @@
     " R "
   ],
   "key": {
-    "R": "@item:minecraft:redstone",
+    "R": "@tag:item:yog:dusts/redstone",
     "S": "@item:minecraft:stone"
   },
   "result": "@item:yog-vlsi:port_input",

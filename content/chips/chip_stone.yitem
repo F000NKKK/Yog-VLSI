@@ -1,6 +1,7 @@
 {
   "name": "@Strings.item.chip_stone",
   "tooltip": "@Strings.item.chip_stone.desc",
+  "tags": ["chips"],
   "item": {
     "stack_size": 1
   },

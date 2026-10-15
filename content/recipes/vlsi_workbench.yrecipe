@@ -6,10 +6,10 @@
     "IRI"
   ],
   "key": {
-    "I": "@item:minecraft:iron_ingot",
+    "I": "@tag:item:yog:ingots/iron",
     "S": "@item:minecraft:smooth_stone",
     "C": "@item:minecraft:crafting_table",
-    "R": "@item:minecraft:redstone_block"
+    "R": "@tag:item:yog:storage_blocks/redstone"
   },
   "result": "@item:yog-vlsi:vlsi_workbench"
 }

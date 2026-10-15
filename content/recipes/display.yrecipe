@@ -6,7 +6,7 @@
     "SCS"
   ],
   "key": {
-    "G": "@item:minecraft:glass_pane",
+    "G": "@tag:item:yog:glass_panes/colorless",
     "L": "@item:minecraft:redstone_lamp",
     "S": "@item:minecraft:smooth_stone",
     "C": "@item:yog-vlsi:digital_cable"

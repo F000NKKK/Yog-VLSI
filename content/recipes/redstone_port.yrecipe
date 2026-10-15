@@ -7,7 +7,7 @@
   ],
   "key": {
     "S": "@item:minecraft:smooth_stone",
-    "R": "@item:minecraft:redstone"
+    "R": "@tag:item:yog:dusts/redstone"
   },
   "result": "@item:yog-vlsi:redstone_port"
 }

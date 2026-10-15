@@ -4,7 +4,7 @@
     "RRR"
   ],
   "key": {
-    "R": "@item:minecraft:redstone"
+    "R": "@tag:item:yog:dusts/redstone"
   },
   "result": "@item:yog-vlsi:analog_cable",
   "count": 3
