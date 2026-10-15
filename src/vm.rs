@@ -728,7 +728,7 @@ impl RedstoneVM {
     /// `budget` steps; how many it took. A circuit answers its inputs in
     /// the steps it needs, not one a server tick.
     pub fn settle(&mut self, budget: u32) -> u32 {
-        self.settle_traced(budget, &mut |_| {})
+        self.settle_with(budget, None)
     }
 
     /// [`settle`](Self::settle), stopping early at `deadline` (looked at
@@ -749,23 +749,70 @@ impl RedstoneVM {
 
     /// [`settle`](Self::settle), `after` called after each step.
     pub(crate) fn settle_traced(&mut self, budget: u32, after: &mut dyn FnMut(&RedstoneVM)) -> u32 {
+        self.settle_with(budget, Some(after))
+    }
+
+    /// Settling; `after` (when there is one) is called after every step, so
+    /// no step is skipped — else steps that would only count timers down
+    /// are passed over in one go.
+    fn settle_with(&mut self, budget: u32, mut after: Option<&mut dyn FnMut(&RedstoneVM)>) -> u32 {
         // Settled and its inputs as they were: the step would change nothing.
         if self.quiet {
             return 0;
         }
-        let mut before = self.state();
-        for n in 1..=budget {
+        let (mut before, mut before_untimed) = self.state_parts();
+        let mut n = 0;
+        while n < budget {
+            n += 1;
             self.step();
-            after(self);
-            let now = self.state();
+            if let Some(f) = after.as_mut() {
+                f(self);
+            }
+            let (now, untimed) = self.state_parts();
             if now == before {
                 // Not while a nested ALU's chip waits for its next tick's steps.
                 self.quiet = self.nested.values().all(|a| a.stable);
                 return n;
             }
+            // Only timers moved, and nothing waits to run: the next steps
+            // till a timer runs out do the same — count them down at once.
             before = now;
+            if after.is_none() && untimed == before_untimed && self.idle_but_timers() {
+                let k = self.min_timer().saturating_sub(1).min(budget - n);
+                if k > 0 {
+                    self.count_down(k);
+                    n += k;
+                    before = self.state();
+                }
+            }
+            before_untimed = untimed;
         }
         budget
+    }
+
+    /// Nothing but timers would move: no ALU, reader or channel waiting.
+    fn idle_but_timers(&self) -> bool {
+        self.dirty.is_empty()
+            && self.unstable.is_empty()
+            && self.dirty_readers.is_empty()
+            && self.nested.values().all(|a| a.stable)
+    }
+
+    /// The smallest running timer (0: none).
+    fn min_timer(&self) -> u32 {
+        self.components.iter().chain(&self.movers).map(|&i| u32::from(self.get(i).timer)).filter(|&t| t > 0).min().unwrap_or(0)
+    }
+
+    /// `k` steps of timers only: each running timer `k` lower, the clock `k` on.
+    fn count_down(&mut self, k: u32) {
+        let cells: Vec<u32> = self.components.iter().chain(&self.movers).copied().collect();
+        for i in cells {
+            let c = self.get_mut(i);
+            if c.timer > 0 {
+                c.timer -= k as u8;
+            }
+        }
+        self.tick += u64::from(k);
     }
 
     /// Everything that decides what it does next: its cells, whether it's
@@ -802,6 +849,12 @@ impl RedstoneVM {
 
     /// A fingerprint of every cell's state (block, levels, timers).
     fn state(&self) -> u64 {
+        self.state_parts().0
+    }
+
+    /// [`state`](Self::state), and the same without the timers.
+    fn state_parts(&self) -> (u64, u64) {
+        let mut u: u64 = 0xcbf2_9ce4_8422_2325;
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         let mut mix = |v: u64| {
             h ^= v;
@@ -813,15 +866,17 @@ impl RedstoneVM {
             let mut bh = Fnv::default();
             std::hash::Hash::hash(&c.block, &mut bh);
             mix(std::hash::Hasher::finish(&bh));
-            mix(u64::from(c.power) | u64::from(c.strong) << 8 | u64::from(c.weak) << 16 | u64::from(c.timer) << 24 | u64::from(i) << 32);
+            let untimed = u64::from(c.power) | u64::from(c.strong) << 8 | u64::from(c.weak) << 16 | u64::from(i) << 32;
+            mix(untimed | u64::from(c.timer) << 24);
             mix(u64::from(c.watched));
+            u = (u ^ untimed ^ u64::from(c.watched) << 40 ^ std::hash::Hasher::finish(&bh)).wrapping_mul(0x0100_0000_01b3);
         }
         // A nested ALU still running (a clock in a chip, a chip out of
         // steps): the circuit isn't settled.
         if self.nested.values().any(|a| !a.stable) {
             mix(self.tick);
         }
-        h
+        (h, u ^ self.alu_changes)
     }
 
     pub fn step(&mut self) {
