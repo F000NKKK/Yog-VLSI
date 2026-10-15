@@ -308,3 +308,69 @@ impl ChipSim {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::content::Tier;
+    use crate::designs;
+
+    /// Every ready-made design without ALUs, stepped and from its table side
+    /// by side: the same outputs after every settle — on and off, levels in
+    /// between, inputs changed mid-transition, budgets cut short.
+    #[test]
+    fn a_table_runs_exactly_as_the_redstone() {
+        let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut rnd = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let mut tabled = 0;
+        for d in designs::all() {
+            let c = d.circuit(d.tier());
+            if !c.alus.is_empty() {
+                continue;
+            }
+            let ins: Vec<_> = c.ports.iter().filter(|p| p.dir.inputs()).map(|p| (p.x, p.y, p.z)).collect();
+            let outs: Vec<_> = c.ports.iter().filter(|p| p.dir.outputs()).map(|p| (p.x, p.y, p.z)).collect();
+            let mut real = ChipSim::new(c.vm(), ins.clone(), outs.clone(), None);
+            let mut fast = ChipSim::new(c.vm(), ins.clone(), outs.clone(), Some(&format!("test:{}", d.name)));
+            for t in 0..3000 {
+                real.new_tick();
+                fast.new_tick();
+                for &(x, y, z) in &ins {
+                    if rnd(3) == 0 {
+                        let level = match rnd(10) {
+                            0 => 7,
+                            1..=4 => 0,
+                            _ => 15,
+                        };
+                        real.set_input(x, y, z, level);
+                        fast.set_input(x, y, z, level);
+                    }
+                }
+                let budget = [0, 1, 2, 3, 8, 8, 8, 64][rnd(8) as usize] as u32;
+                assert_eq!(real.settle(budget), fast.settle(budget), "{} at {t}: steps", d.name);
+                for &(x, y, z) in &outs {
+                    assert_eq!(real.output(x, y, z), fast.output(x, y, z), "{} at {t}: output", d.name);
+                }
+            }
+            tabled += fast.place.is_some() as u32 + 1;
+        }
+        assert!(tabled > 0);
+    }
+
+    #[test]
+    fn every_gate_gets_a_table() {
+        for name in ["NOT", "AND", "OR", "XOR", "NAND", "NOR", "D latch", "D flip-flop", "RS latch"] {
+            let d = designs::named(name).unwrap();
+            let c = d.circuit(Tier::Wood);
+            let ins: Vec<_> = c.ports.iter().filter(|p| p.dir.inputs()).map(|p| (p.x, p.y, p.z)).collect();
+            let outs: Vec<_> = c.ports.iter().filter(|p| p.dir.outputs()).map(|p| (p.x, p.y, p.z)).collect();
+            let t = analyse(&c.vm(), &ins, &outs).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(t.snapshots.len() < 64, "{name}: {} states", t.snapshots.len());
+        }
+    }
+}
