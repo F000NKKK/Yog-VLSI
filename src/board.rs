@@ -520,7 +520,8 @@ pub fn forget_in(dimension: &str, lo: BlockPos, hi: BlockPos) {
     });
 }
 /// Who has which ALU open, and what they were last sent.
-static WATCHERS: LazyLock<Mutex<HashMap<String, (AluId, Option<BoardView>)>>> =
+type Watching = (AluId, Option<BoardView>);
+static WATCHERS: LazyLock<Mutex<HashMap<String, Watching>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static TICKS: Mutex<u64> = Mutex::new(0);
 
