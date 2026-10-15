@@ -522,7 +522,12 @@ fn flow_layout(
         if sweep % 2 == 0 {
             for d in 0..=max_depth {
                 let snapshot = at.clone();
-                sort_by(&mut columns[d], &|slot| fed_from(&snapshot, slot));
+                // The last time round, both ways: between what feeds it and what it feeds.
+                let both = |slot| match (fed_from(&snapshot, slot), feeds(&snapshot, slot)) {
+                    (Some(a), Some(b)) if sweep > 0 => Some((a + b) / 2.0),
+                    (a, b) => a.or(b),
+                };
+                sort_by(&mut columns[d], &both);
                 stack(&mut at, &columns[d], x_of(d));
             }
         } else {
