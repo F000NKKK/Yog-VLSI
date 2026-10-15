@@ -22,11 +22,7 @@ class Sim:
         if kind == "NOR": return 1 - (a | b)
         if kind == "D latch": return a if b else v[q]
         if kind == "D flip-flop":
-            prev = self.ff_prev_c.get(q, 0)
-            out = self.ff_q.get(q, 0)
-            if b and not prev:
-                out = a
-            return out
+            return self.ff_q.get(q, 0)
         raise ValueError(kind)
 
     def settle(self):
@@ -38,12 +34,6 @@ class Sim:
                 if nv != self.v[q]:
                     self.v[q] = nv
                     changed = True
-            for kind, ins, q in self.net.gates:
-                if kind == "D flip-flop":
-                    c = self.v[ins[1]]
-                    if c and not self.ff_prev_c.get(q, 0):
-                        self.ff_q[q] = self.v[q]
-                    self.ff_prev_c[q] = c
             if not changed:
                 return
         raise RuntimeError("doesn't settle")
@@ -58,6 +48,10 @@ class Sim:
         return sum(self.get(f"{prefix}{i}") << i for i in range(8))
 
     def clock(self):
+        # Every flip-flop takes its D at once on the rising edge (all are on CLK).
+        for kind, ins, q in self.net.gates:
+            if kind == "D flip-flop":
+                self.ff_q[q] = self.v[ins[0]]
         self.set("CLK", 1); self.settle()
         self.set("CLK", 0); self.settle()
 
