@@ -13,11 +13,11 @@ miniz_oxide = "0.8"
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid       = { version = "1", features = ["v4"] }
-yog-api    = "0.94.1"
-yog-kit    = "0.5"
+yog-api    = "0.95"
+yog-kit    = "0.6"
 
 [dependencies.exports]
-yog-pipes = "0.6"
+yog-pipes = "0.7"
 
 ## `yog run <name>` — build, drop the .yog into the loader's own Gradle dev-run
 # instance, then launch it.
