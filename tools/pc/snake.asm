@@ -1,17 +1,15 @@
 ; Snake on YOG-8: an 8×8 screen, a pixel is row*8 + col. The body is a
-; ring of positions at 16..31 (HP: its head, TP: its tail).
+; ring of positions at 16..31 (HP: its head, TP: its tail). The direction
+; is the hardware's: IN gives it, the buttons already taken into account.
 .equ HEAD 0
-.equ DIR 1      ; 0 up, 1 down, 2 left, 3 right
 .equ FOOD 2
 .equ HP 3
 .equ TP 4
 .equ GROW 5
-.equ T 6
-.equ BTN 7
 
 start:
+    LDI 3 | SETD                ; right
     LDI 36 | ST HEAD
-    LDI 3 | ST DIR
     LDI 16 | ST HP | ST TP | TAX
     LD HEAD | STX
     ORI 64 | PLOT
@@ -19,53 +17,36 @@ start:
     JMP newfood
 
 loop:
-    ; The buttons pressed since last time: a new direction, never straight back.
-    IN | ST BTN | JZ move
-    ANDI 1 | JZ n1
-    LD DIR | SUBI 1 | JZ move
-    LDI 0 | ST DIR | JMP move
-n1: LD BTN | ANDI 2 | JZ n2
-    LD DIR | JZ move
-    LDI 1 | ST DIR | JMP move
-n2: LD BTN | ANDI 4 | JZ n3
-    LD DIR | SUBI 3 | JZ move
-    LDI 2 | ST DIR | JMP move
-n3: LD BTN | ANDI 8 | JZ move
-    LD DIR | SUBI 2 | JZ move
-    LDI 3 | ST DIR
-
-move:
-    LD DIR | JNZ notup
+    IN | JNZ notup
     LD HEAD | SUBI 8 | ANDI 63 | ST HEAD | JMP moved
 notup:
     SUBI 1 | JNZ notdown
     LD HEAD | ADDI 8 | ANDI 63 | ST HEAD | JMP moved
 notdown:
-    LD HEAD | ANDI 56 | ST T
-    LD DIR | SUBI 2 | JNZ right
-    LD HEAD | SUBI 1 | ANDI 7 | ADD T | ST HEAD | JMP moved
+    SUBI 1 | JNZ right
+    LD HEAD | MDEC 7 | ST HEAD | JMP moved
 right:
-    LD HEAD | ADDI 1 | ANDI 7 | ADD T | ST HEAD
+    LD HEAD | MINC 7 | ST HEAD
 
 moved:
     LD HEAD | SUB FOOD | JNZ notfood
     ; Eaten: the head goes on, the tail stays — one longer, while the
     ; ring of 16 has room.
     LD HEAD | ORI 64 | PLOT
-    LD HP | ADDI 1 | ANDI 15 | ORI 16 | ST HP | TAX | LD HEAD | STX
+    LD HP | MINC 15 | ST HP | TAX | LD HEAD | STX
     LD HP | SUB TP | ANDI 15 | SUBI 15 | JNZ newfood
     LD TP | TAX | LDX | PLOT
-    LD TP | ADDI 1 | ANDI 15 | ORI 16 | ST TP
+    LD TP | MINC 15 | ST TP
     JMP newfood
 notfood:
     LD HEAD | TEST | JNZ dead
     LD HEAD | ORI 64 | PLOT
-    LD HP | ADDI 1 | ANDI 15 | ORI 16 | ST HP | TAX | LD HEAD | STX
+    LD HP | MINC 15 | ST HP | TAX | LD HEAD | STX
     LD GROW | JZ erase
     SUBI 1 | ST GROW | JMP loop
 erase:
     LD TP | TAX | LDX | PLOT
-    LD TP | ADDI 1 | ANDI 15 | ORI 16 | ST TP
+    LD TP | MINC 15 | ST TP
     JMP loop
 
 newfood:
@@ -74,8 +55,8 @@ newfood:
     JMP loop
 
 dead:
-    LDI 0 | ST T
+    LDI 0 | ST HEAD
 clear:
-    LD T | PLOT
-    LD T | ADDI 1 | ST T | SUBI 64 | JNZ clear
+    LD HEAD | PLOT
+    LD HEAD | ADDI 1 | ST HEAD | SUBI 64 | JNZ clear
     JMP start
