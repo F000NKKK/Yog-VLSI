@@ -114,5 +114,17 @@
   "display": {
     "type": "image",
     "value": "block/display.png"
+  },
+  "display_side": {
+    "type": "image",
+    "value": "block/display_side.png"
+  },
+  "display_top": {
+    "type": "image",
+    "value": "block/display_top.png"
+  },
+  "display_back": {
+    "type": "image",
+    "value": "block/display_back.png"
   }
 }

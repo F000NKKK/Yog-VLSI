@@ -10,9 +10,18 @@
     ]
   },
   "model": {
-    "parent": "cube_all",
+    "parent": "cube",
     "textures": {
-      "all": "@Textures.display"
+      "north": "@Textures.display",
+      "south": "@Textures.display_back",
+      "east": "@Textures.display_side",
+      "west": "@Textures.display_side",
+      "up": "@Textures.display_top",
+      "down": "@Textures.display_top",
+      "particle": "@Textures.display_side"
     }
+  },
+  "states": {
+    "facing": "horizontal"
   }
 }
