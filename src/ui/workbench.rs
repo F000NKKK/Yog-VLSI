@@ -27,6 +27,7 @@ use crate::content::Items;
 use crate::editor;
 use crate::res::Strings;
 use crate::resources::{Amounts, Resource, compact};
+use crate::designs;
 use crate::tier::Tier;
 
 pub const WORKBENCH_ID: &str = crate::content::Blocks::VLSI_WORKBENCH;
@@ -81,7 +82,8 @@ pub struct BenchState {
 
 #[derive(Debug, Serialize, Deserialize)]
 enum Request {
-    Create { bench: BenchId, name: String, tier: Tier },
+    /// `design`: a ready-made one to start from ([`designs`]).
+    Create { bench: BenchId, name: String, tier: Tier, design: Option<String> },
     Edit { bench: BenchId },
     Fabricate { bench: BenchId },
 }
@@ -98,9 +100,11 @@ pub struct CostRow {
 pub struct WorkbenchVm {
     /// The open workbench, as the server last described it.
     state: Option<BenchState>,
-    /// A new design's name and tier.
+    /// A new design's name, tier and what it starts as (an index into
+    /// [`designs::all`], past the empty one).
     name: String,
     tier: Option<Tier>,
+    template: usize,
 }
 
 impl ViewModel for WorkbenchVm {}
@@ -189,8 +193,18 @@ impl WorkbenchVm {
         let i = Tier::ALL.iter().position(|t| *t == self.tier()).unwrap_or(0);
         self.tier = Some(Tier::ALL[(i + 1) % Tier::ALL.len()]);
     }
+    /// The ready-made design picked, if any.
+    fn template(&self) -> Option<String> {
+        self.template.checked_sub(1).and_then(|i| designs::all().get(i).map(|d| d.name.clone()))
+    }
+    pub fn template_text(&self) -> String {
+        Strings::screen_workbench_template(self.template().unwrap_or_else(Strings::screen_workbench_template_empty))
+    }
+    pub fn next_template(&mut self) {
+        self.template = (self.template + 1) % (designs::all().len() + 1);
+    }
     pub fn can_create(&self) -> bool {
-        self.blank() && !self.name.trim().is_empty()
+        self.blank() && (!self.name.trim().is_empty() || self.template > 0)
     }
     pub fn can_fabricate(&self) -> bool {
         let Some(state) = &self.state else { return false };
@@ -200,7 +214,10 @@ impl WorkbenchVm {
 
     pub fn create(&mut self) {
         if let Some(s) = &self.state {
-            send(&Request::Create { bench: s.bench.clone(), name: self.name.trim().to_string(), tier: self.tier() });
+            let design = self.template();
+            // Unnamed, it's called what it starts as.
+            let name = Some(self.name.trim().to_string()).filter(|n| !n.is_empty()).or(design.clone()).unwrap_or_default();
+            send(&Request::Create { bench: s.bench.clone(), name, tier: self.tier(), design });
             self.name.clear();
         }
     }
@@ -318,11 +335,15 @@ pub fn tick(srv: &dyn yog_api::Server) {
 /// Runs a client's request; the reply goes to its action bar.
 fn run_request(srv: &dyn yog_api::Server, player: &str, request: Request) -> String {
     match request {
-        Request::Create { bench, name, tier } => {
+        Request::Create { bench, name, tier, design } => {
             if !matches!(blueprint_in(srv, &bench).0, BlueprintView::Blank) {
                 return "§cPut a blank Blueprint in the workbench.".into();
             }
-            let bp = Blueprint::new(name.clone(), tier);
+            let mut bp = Blueprint::new(name.clone(), tier);
+            if let Some(design) = design {
+                let Some(d) = designs::named(&design) else { return format!("§cNo design '{design}'.") };
+                bp.circuit = d.circuit(tier);
+            }
             if !srv.set_inventory_slot(&bench.dimension, bench.pos(), BLUEPRINT_SLOT, BLUEPRINT_ID, 1, &bp.to_nbt()) {
                 return "§cCouldn't write the Blueprint.".into();
             }

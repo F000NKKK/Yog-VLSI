@@ -1,0 +1,8 @@
+name OR
+port a A in
+port b B in
+port q Q out
+layer
+a-..
+.--q
+b-..

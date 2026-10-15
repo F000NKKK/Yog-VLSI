@@ -1,0 +1,15 @@
+// Two torches, each on the block the other's output runs into (a NOR latch).
+// S sets Q, R resets it; both off, it holds.
+name RS latch
+port s S in
+port r R in
+port q Q out
+port n NQ out
+unlit 3 0 1
+layer
+...q...
+r-#>-..
+..-.-..
+..-.-..
+..-<#-s
+...n...

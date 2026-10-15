@@ -80,7 +80,7 @@
   "screen.alu.clear_links": "Clear links",
   "screen.workbench.blueprint": "Blueprint",
   "screen.workbench.blueprint_help": {
-    "value": "Put a Blueprint here.\nA blank one: name it, pick a tier, Create.\nA written one: open it in the Editor, or Fabricate a chip from it.",
+    "value": "Put a Blueprint here.\nA blank one: name it, pick a tier and what it starts as (empty or a ready-made gate), Create.\nA written one: open it in the Editor, or Fabricate a chip from it.",
     "comment": "Tooltip of the (i) next to the blueprint slot"
   },
   "screen.workbench.no_blueprint": "No blueprint",
@@ -90,6 +90,11 @@
     "value": "Tier: {tier}",
     "comment": "Button cycling the new design's tier"
   },
+  "screen.workbench.template": {
+    "value": "Start: {template}",
+    "comment": "Button cycling what a new design starts as: empty, or a ready-made gate"
+  },
+  "screen.workbench.template_empty": "Empty",
   "screen.workbench.create": "Create",
   "screen.workbench.design_tier": {
     "value": "{tier} · {ports} ports · {blocks} blocks",

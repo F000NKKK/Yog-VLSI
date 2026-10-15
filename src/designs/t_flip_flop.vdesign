@@ -1,0 +1,16 @@
+// A D flip-flop taking its own inverted output: Q flips each time C goes on.
+name T flip-flop
+port c C in
+port q Q out
+delay 2 0 3 4
+layer
+.--<#.
+.-..-.
+.-..-.
+.-→→-q
+..↑↑..
+c--↑..
+-..^..
+-..#..
+-..-..
+----..

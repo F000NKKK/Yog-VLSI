@@ -1,0 +1,5 @@
+name NOT
+port a A in
+port q Q out
+layer
+a-#>q

@@ -115,6 +115,7 @@
                              text="{x:Bind name, Mode=TwoWay}"
                              placeholder="@Strings.screen.workbench.name_placeholder" />
                     <Button x:Name="tier" style="@Action" text="{x:Bind tier_text()}" d:text="@Strings.tier_wood" command="{x:Bind next_tier()}" />
+                    <Button x:Name="template" style="@Action" text="{x:Bind template_text()}" d:text="@Strings.screen.workbench.template_empty" command="{x:Bind next_template()}" />
                     <Button x:Name="create"
                             style="@Action"
                             text="@Strings.screen.workbench.create"

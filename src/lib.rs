@@ -4,6 +4,7 @@ mod board;
 mod cables;
 mod chip;
 mod commands;
+mod designs;
 mod editor;
 mod nbt;
 mod resources;

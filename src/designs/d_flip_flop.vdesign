@@ -1,0 +1,16 @@
+// Takes D when C goes on, holds it till the next time. Two latches: the
+// first locked while C is on, the second while it's off. The first one's
+// delay outlasts the second one locking, so nothing slips through.
+name D flip-flop
+port d D in
+port c C in
+port q Q out
+delay 2 0 0 4
+layer
+d-→→q
+..↑↑.
+c--↑.
+-..^.
+-..#.
+-..-.
+----.

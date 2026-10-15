@@ -1,0 +1,23 @@
+// XOR, and a torch on its block.
+name XNOR
+port a A in
+port b B in
+port q Q out
+layer
+..a--
+..-.-
+-→▽.-
+-.#.-
+-.△←-
+-.-..
+--b..
+layer
+.....
+.....
+.....
+..T..
+layer
+.....
+.....
+.....
+..q..

@@ -1,0 +1,12 @@
+// While E is on, Q follows D; off, a repeater from the side locks Q.
+name D latch
+port d D in
+port e E in
+port q Q out
+layer
+d-→q
+..↑.
+..^.
+..#.
+..-.
+..e.
