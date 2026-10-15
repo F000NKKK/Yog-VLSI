@@ -124,6 +124,9 @@ def build(program, debug=True, gpu=False):
     pressed = []
     for b in btn:
         q = n.sig()
+        if gpu:
+            # A press, not a hold: a button stays down for many clocks.
+            b = n.AND(b, n.NOT(n.DFF(b, clk)))
         d = n.DFF(n.OR(b, n.AND(q, not_in)), clk)
         n.alias(q, d)
         pressed.append(d)
