@@ -60,6 +60,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
+/// A map keyed by cell index, hashed fast.
+type CellMap<V> = HashMap<u32, V, std::hash::BuildHasherDefault<Fnv>>;
+
 /// A fast hasher for fingerprints (FNV-1a): not for maps an adversary fills.
 #[derive(Default)]
 struct Fnv(u64);
@@ -398,7 +401,7 @@ pub struct RedstoneVM {
     /// The items of every container, by cell: (item, count) per slot.
     inventories: HashMap<u32, Vec<(u16, u8)>>,
     /// The nested ALUs' insides, by cell.
-    nested: HashMap<u32, NestedAlu>,
+    nested: CellMap<NestedAlu>,
     /// Item ids, indexed by the numbers in `inventories`.
     items: Vec<String>,
     rng: u64,
@@ -409,6 +412,10 @@ pub struct RedstoneVM {
     buses: Option<Buses>,
     /// Nested ALUs to run next step: a channel they read changed.
     dirty: std::collections::BTreeSet<u32>,
+    /// Nested ALUs not settled yet (run every step till they are).
+    unstable: std::collections::BTreeSet<u32>,
+    /// Fed readers ([`Buses::fed`]) to look at next step.
+    dirty_readers: std::collections::BTreeSet<u32>,
 }
 
 /// One slot's item: (index into `items`, count); count 0 = empty.
@@ -449,12 +456,14 @@ impl RedstoneVM {
             movers: Vec::new(),
             tick: 0,
             inventories: HashMap::new(),
-            nested: HashMap::new(),
+            nested: CellMap::default(),
             items: Vec::new(),
             rng: 0x9E37_79B9_7F4A_7C15,
             quiet: false,
             buses: None,
             dirty: std::collections::BTreeSet::new(),
+            unstable: std::collections::BTreeSet::new(),
+            dirty_readers: std::collections::BTreeSet::new(),
         }
     }
 
@@ -659,6 +668,7 @@ impl RedstoneVM {
         if matches!(self.get(i).block, BlockType::Port(PortMode::Input | PortMode::Bidirectional)) && self.get(i).port_in != power.min(15) {
             self.get_mut(i).port_in = power.min(15);
             self.quiet = false;
+            self.touch_around(i);
         }
     }
 
@@ -974,8 +984,11 @@ impl RedstoneVM {
 
     /// 4. Lamps and output ports read what's around them.
     fn read_power(&mut self) {
-        for k in 0..self.readers.len() {
-            let i = self.readers[k];
+        self.ensure_buses();
+        let fed = self.buses.as_ref().map(|b| &b.fed);
+        let mut todo: Vec<u32> = self.readers.iter().copied().filter(|i| !fed.is_some_and(|f| f.contains(i))).collect();
+        todo.extend(std::mem::take(&mut self.dirty_readers));
+        for i in todo {
             let cell = *self.get(i);
             let level = match cell.block {
                 BlockType::RedstoneLamp => {
@@ -1091,8 +1104,32 @@ impl RedstoneVM {
                 }
             }
         }
+        // What beside a cell changes only when an ALU or a port does.
+        let calm = |vm: &RedstoneVM, i: u32| {
+            Facing::ALL.into_iter().all(|f| {
+                matches!(vm.next(i, f).block, BlockType::Air | BlockType::Alu | BlockType::Bus | BlockType::Port(_))
+            })
+        };
+        b.always = self.nested.iter().filter(|&(&i, a)| a.reads_faces && !calm(self, i)).map(|(&i, _)| i).collect();
+        b.always.sort_unstable();
+        b.fed = self.readers.iter().copied().filter(|&i| calm(self, i)).collect();
         self.dirty.extend(self.nested.keys().copied());
+        self.dirty_readers.extend(b.fed.iter().copied());
         self.buses = Some(b);
+    }
+
+    /// Something beside cell `i` changed: the ALUs and fed readers next to
+    /// it look again next step.
+    fn touch_around(&mut self, i: u32) {
+        for f in Facing::ALL {
+            let Some(n) = self.at(i, f) else { continue };
+            if self.nested.contains_key(&n) {
+                self.dirty.insert(n);
+            }
+            if self.buses.as_ref().is_some_and(|b| b.fed.contains(&n)) {
+                self.dirty_readers.insert(n);
+            }
+        }
     }
 
     /// Channel `ch` of run `r` again, from its drivers; who reads it, if it changed.
@@ -1167,10 +1204,12 @@ impl RedstoneVM {
             .collect();
         // Nested ALUs: their faces' power in, their chips run, their faces' levels out.
         let mut changes = changes;
+        let mut touched = Vec::new();
         // Only those a read channel changed for, still settling, or reading their faces.
         self.ensure_buses();
         let mut run: Vec<u32> = std::mem::take(&mut self.dirty).into_iter().collect();
-        run.extend(self.nested.iter().filter(|(_, a)| !a.stable || a.reads_faces).map(|(&i, _)| i));
+        run.extend(self.unstable.iter().copied());
+        run.extend(self.buses.as_ref().map(|b| b.always.as_slice()).unwrap_or_default().iter().copied());
         run.sort_unstable();
         run.dedup();
         for i in run {
@@ -1206,16 +1245,25 @@ impl RedstoneVM {
                 alu.changed = changed;
                 alu.changed.clear();
             }
+            if self.nested.get(&i).is_some_and(|a| a.stable) {
+                self.unstable.remove(&i);
+            } else {
+                self.unstable.insert(i);
+            }
             let packed = outputs.iter().enumerate().fold(0u32, |p, (k, &l)| p | u32::from(l.min(15)) << (4 * k));
             let cell = *self.get(i);
             if cell.watched != packed {
                 let power = outputs.iter().copied().max().unwrap_or(0);
                 changes.push((i, Cell { watched: packed, power, ..cell }));
                 self.alu_changes += 1;
+                touched.push(i);
             }
         }
         for (i, next) in changes {
             *self.get_mut(i) = next;
+        }
+        for i in touched {
+            self.touch_around(i);
         }
         for i in pistons {
             if let BlockType::Piston { facing, sticky, extended } = self.get(i).block {
@@ -1563,6 +1611,12 @@ struct Buses {
     /// Each run's channels' drivers (ALU, its face) and readers.
     drivers: Vec<HashMap<u16, Vec<(u32, u8)>>>,
     readers: Vec<HashMap<u16, Vec<u32>>>,
+    /// ALUs reading their faces with redstone beside them: run every step.
+    /// (Those with only ports and ALUs beside them run when those change.)
+    always: Vec<u32>,
+    /// Lamps and output ports with only ALUs, ports and air beside them:
+    /// looked at when those change, not every step.
+    fed: std::collections::HashSet<u32>,
 }
 
 /// An ALU inside a circuit: its chips and the wires of its board, run each
