@@ -154,7 +154,7 @@
   },
   "screen.port.redstone_title": "Redstone Port",
   "block.display": "Display",
-  "block.display.desc": "§7A 256×256 screen with a GPU, driven over a Digital Cable.\n§7Vertex and index buffers, lines and shaded faces.\n§7Right-click to set its size and bus channels.",
+  "block.display.desc": "§7A 256×256 screen with a GPU, driven over a Digital Cable.\n§7The picture shows on the side that faced you when you placed it.\n§7Right-click to set its size (1–1024 blocks) and bus channels.",
   "screen.display.title": "Display",
   "screen.display.size_placeholder": "Size in blocks (1–1024)",
   "screen.display.channel_placeholder": "First bus channel",

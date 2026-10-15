@@ -3,7 +3,8 @@ from cpu import OPS
 
 
 class Emu:
-    def __init__(self, words):
+    def __init__(self, words, gpu=False):
+        self.gpu = gpu; self.writes = []; self.reg = 0
         self.w = words; self.pc = 0; self.a = 0; self.x = 0; self.c = 0
         self.m = [0] * 32; self.px = [0] * 64; self.r = 0; self.btn = 0; self.d = 0
 
@@ -30,6 +31,12 @@ class Emu:
         elif op == "JZ" and a == 0: pc = k
         elif op == "JNZ" and a != 0: pc = k
         elif op == "JC" and self.c: pc = k
+        elif op == "IN" and self.gpu:
+            a = self.btn; self.btn = 0
+        elif op == "OUT":
+            self.reg = k; self.writes.append((k, a))
+        elif op == "PUT":
+            self.writes.append((self.reg, k))
         elif op == "IN":
             b = self.btn; self.btn = 0
             code = 0 if b & 1 else 1 if b & 2 else 2 if b & 4 else 3 if b & 8 else None

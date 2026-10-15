@@ -30,7 +30,9 @@ OPS = [
     "JNZ",   # if A != 0
     "JC",    # if C
     "IN",    # A = the direction (0 up, 1 down, 2 left, 3 right): the button pressed
-             # since the last IN (up first), unless it's straight back; kept as the direction
+             # since the last IN (up first), unless it's straight back; kept as the direction.
+             # With the Display port: the buttons pressed since the last IN (bit 0 up,
+             # 1 down, 2 left, 3 right)
     "RND",   # A = an 8-bit LFSR, stepping every clock
     "PLOT",  # pixel A[5:0] = A[6]
     "TEST",  # A = pixel A[5:0]
@@ -157,7 +159,8 @@ def build(program, debug=True, gpu=False):
         (op["ANDI"], [n.AND(a, b) for a, b in zip(A, k)]),
         (op["ORI"], [n.OR(a, b) for a, b in zip(A, k)]),
         (op["XORI"], [n.XOR(a, b) for a, b in zip(A, k)]),
-        (op["IN"], direction + [n.ZERO] * 6),
+        # With the Display port, IN is the buttons pressed since the last IN.
+        (op["IN"], pressed + [n.ZERO] * 4 if gpu else direction + [n.ZERO] * 6),
         (op["RND"], R),
         (op["TEST"], [test] + [n.ZERO] * 7),
         (op["TXA"], X),
