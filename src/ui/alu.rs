@@ -473,31 +473,64 @@ fn flow_layout(
         Some(y + HEAD + row as f32 * ROW + ROW / 2.0)
     };
     let max_depth = depth.values().copied().max().unwrap_or(0);
-    for d in 0..=max_depth {
-        let mut column: Vec<(&crate::board::ChipView, f32)> = view
-            .chips
-            .iter()
-            .filter(|c| depth.get(&c.slot) == Some(&d) && placed(Node::Chip(c.slot)).is_none())
-            .map(|c| {
-                let ys: Vec<f32> = view
-                    .wires
-                    .iter()
-                    .filter(|w| w.to.node == Node::Chip(c.slot))
-                    .filter_map(|w| source_y(&w.from).or_else(|| chip_out_y(&at, &w.from)))
-                    .collect();
-                let mean = if ys.is_empty() { f32::MAX } else { ys.iter().sum::<f32>() / ys.len() as f32 };
-                (c, mean)
-            })
-            .collect();
-        column.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.slot.cmp(&b.0.slot)));
-        let x = x0 + d as f32 * pitch;
+    let mut columns: Vec<Vec<&crate::board::ChipView>> = (0..=max_depth)
+        .map(|d| view.chips.iter().filter(|c| depth.get(&c.slot) == Some(&d) && placed(Node::Chip(c.slot)).is_none()).collect())
+        .collect();
+    // Where a chip's pins are, at `at`: its input row `name`'s height.
+    let input_y = |at: &HashMap<u8, (f32, f32)>, pin: &Pin| -> Option<f32> {
+        match pin.node {
+            Node::Chip(slot) => {
+                let chip = view.chips.iter().find(|c| c.slot == slot)?;
+                let row = chip.pins.iter().filter(|(_, m)| m.inputs()).position(|(n, _)| *n == pin.name)?;
+                let (_, y) = placed(pin.node).or_else(|| at.get(&slot).copied())?;
+                Some(y + HEAD + row as f32 * ROW + ROW / 2.0)
+            }
+            Node::Out => {
+                let row = view.sides.iter().position(|s| s.side == pin.name)?;
+                let (_, y) = placed(Node::Out).unwrap_or((0.0, 2.0));
+                Some(y + HEAD + row as f32 * ROW + ROW / 2.0)
+            }
+            _ => None,
+        }
+    };
+    let mean = |ys: Vec<f32>| if ys.is_empty() { None } else { Some(ys.iter().sum::<f32>() / ys.len() as f32) };
+    // What feeds a chip, and what it feeds: their mean heights.
+    let fed_from = |at: &HashMap<u8, (f32, f32)>, slot: u8| {
+        mean(view.wires.iter().filter(|w| w.to.node == Node::Chip(slot)).filter_map(|w| source_y(&w.from).or_else(|| chip_out_y(at, &w.from))).collect())
+    };
+    let feeds = |at: &HashMap<u8, (f32, f32)>, slot: u8| mean(view.wires.iter().filter(|w| w.from.node == Node::Chip(slot)).filter_map(|w| input_y(at, &w.to)).collect());
+    // Stacks a column at `x`, each chip level with what feeds it where there's room.
+    let stack = |at: &mut HashMap<u8, (f32, f32)>, column: &[&crate::board::ChipView], x: f32| {
         let mut y = 2.0f32;
-        for (c, mean) in column {
-            // Level with what feeds it where there's room.
-            let h = height(c);
-            let want = if mean.is_finite() && mean < f32::MAX { (mean - HEAD - ROW / 2.0).max(y) } else { y };
+        for c in column {
+            let want = fed_from(at, c.slot).map_or(y, |m| (m - HEAD - ROW / 2.0).max(y));
             at.insert(c.slot, (x, want));
-            y = want + h + GAP;
+            y = want + height(c) + GAP;
+        }
+    };
+    let x_of = |d: usize| x0 + d as f32 * pitch;
+    let sort_by = |column: &mut Vec<&crate::board::ChipView>, key: &dyn Fn(u8) -> Option<f32>| {
+        // Those with nothing to go by keep their place among the rest.
+        let keys: Vec<f32> = column.iter().enumerate().map(|(i, c)| key(c.slot).unwrap_or(i as f32 * 1e-3 + f32::MAX / 2.0)).collect();
+        let mut idx: Vec<usize> = (0..column.len()).collect();
+        idx.sort_by(|&a, &b| keys[a].total_cmp(&keys[b]).then(column[a].slot.cmp(&column[b].slot)));
+        *column = idx.into_iter().map(|i| column[i]).collect();
+    };
+    // Down the flow by what feeds each chip, back up by what it feeds,
+    // and down again: fewer wires cross.
+    for sweep in 0..3 {
+        if sweep % 2 == 0 {
+            for d in 0..=max_depth {
+                let snapshot = at.clone();
+                sort_by(&mut columns[d], &|slot| fed_from(&snapshot, slot));
+                stack(&mut at, &columns[d], x_of(d));
+            }
+        } else {
+            for d in (0..max_depth).rev() {
+                let snapshot = at.clone();
+                sort_by(&mut columns[d], &|slot| feeds(&snapshot, slot));
+                stack(&mut at, &columns[d], x_of(d));
+            }
         }
     }
     at
