@@ -68,7 +68,7 @@ type FastSet<K> = HashSet<K, std::hash::BuildHasherDefault<Fnv>>;
 
 /// A fast hasher for fingerprints (FNV-1a): not for maps an adversary fills.
 #[derive(Default)]
-struct Fnv(u64);
+pub(crate) struct Fnv(u64);
 
 impl std::hash::Hasher for Fnv {
     fn finish(&self) -> u64 {
