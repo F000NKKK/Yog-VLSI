@@ -47,6 +47,10 @@ def layout(net, clock_repeaters=3, clock_delay=4):
     block(6, Y, ZB - 2 - n, "minecraft:redstone_wire[east=none,north=none,power=0,south=side,west=side]")
     block(5, Y, ZB - 2 - n, "minecraft:redstone_wire[east=side,north=none,power=0,south=side,west=none]")
     assert ZB - 2 - n >= 0
+    # Repeaters and wire stand on something — in the editor they're real blocks.
+    for x in (5, 6):
+        for z in range(ZB - 2 - n, ZB - 1):
+            block(x, Y - 1, z, "minecraft:stone")
 
     x = X0
     # The clock's ALU: the torch on its west face onto the bus (south).
@@ -109,8 +113,13 @@ def layout(net, clock_repeaters=3, clock_delay=4):
         alu(gx + dx, Y + dy, ZB + dz, chips, wires)
     last_x = first_gate_x + (len(groups) - 1) // 4
     assert last_x < SIZE, last_x
+    # The bus: each cable joined to its neighbours along it and to the ALUs beside it.
+    taken = {(a["x"], a["y"], a["z"]) for a in alus}
     for bx in range(X0, last_x + 1):
-        block(bx, Y, ZB, "yog-vlsi:digital_cable")
+        near = lambda dx, dy, dz: (bx + dx, Y + dy, ZB + dz) in taken or (dx != 0 and X0 <= bx + dx <= last_x and dy == 0 and dz == 0)
+        props = ",".join(f"{k}={str(near(*d)).lower()}" for k, d in
+                         [("down", (0, -1, 0)), ("east", (1, 0, 0)), ("north", (0, 0, -1)), ("south", (0, 0, 1)), ("up", (0, 1, 0)), ("west", (-1, 0, 0))])
+        block(bx, Y, ZB, f"yog-vlsi:digital_cable[{props}]")
     return {"size": SIZE, "blocks": blocks, "ports": ports, "alus": alus}
 
 
