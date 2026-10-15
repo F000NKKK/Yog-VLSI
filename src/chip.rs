@@ -460,6 +460,8 @@ mod tests {
                 println!("tick {t}: PC {} A {} ({:?}/tick)", word(&vm, "PC"), word(&vm, "A"), started.elapsed() / (t + 1));
             }
         }
+        let c4: Vec<u64> = crate::vm::COUNTS.iter().map(|c| c.load(std::sync::atomic::Ordering::Relaxed) / u64::from(ticks)).collect();
+        println!("per tick: alu runs {} over {} steps, chip settles {}, chip steps {}", c4[0], c4[1], c4[2], c4[3]);
         for r in 0..8 {
             let row: String = (0..8)
                 .map(|c| match port(&format!("PX{r}{c}")) {

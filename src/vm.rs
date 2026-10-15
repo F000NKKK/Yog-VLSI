@@ -63,6 +63,7 @@ use serde::{Deserialize, Serialize};
 /// A fast hasher for fingerprints (FNV-1a): not for maps an adversary fills.
 #[derive(Default)]
 struct Fnv(u64);
+pub static COUNTS: [std::sync::atomic::AtomicU64; 4] = [const { std::sync::atomic::AtomicU64::new(0) }; 4];
 
 impl std::hash::Hasher for Fnv {
     fn finish(&self) -> u64 {
@@ -1074,6 +1075,8 @@ impl RedstoneVM {
         run.extend(self.nested.iter().filter(|(_, a)| !a.stable || a.reads_faces).map(|(&i, _)| i));
         run.sort_unstable();
         run.dedup();
+        COUNTS[0].fetch_add(run.len() as u64, std::sync::atomic::Ordering::Relaxed);
+        COUNTS[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         for i in run {
             if self.get(i).block != BlockType::Alu {
                 continue;
@@ -1548,7 +1551,9 @@ impl NestedAlu {
             if c.left == 0 {
                 continue;
             }
+            COUNTS[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let used = c.vm.settle(c.left);
+            COUNTS[3].fetch_add(used as u64, std::sync::atomic::Ordering::Relaxed);
             let settled = used < c.left;
             c.left -= used;
             c.settled_on = settled.then_some(ins);
