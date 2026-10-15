@@ -60,6 +60,25 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
+/// A fast hasher for fingerprints (FNV-1a): not for maps an adversary fills.
+#[derive(Default)]
+struct Fnv(u64);
+
+impl std::hash::Hasher for Fnv {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        if self.0 == 0 {
+            self.0 = 0xcbf2_9ce4_8422_2325;
+        }
+        for &b in bytes {
+            self.0 ^= u64::from(b);
+            self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+}
+
 // ── Block types ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -342,7 +361,7 @@ impl Cell {
 
     /// What an observer sees of this cell.
     fn looks(&self) -> u32 {
-        let mut h = std::hash::DefaultHasher::new();
+        let mut h = Fnv::default();
         std::hash::Hash::hash(&self.block, &mut h);
         let shown = match self.block {
             BlockType::Solid | BlockType::Transparent | BlockType::Air | BlockType::Immovable => 0,
@@ -662,7 +681,7 @@ impl RedstoneVM {
         };
         for &i in &self.active {
             let c = self.get(i);
-            let mut bh = std::collections::hash_map::DefaultHasher::new();
+            let mut bh = Fnv::default();
             std::hash::Hash::hash(&c.block, &mut bh);
             mix(std::hash::Hasher::finish(&bh));
             mix(u64::from(c.power) | u64::from(c.strong) << 8 | u64::from(c.weak) << 16 | u64::from(c.timer) << 24 | u64::from(i) << 32);
