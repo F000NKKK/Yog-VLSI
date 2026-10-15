@@ -301,8 +301,10 @@ impl CircuitData {
                 .iter()
                 .filter(|(slot, _)| (*slot as usize) < a.tier.max_chips())
                 .filter_map(|(slot, meta)| {
+                    // Its ports where its circuit has them now (a copy on an
+                    // item may be older).
                     let circuit = load(&meta.id)?;
-                    let ports = meta
+                    let ports = circuit
                         .ports
                         .iter()
                         .map(|p| NestedPort { label: p.label.clone(), x: p.x, y: p.y, z: p.z, mode: p.dir })
