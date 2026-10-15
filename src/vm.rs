@@ -373,6 +373,7 @@ impl Cell {
 
 // ── VM ────────────────────────────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct RedstoneVM {
     /// Edge length of the (cubic) world, a power of two.
     pub size: u32,
@@ -661,7 +662,7 @@ impl RedstoneVM {
         for alu in self.nested.values_mut() {
             for c in &mut alu.chips {
                 c.left = c.budget;
-                c.vm.new_tick();
+                c.sim.new_tick();
             }
         }
     }
@@ -670,6 +671,11 @@ impl RedstoneVM {
     /// `budget` steps; how many it took. A circuit answers its inputs in
     /// the steps it needs, not one a server tick.
     pub fn settle(&mut self, budget: u32) -> u32 {
+        self.settle_traced(budget, &mut |_| {})
+    }
+
+    /// [`settle`](Self::settle), `after` called after each step.
+    pub(crate) fn settle_traced(&mut self, budget: u32, after: &mut dyn FnMut(&RedstoneVM)) -> u32 {
         // Settled and its inputs as they were: the step would change nothing.
         if self.quiet {
             return 0;
@@ -677,6 +683,7 @@ impl RedstoneVM {
         let mut before = self.state();
         for n in 1..=budget {
             self.step();
+            after(self);
             let now = self.state();
             if now == before {
                 // Not while a nested ALU's chip waits for its next tick's steps.
@@ -686,6 +693,38 @@ impl RedstoneVM {
             before = now;
         }
         budget
+    }
+
+    /// Everything that decides what it does next: its cells, whether it's
+    /// settled, what its input ports get. Two VMs of one circuit with the
+    /// same fingerprint go on alike.
+    pub(crate) fn fingerprint(&self, inputs: &[(u32, u32, u32)]) -> u64 {
+        let mut h = self.state() ^ u64::from(self.quiet) << 63;
+        for &(x, y, z) in inputs {
+            let v = if self.in_bounds(x as i32, y as i32, z as i32) { self.get(self.idx(x, y, z)).port_in } else { 0 };
+            h = (h ^ u64::from(v)).wrapping_mul(0x0100_0000_01b3);
+        }
+        h
+    }
+
+    /// Whether a table can stand for it ([`crate::compile`]): only redstone
+    /// whose next step is its cells' business — no items or randomness, no
+    /// observers (they count steps), no pistons, no ALUs inside.
+    pub(crate) fn tabulable(&self) -> Result<(), &'static str> {
+        if !self.nested.is_empty() {
+            return Err("it holds ALUs");
+        }
+        for &i in &self.active {
+            match self.get(i).block {
+                BlockType::Observer { .. } => return Err("an observer"),
+                BlockType::Piston { .. } | BlockType::PistonHead { .. } | BlockType::Slime | BlockType::Honey => return Err("pistons"),
+                BlockType::Container { .. } | BlockType::Hopper { .. } | BlockType::Dropper { .. } => return Err("items"),
+                BlockType::Button { .. } => return Err("a button"),
+                BlockType::Alu | BlockType::Bus => return Err("it holds ALUs"),
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     /// A fingerprint of every cell's state (block, levels, timers).
@@ -1450,11 +1489,13 @@ pub struct NestedPort {
 /// gives it each server tick. However many steps the circuit around it
 /// takes in a tick, it takes no more than its own — a slow chip stays slow
 /// inside a fast one, a fast one isn't sped up by it.
+#[derive(Clone)]
 pub struct NestedChip {
     pub slot: u8,
     pub ports: Vec<NestedPort>,
     pub budget: u32,
-    pub vm: RedstoneVM,
+    /// Its circuit — run step by step, or from its table once it has one.
+    pub sim: crate::compile::ChipSim,
     /// Steps it has left this tick.
     left: u32,
     /// Settled with these inputs: nothing to do until they change.
@@ -1462,13 +1503,18 @@ pub struct NestedChip {
 }
 
 impl NestedChip {
-    pub fn new(slot: u8, ports: Vec<NestedPort>, budget: u32, vm: RedstoneVM) -> Self {
-        NestedChip { slot, ports, budget, vm, left: budget, settled_on: None }
+    /// `key`: what its circuit is known by (its chip id): a circuit is
+    /// analysed once, however many chips run it.
+    pub fn new(slot: u8, ports: Vec<NestedPort>, budget: u32, vm: RedstoneVM, key: &str) -> Self {
+        let ins = ports.iter().filter(|p| p.mode.inputs()).map(|p| (p.x, p.y, p.z)).collect();
+        let outs = ports.iter().filter(|p| p.mode.outputs()).map(|p| (p.x, p.y, p.z)).collect();
+        let sim = crate::compile::ChipSim::new(vm, ins, outs, Some(key));
+        NestedChip { slot, ports, budget, sim, left: budget, settled_on: None }
     }
 }
 
 /// A circuit's buses (digital cable runs).
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Buses {
     /// Each bus cell's run.
     run: HashMap<u32, usize>,
@@ -1483,6 +1529,7 @@ struct Buses {
 
 /// An ALU inside a circuit: its chips and the wires of its board, run each
 /// step of the circuit around it — as the ALU it was in the world.
+#[derive(Clone)]
 pub struct NestedAlu {
     pub chips: Vec<NestedChip>,
     pub wires: Vec<(NestedPin, NestedPin)>,
@@ -1541,7 +1588,7 @@ impl NestedAlu {
         let outputs = |chips: &[NestedChip], levels: &mut HashMap<NestedPin, u8>| {
             for c in chips {
                 for p in c.ports.iter().filter(|p| p.mode.outputs()) {
-                    levels.insert(NestedPin::Chip(c.slot, p.label.clone()), c.vm.get_port_output(p.x, p.y, p.z));
+                    levels.insert(NestedPin::Chip(c.slot, p.label.clone()), c.sim.output(p.x, p.y, p.z));
                 }
             }
         };
@@ -1560,13 +1607,13 @@ impl NestedAlu {
                 continue;
             }
             for (p, &level) in c.ports.iter().filter(|p| p.mode.inputs()).zip(&ins) {
-                c.vm.set_port_input(p.x, p.y, p.z, level);
+                c.sim.set_input(p.x, p.y, p.z, level);
             }
             // Out of steps this tick: it waits for the next, as it would in the world.
             if c.left == 0 {
                 continue;
             }
-            let used = c.vm.settle(c.left);
+            let used = c.sim.settle(c.left);
             let settled = used < c.left;
             c.left -= used;
             c.settled_on = settled.then_some(ins);
