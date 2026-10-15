@@ -1,4 +1,5 @@
-//! Displays: a 256 × 256 screen with a GPU (`gpu.rs`) on a digital bus.
+//! Displays: a screen of up to 1024 × 1024 pixels with a GPU (`gpu.rs`) on
+//! a digital bus, shown 1 to 1024 blocks wide.
 //!
 //! A Display reads writes to its registers off the bus it joins, from its
 //! first channel `c` on:
