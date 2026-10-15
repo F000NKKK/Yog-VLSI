@@ -1813,6 +1813,7 @@ impl NestedAlu {
             })
             .collect();
         let levels = vec![0; board.size];
+        let n_chips = chips.len();
         NestedAlu {
             chips,
             wires,
@@ -1821,7 +1822,7 @@ impl NestedAlu {
             sinks,
             reads_faces,
             board,
-            pending: vec![true; chips.len()],
+            pending: vec![true; n_chips],
             primed: false,
             levels,
             scratch: Vec::new(),
@@ -1845,7 +1846,7 @@ impl NestedAlu {
         let pending = &mut self.pending;
         let get = |lv: &[u8], src: Option<usize>| src.map_or(0, |i| lv[i]);
         // A slot's new level: the chips reading it look again.
-        let mut set = |lv: &mut [u8], pending: &mut [bool], slot: usize, level: u8| {
+        let set = |lv: &mut [u8], pending: &mut [bool], slot: usize, level: u8| {
             if lv[slot] != level {
                 lv[slot] = level;
                 for &ci in &b.readers[slot] {
