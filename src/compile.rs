@@ -258,6 +258,15 @@ impl ChipSim {
         }
     }
 
+    /// [`settle`](Self::settle), stopping early at `deadline` while stepped.
+    pub fn settle_until(&mut self, budget: u32, deadline: Instant) -> u32 {
+        if self.place.is_none() {
+            self.touched = false;
+            return self.vm.settle_until(budget, deadline);
+        }
+        self.settle(budget)
+    }
+
     /// Settles for up to `budget` steps; how many it took — as
     /// [`RedstoneVM::settle`].
     pub fn settle(&mut self, budget: u32) -> u32 {

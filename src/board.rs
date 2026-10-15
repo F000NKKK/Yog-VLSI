@@ -117,8 +117,21 @@ const BUS_ROWS: u16 = 4;
 struct Installed {
     meta: ChipMeta,
     circuit: CircuitData,
-    vm: RedstoneVM,
+    sim: crate::compile::ChipSim,
 }
+
+impl Installed {
+    fn new(meta: ChipMeta, circuit: CircuitData, vm: RedstoneVM) -> Self {
+        let ins = circuit.ports.iter().filter(|p| p.dir.inputs()).map(|p| (p.x, p.y, p.z)).collect();
+        let outs = circuit.ports.iter().filter(|p| p.dir.outputs()).map(|p| (p.x, p.y, p.z)).collect();
+        let sim = crate::compile::ChipSim::new(vm, ins, outs, Some(&meta.id));
+        Installed { meta, circuit, sim }
+    }
+}
+
+/// The time all ALUs may take in one server tick: past it their chips go
+/// on next tick, slower — the server isn't.
+const TICK_BUDGET: std::time::Duration = std::time::Duration::from_millis(10);
 
 struct Board {
     saved: Saved,
@@ -246,7 +259,7 @@ impl Board {
                     // Its ALUs run inside it, their chips' circuits from the store.
                     let game_dir = srv.game_dir();
                     let vm = circuit.vm_with(&|id| CircuitData::load_for_chip(&game_dir, id), 1);
-                    *entry = Some(Installed { meta, circuit, vm });
+                    *entry = Some(Installed::new(meta, circuit, vm));
                 }
                 None => *entry = None,
             }
@@ -285,7 +298,7 @@ impl Board {
         for (slot, chip) in self.chips.iter().enumerate().take(max) {
             let Some(chip) = chip else { continue };
             for port in chip.circuit.ports.iter().filter(|p| p.dir.outputs()) {
-                levels.insert(Pin::new(Node::Chip(slot as u8), &port.label), chip.vm.get_port_output(port.x, port.y, port.z));
+                levels.insert(Pin::new(Node::Chip(slot as u8), &port.label), chip.sim.output(port.x, port.y, port.z));
             }
         }
         for (i, side) in SIDES.iter().enumerate().filter(|(i, _)| self.is_bus(*i)) {
@@ -304,7 +317,7 @@ impl Board {
     /// chips, the chips step with it, and what they put out leaves by the
     /// output sides the same tick — a signal crosses an ALU in the chips'
     /// own steps, no tick lost waiting on either side of them.
-    fn tick(&mut self, alu: &AluId) {
+    fn tick(&mut self, alu: &AluId, deadline: std::time::Instant) {
         let max = self.saved.tier.max_chips();
         let incoming = |wires: &[Wire], levels: &HashMap<Pin, u8>, to: &Pin| {
             wires.iter().find(|w| &w.to == to).and_then(|w| levels.get(&w.from)).copied().unwrap_or(0)
@@ -321,15 +334,15 @@ impl Board {
         }
         for (slot, x, y, z, level) in inputs {
             if let Some(chip) = &mut self.chips[slot] {
-                chip.vm.set_port_input(x, y, z, level);
+                chip.sim.set_input(x, y, z, level);
             }
         }
 
         // The chips settle with them: as many steps as they need, up to
         // their tier's — they answer this tick.
         for chip in self.chips.iter_mut().take(max).flatten() {
-            chip.vm.new_tick();
-            chip.vm.settle(chip.meta.tier.steps_per_tick());
+            chip.sim.new_tick();
+            chip.sim.settle_until(chip.meta.tier.steps_per_tick(), deadline);
         }
 
         // Out: what they put out now, through the output sides.
@@ -551,7 +564,19 @@ pub fn tick(srv: &dyn yog_api::Server) {
     let cables_changed = cables::cables_changed();
     {
         let mut boards = BOARDS.lock().unwrap();
-        for (alu, board) in boards.iter_mut() {
+        // Each a share of what's left of the tick's budget, starting each
+        // tick one further along: no ALU always last.
+        let started = std::time::Instant::now();
+        let count = boards.len().max(1);
+        let first = (n as usize) % count;
+        let mut order: Vec<_> = boards.iter_mut().collect();
+        let len = order.len();
+        order.rotate_left(first.min(len));
+        let mut left = count;
+        for (alu, board) in order {
+            let spent = started.elapsed();
+            let share = TICK_BUDGET.saturating_sub(spent) / left as u32;
+            left -= 1;
             if names.is_some() || cables_changed || !board.cables_known {
                 board.sync_cables(srv, alu);
             }
@@ -562,7 +587,7 @@ pub fn tick(srv: &dyn yog_api::Server) {
                     .filter_map(|&side| Some((side.to_string(), cables::side_port_name(srv, alu, side, names)?)))
                     .collect();
             }
-            board.tick(alu);
+            board.tick(alu, std::time::Instant::now() + share);
         }
     }
     if n % SEND_EVERY == 0 {
@@ -663,7 +688,7 @@ mod tests {
             ports.iter().enumerate().map(|(i, (l, d))| Port { label: l.to_string(), x: i as u32, y: 0, z: 0, dir: *d }).collect();
         let circuit = CircuitData { size: 16, blocks: Vec::new(), ports: ports.clone(), alus: Vec::new() };
         let meta = ChipMeta { id: format!("c{slot}"), tier: Tier::ALL[0], name: "Chip".into(), ports };
-        (slot, Installed { vm: circuit.vm(), circuit, meta })
+        (slot, Installed::new(meta, circuit.clone(), circuit.vm()))
     }
 
     fn board() -> Board {

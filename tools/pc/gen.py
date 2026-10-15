@@ -25,7 +25,7 @@ def pin_in(face): return {"In": face}
 def pin_out(face): return {"Out": face}
 
 
-def layout(net, clock_repeaters=8, clock_delay=4):
+def layout(net, clock_repeaters=3, clock_delay=4):
     blocks, ports, alus = [], [], []
 
     def block(x, y, z, state):

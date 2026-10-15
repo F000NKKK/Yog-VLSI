@@ -701,6 +701,22 @@ impl RedstoneVM {
         self.settle_traced(budget, &mut |_| {})
     }
 
+    /// [`settle`](Self::settle), stopping early at `deadline` (looked at
+    /// every 32 steps) — the server's tick comes first; the circuit goes on
+    /// next tick, as if out of steps.
+    pub fn settle_until(&mut self, budget: u32, deadline: std::time::Instant) -> u32 {
+        let mut done = 0;
+        while done < budget {
+            let chunk = (budget - done).min(32);
+            let n = self.settle(chunk);
+            done += n;
+            if n < chunk || std::time::Instant::now() >= deadline {
+                break;
+            }
+        }
+        done
+    }
+
     /// [`settle`](Self::settle), `after` called after each step.
     pub(crate) fn settle_traced(&mut self, budget: u32, after: &mut dyn FnMut(&RedstoneVM)) -> u32 {
         // Settled and its inputs as they were: the step would change nothing.
