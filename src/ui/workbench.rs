@@ -504,11 +504,14 @@ mod tests {
     #[test]
     fn vials_fill_on_a_log_scale() {
         let mut vm = WorkbenchVm::default();
-        vm.apply(state([0, 9, 999_999, 0, 0, 5_000_000], BlueprintView::None));
+        // Iron and gold count nuggets: 9 ingots, 999 999 ingots.
+        vm.apply(state([0, 81, 8_999_991, 0, 0, 5_000_000], BlueprintView::None));
         assert_eq!(vm.vial(Resource::Redstone), 0.0);
         assert!(vm.vial(Resource::Iron) > 0.0 && vm.vial(Resource::Iron) < VIAL_HEIGHT / 2.0);
         assert!((vm.vial(Resource::Gold) - VIAL_HEIGHT).abs() < 0.01);
         assert_eq!(vm.vial(Resource::Stone), VIAL_HEIGHT);
         assert_eq!(vm.amount(Resource::Stone), "5m");
+        assert_eq!(vm.amount(Resource::Iron), "9");
+        assert_eq!((Resource::Iron.shown(21), Resource::Iron.shown(5), Resource::Redstone.shown(21)), ("2.3".into(), "0.5".into(), "21".into()), "an ingot is 9 nuggets");
     }
 }
