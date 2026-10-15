@@ -143,6 +143,7 @@ fn table_for(key: &str, vm: &RedstoneVM, ins: &[(u32, u32, u32)], outs: &[(u32, 
         None => {}
     }
     tables.insert(key.to_string(), Slot::Working);
+    drop(tables);
     let (key, vm, ins, outs) = (key.to_string(), vm.clone(), ins.to_vec(), outs.to_vec());
     let work = move || {
         let started = Instant::now();
@@ -156,20 +157,18 @@ fn table_for(key: &str, vm: &RedstoneVM, ins: &[(u32, u32, u32)], outs: &[(u32, 
                 Slot::Redstone(why)
             }
         };
+        let ready = match &slot {
+            Slot::Ready(t) => Some(t.clone()),
+            _ => None,
+        };
         TABLES.lock().unwrap().insert(key, slot);
+        ready
     };
+    // Tests have it at once; the game on a worker thread, stepping meanwhile.
     if cfg!(test) {
-        drop(tables);
-        work();
-        return table_for_ready(&TABLES, &ins_key(&ins));
+        return work();
     }
     std::thread::spawn(work);
-    None
-}
-
-// (In tests the work is done at once; the key is looked up again.)
-fn ins_key(_: &[(u32, u32, u32)]) {}
-fn table_for_ready(_: &Mutex<HashMap<String, Slot>>, _: &()) -> Option<Arc<Table>> {
     None
 }
 

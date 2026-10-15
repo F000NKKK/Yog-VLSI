@@ -308,7 +308,7 @@ impl CircuitData {
                         .iter()
                         .map(|p| NestedPort { label: p.label.clone(), x: p.x, y: p.y, z: p.z, mode: p.dir })
                         .collect();
-                    Some(NestedChip::new(*slot, ports, meta.tier.steps_per_tick(), circuit.vm_with(load, depth + 1)))
+                    Some(NestedChip::new(*slot, ports, meta.tier.steps_per_tick(), circuit.vm_with(load, depth + 1), &meta.id))
                 })
                 .collect();
             vm.set_nested(a.x, a.y, a.z, NestedAlu::new(chips, a.wires.clone()));

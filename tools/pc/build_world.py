@@ -20,7 +20,10 @@ import nbt
 from world import World
 
 CHIP_ID = "yog8-snake"
-BUS_SIDE = 4  # U, in N S E W U D
+# The ALU's buses, by side (N S E W U D): the screen's plate above it, the
+# buttons' cable below — two buses, an ALU isn't a cable.
+SCREEN_BUS = 4
+BUTTON_BUS = 5
 
 
 def kv_read(path):
@@ -120,9 +123,9 @@ def main(save, data, ox, oy, oz):
 
     dim = "minecraft:overworld"
     pin = lambda node, name: {"node": node, "name": name}
-    wires = [{"from": pin({"Chip": 0}, f"PX{r}{c}"), "to": pin({"Bus": BUS_SIDE}, str(r * 8 + c + 1))} for r in range(8) for c in range(8)]
-    wires += [{"from": pin({"Bus": BUS_SIDE}, str(65 + i)), "to": pin({"Chip": 0}, name)} for i, name in enumerate(controls)]
-    board = {"tier": "Netherite", "wires": wires, "layout": [], "panels": [], "bus_rows": [[BUS_SIDE, 68]]}
+    wires = [{"from": pin({"Chip": 0}, f"PX{r}{c}"), "to": pin({"Bus": SCREEN_BUS}, str(r * 8 + c + 1))} for r in range(8) for c in range(8)]
+    wires += [{"from": pin({"Bus": BUTTON_BUS}, str(65 + i)), "to": pin({"Chip": 0}, name)} for i, name in enumerate(controls)]
+    board = {"tier": "Netherite", "wires": wires, "layout": [], "panels": [], "bus_rows": [[SCREEN_BUS, 64], [BUTTON_BUS, 68]]}
     kv = os.path.join(data, "yog-vlsi_boards", "global.kv")
     e = kv_read(kv)
     boards = json.loads(e["boards"][1]) if "boards" in e else []

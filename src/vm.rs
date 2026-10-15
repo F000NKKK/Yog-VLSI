@@ -2061,7 +2061,7 @@ mod tests {
         vm.set_block(4, 0, 0, BlockType::Port(PortMode::Output));
         vm.settle(8);
         let port = |label: &str, x, mode| NestedPort { label: label.into(), x, y: 0, z: 0, mode };
-        NestedChip::new(0, vec![port("IN", 0, PortMode::Input), port("OUT", 4, PortMode::Output)], budget, vm)
+        NestedChip::new(0, vec![port("IN", 0, PortMode::Input), port("OUT", 4, PortMode::Output)], budget, vm, "test:not")
     }
 
     /// An outer circuit: input port, the ALU (its west face in, its east face out), output port.
