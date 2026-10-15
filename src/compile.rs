@@ -364,7 +364,8 @@ mod tests {
 
     #[test]
     fn every_gate_gets_a_table() {
-        for name in ["NOT", "AND", "OR", "XOR", "NAND", "NOR", "D latch", "D flip-flop", "RS latch"] {
+        // (Not the RS latch: S and R let go at once, it oscillates — as redstone.)
+        for name in ["NOT", "AND", "OR", "XOR", "NAND", "NOR", "XNOR", "D latch", "D flip-flop", "T flip-flop"] {
             let d = designs::named(name).unwrap();
             let c = d.circuit(Tier::Wood);
             let ins: Vec<_> = c.ports.iter().filter(|p| p.dir.inputs()).map(|p| (p.x, p.y, p.z)).collect();
