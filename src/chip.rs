@@ -462,8 +462,6 @@ mod tests {
                 println!("tick {t}: PC {} A {} ({:?}/tick)", word(&vm, "PC"), word(&vm, "A"), started.elapsed() / (t + 1));
             }
         }
-        let pr: Vec<f64> = crate::vm::PROF.iter().map(|c| c.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e6 / f64::from(ticks)).collect();
-        println!("ms/tick: passes(all VMs) {:.2} components(all) {:.2} outer settle {:.2} state(all) {:.2} nested-loop(outer) {:.2} real settles/tick {:.0}", pr[0], pr[1], pr[2], pr[3], pr[4], pr[5]*1e6);
         for r in 0..8 {
             let row: String = (0..8)
                 .map(|c| match port(&format!("PX{r}{c}")) {

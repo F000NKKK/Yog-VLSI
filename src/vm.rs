@@ -63,7 +63,6 @@ use serde::{Deserialize, Serialize};
 /// A fast hasher for fingerprints (FNV-1a): not for maps an adversary fills.
 #[derive(Default)]
 struct Fnv(u64);
-pub static PROF: [std::sync::atomic::AtomicU64; 6] = [const { std::sync::atomic::AtomicU64::new(0) }; 6];
 
 impl std::hash::Hasher for Fnv {
     fn finish(&self) -> u64 {
@@ -677,12 +676,6 @@ impl RedstoneVM {
 
     /// [`settle`](Self::settle), `after` called after each step.
     pub(crate) fn settle_traced(&mut self, budget: u32, after: &mut dyn FnMut(&RedstoneVM)) -> u32 {
-        let t0 = std::time::Instant::now();
-        let r = self.settle_inner(budget, after);
-        if !self.nested.is_empty() { PROF[2].fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed); }
-        r
-    }
-    fn settle_inner(&mut self, budget: u32, after: &mut dyn FnMut(&RedstoneVM)) -> u32 {
         // Settled and its inputs as they were: the step would change nothing.
         if self.quiet {
             return 0;
@@ -691,9 +684,7 @@ impl RedstoneVM {
         for n in 1..=budget {
             self.step();
             after(self);
-            let ts = std::time::Instant::now();
             let now = self.state();
-            PROF[3].fetch_add(ts.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
             if now == before {
                 // Not while a nested ALU's chip waits for its next tick's steps.
                 self.quiet = self.nested.values().all(|a| a.stable);
@@ -762,16 +753,12 @@ impl RedstoneVM {
 
     pub fn step(&mut self) {
         self.tick += 1;
-        let t = std::time::Instant::now();
         self.shape_wire();
         self.strong_power();
         self.settle_wire();
         self.wire_power();
         self.read_power();
-        let t2 = std::time::Instant::now();
-        PROF[0].fetch_add((t2 - t).as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
         self.settle_components();
-        PROF[1].fetch_add(t2.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
         self.move_items();
     }
 
@@ -1137,7 +1124,6 @@ impl RedstoneVM {
             .collect();
         // Nested ALUs: their faces' power in, their chips run, their faces' levels out.
         let mut changes = changes;
-        let tn = std::time::Instant::now();
         // Only those a read channel changed for, still settling, or reading their faces.
         self.ensure_buses();
         let mut run: Vec<u32> = std::mem::take(&mut self.dirty).into_iter().collect();
@@ -1190,7 +1176,6 @@ impl RedstoneVM {
                 self.alu_changes += 1;
             }
         }
-        if !self.nested.is_empty() { PROF[4].fetch_add(tn.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed); }
         for (i, next) in changes {
             *self.get_mut(i) = next;
         }
