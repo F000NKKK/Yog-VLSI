@@ -501,6 +501,21 @@ mod tests {
         assert_eq!(h.vm().cost_rows().len(), 2);
     }
 
+    /// The screen's resource slots take what the resources' table says they're worth.
+    #[test]
+    fn resource_slots_take_the_resources_inputs() {
+        let yui = include_str!("workbench.yui");
+        for r in Resource::ALL {
+            let at = format!("<Slot index=\"{}\" accepts=\"", r.slot());
+            let start = yui.find(&at).unwrap_or_else(|| panic!("no slot {}", r.slot())) + at.len();
+            let mut accepts: Vec<&str> = yui[start..].split('"').next().unwrap().split_whitespace().collect();
+            let mut inputs: Vec<&str> = r.inputs().iter().map(|(i, _)| &**i).collect();
+            accepts.sort();
+            inputs.sort();
+            assert_eq!(accepts, inputs, "{}", r.name());
+        }
+    }
+
     #[test]
     fn vials_fill_on_a_log_scale() {
         let mut vm = WorkbenchVm::default();

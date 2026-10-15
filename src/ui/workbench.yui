@@ -34,7 +34,7 @@
                 <Row gap="4">
                     <Column gap="2">
                         <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Redstone)}">
-                            <Slot index="1" accepts="minecraft:redstone minecraft:redstone_block" />
+                            <Slot index="1" accepts="#yog:dusts/redstone #yog:storage_blocks/redstone" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column style="@Fill" h="{x:Bind vial(Resource::Redstone)}" bg="@Colors.vial.redstone" />
@@ -42,7 +42,7 @@
                             <Label style="@Count" text="{x:Bind amount(Resource::Redstone)}" />
                         </Row>
                         <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Iron)}">
-                            <Slot index="2" accepts="minecraft:iron_ingot minecraft:iron_block" />
+                            <Slot index="2" accepts="#yog:nuggets/iron #yog:ingots/iron #yog:storage_blocks/iron" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column style="@Fill" h="{x:Bind vial(Resource::Iron)}" bg="@Colors.vial.iron" />
@@ -50,7 +50,7 @@
                             <Label style="@Count" text="{x:Bind amount(Resource::Iron)}" />
                         </Row>
                         <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Gold)}">
-                            <Slot index="3" accepts="minecraft:gold_ingot minecraft:gold_block" />
+                            <Slot index="3" accepts="#yog:nuggets/gold #yog:ingots/gold #yog:storage_blocks/gold" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column style="@Fill" h="{x:Bind vial(Resource::Gold)}" bg="@Colors.vial.gold" />
@@ -60,7 +60,7 @@
                     </Column>
                     <Column gap="2">
                         <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Quartz)}">
-                            <Slot index="4" accepts="minecraft:quartz minecraft:quartz_block" />
+                            <Slot index="4" accepts="#yog:gems/quartz #yog:storage_blocks/quartz" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column style="@Fill" h="{x:Bind vial(Resource::Quartz)}" bg="@Colors.vial.quartz" />
@@ -68,7 +68,7 @@
                             <Label style="@Count" text="{x:Bind amount(Resource::Quartz)}" />
                         </Row>
                         <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Wood)}">
-                            <Slot index="5" accepts="#minecraft:logs" />
+                            <Slot index="5" accepts="#yog:logs" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column style="@Fill" h="{x:Bind vial(Resource::Wood)}" bg="@Colors.vial.wood" />
@@ -76,7 +76,7 @@
                             <Label style="@Count" text="{x:Bind amount(Resource::Wood)}" />
                         </Row>
                         <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Stone)}">
-                            <Slot index="6" accepts="minecraft:cobblestone" />
+                            <Slot index="6" accepts="#yog:cobblestones #yog:stones" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
                                 <Column style="@Fill" h="{x:Bind vial(Resource::Stone)}" bg="@Colors.vial.cobblestone" />
