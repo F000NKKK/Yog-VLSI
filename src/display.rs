@@ -278,6 +278,8 @@ mod client {
         since: Instant,
         spins: bool,
         texture: Option<Texture>,
+        /// The picture's width over its height.
+        aspect: f32,
         drawn: Option<Instant>,
     }
 
@@ -321,17 +323,18 @@ void main() {
                 let since = now - Duration::from_millis(frame.age * 50);
                 let spins = frame.ops.iter().any(|op| matches!(op, gpu::Op::Draw(d) if d.spin != [0; 3]));
                 let texture = shown.remove(&key).and_then(|s| s.texture);
-                shown.insert(key, Shown { frame, heard: now, since, spins, texture, drawn: None });
+                shown.insert(key, Shown { frame, heard: now, since, spins, texture, aspect: 1.0, drawn: None });
             }
         }
     }
 
-    /// The picture's corners (bottom left, then right and up, each `size`
-    /// long), in world coordinates: on the face it faces, a hair out.
-    fn quad(pos: (i32, i32, i32), facing: Facing, size: f32) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    /// The picture's corner (bottom left) and its sides (right, `width`
+    /// long, and up, `height`), in world coordinates: on the face it faces,
+    /// a hair out.
+    fn quad(pos: (i32, i32, i32), facing: Facing, size: f32, height: f32) -> ([f32; 3], [f32; 3], [f32; 3]) {
         let (x, y, z) = (pos.0 as f32, pos.1 as f32, pos.2 as f32);
         const OUT: f32 = 0.01;
-        let up = [0.0, size, 0.0];
+        let up = [0.0, height, 0.0];
         match facing {
             Facing::S => ([x, y, z + 1.0 + OUT], [size, 0.0, 0.0], up),
             Facing::N => ([x + 1.0, y, z - OUT], [-size, 0.0, 0.0], up),
@@ -376,15 +379,17 @@ void main() {
             };
             if stale {
                 let ticks = (now - s.since).as_secs_f32() * 20.0;
-                let pixels = gpu::render(&s.frame.ops, ticks);
+                let (w, h, pixels) = gpu::render(&s.frame.ops, ticks);
                 if let Some(t) = s.texture.take() {
                     gfx.delete_texture(t);
                 }
-                s.texture = Some(gfx.create_texture_rgba(gpu::SIZE as u32, gpu::SIZE as u32, &pixels, false));
+                s.texture = Some(gfx.create_texture_rgba(w as u32, h as u32, &pixels, false));
+                s.aspect = w as f32 / h as f32;
                 s.drawn = Some(now);
             }
             let Some(texture) = &s.texture else { continue };
-            let (o, r, u) = quad(s.frame.pos, s.frame.facing, s.frame.size as f32);
+            let size = s.frame.size as f32;
+            let (o, r, u) = quad(s.frame.pos, s.frame.facing, size, size / s.aspect);
             let at = |a: f32, b: f32| [0, 1, 2].map(|i| o[i] + r[i] * a + u[i] * b - cam[i]);
             // Two triangles; the texture's top row at the top.
             let corners = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
