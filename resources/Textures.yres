@@ -110,5 +110,9 @@
   "chip_wood": {
     "type": "image",
     "value": "item/chip_wood.png"
+  },
+  "display": {
+    "type": "image",
+    "value": "block/display.png"
   }
 }

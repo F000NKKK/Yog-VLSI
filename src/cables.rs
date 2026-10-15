@@ -196,6 +196,18 @@ pub fn bus_level(dim: &str, alu: (i32, i32, i32), side: &str, ch: u8) -> u8 {
     yog_pipes::level(DIGITAL.to_string(), pipe_pos(dim, beside(alu, side)), ch).unwrap_or(0)
 }
 
+/// The level on channel `ch` of the bus a block joins (a Display).
+pub fn bus_level_at(dim: &str, pos: BlockPos, ch: u8) -> u8 {
+    yog_pipes::level(DIGITAL.to_string(), pipe_pos(dim, pos), ch).unwrap_or(0)
+}
+
+/// Drives `level` onto channel `ch` of the bus a block joins.
+pub fn bus_drive_at(dim: &str, pos: BlockPos, ch: u8, level: u8) {
+    if let Err(e) = yog_pipes::emit(DIGITAL.to_string(), pipe_pos(dim, pos), ch, level.min(15)) {
+        warn!("[yog-vlsi] driving the bus: {e}");
+    }
+}
+
 /// Drives `level` onto channel `ch` of the bus at ALU side `side`.
 pub fn bus_drive(dim: &str, alu: (i32, i32, i32), side: &str, ch: u8, level: u8) {
     if let Err(e) = yog_pipes::emit(DIGITAL.to_string(), pipe_pos(dim, beside(alu, side)), ch, level.min(15)) {
@@ -233,7 +245,7 @@ fn register_networks() {
         events: None,
         mechanic: Mechanic::Signal { channels, attenuation: 0 },
     };
-    let steps: [Result<(), String>; 6] = [
+    let steps: [Result<(), String>; 7] = [
         yog_pipes::register_capability(signal(ANALOG, "analog", 1)),
         yog_pipes::register_capability(signal(DIGITAL, "digital", BUS_CHANNELS)),
         yog_pipes::attach(AttachDef {
@@ -251,6 +263,21 @@ fn register_networks() {
         yog_pipes::register_endpoint(EndpointDef {
             capability: DIGITAL.to_string(),
             target: EndpointTarget::Block(Blocks::REDSTONE_PORT.to_string()),
+            kinds: Vec::new(),
+            can_insert: false,
+            can_extract: false,
+            listens_signals: true,
+            listens_messages: false,
+            groups: Vec::new(),
+            priority: 0,
+            max_packet: 0,
+            pressure: 0,
+            handler: None,
+        }),
+        // A Display reads its registers' writes off the bus (`display.rs`).
+        yog_pipes::register_endpoint(EndpointDef {
+            capability: DIGITAL.to_string(),
+            target: EndpointTarget::Block(Blocks::DISPLAY.to_string()),
             kinds: Vec::new(),
             can_insert: false,
             can_extract: false,

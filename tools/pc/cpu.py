@@ -5,7 +5,11 @@ edge; memory and the screen are written while the clock is low, when the
 address and data are steady).
 
 Word: 13 bits — opcode (5) and an 8-bit operand k.
-A, X: 8-bit registers. C: carry. RAM: 32 bytes. Screen: 8×8 pixels.
+A, X: 8-bit registers. C: carry. RAM: 32 bytes. Then either an 8×8 screen
+of its own, or (`gpu`) an output port to a Display: OUT and PUT write a
+register of its GPU over the bus (`display.rs` in the mod) — the port's
+TOGGLE flips, and the next OUT or PUT waits till the Display's ACK has
+followed it.
 """
 
 from hdl import Net
@@ -38,17 +42,21 @@ OPS = [
     "SETD",  # the direction = A[1:0]
     "MINC",  # A = A + 1 in the bits of k, the rest kept (wraps within them)
     "MDEC",  # A = A - 1 in the bits of k, the rest kept
+    "OUT",   # GPU register k = A
+    "PUT",   # the last OUT's register = k
 ]
 OP = {n: i for i, n in enumerate(OPS)}
 RAM_BYTES = 32
 BUTTONS = ["UP", "DOWN", "LEFT", "RIGHT"]
 
 
-def build(program, debug=True):
-    """The computer running `program` (13-bit words) from its ROM."""
+def build(program, debug=True, gpu=False):
+    """The computer running `program` (13-bit words) from its ROM; `gpu`:
+    with the Display port instead of the screen."""
     n = Net()
     clk = n.input("CLK")
     btn = [n.input(b) for b in BUTTONS]
+    ack = n.input("ACK") if gpu else None
 
     # Registers first as placeholders: their outputs are used before they're made.
     A = [n.sig() for _ in range(8)]
@@ -79,13 +87,31 @@ def build(program, debug=True):
         ram.append([n.LATCH(A[b], we) for b in range(8)])
     M = n.select([(rows[r], ram[r]) for r in range(RAM_BYTES)], 8)
 
-    # ── Screen: 64 pixel latches ──────────────────────────────────────────
-    px_rows = n.decoder(A[:6])
-    plot = n.AND(op["PLOT"], n.NOT(clk))
-    pixels = [n.LATCH(A[6], n.AND(px_rows[p], plot)) for p in range(64)]
-    test = n.select([(px_rows[p], [pixels[p]]) for p in range(64)], 1)[0]
-    for p in range(64):
-        n.output(f"PX{p // 8}{p % 8}", pixels[p])
+    if gpu:
+        # ── The Display port: DATA, REG, TOGGLE out; ACK in ───────────────
+        T = n.sig()
+        ack_s = n.DFF(ack, clk)  # the bus's ACK, taken with the clock
+        busy = n.XOR(T, ack_s)
+        put = n.OR(op["OUT"], op["PUT"])
+        stall = n.AND(put, busy)
+        go = n.AND(put, n.NOT(busy))
+        data = n.register(n.mux_word(op["PUT"], A, k), go, clk)
+        regs = n.register(k, n.AND(op["OUT"], n.NOT(busy)), clk)
+        n.alias(T, n.register([n.NOT(T)], go, clk)[0])
+        for i in range(8):
+            n.output(f"D{i}", data[i])
+            n.output(f"R{i}", regs[i])
+        n.output("T", T)
+        test = n.ZERO
+    else:
+        # ── Screen: 64 pixel latches ──────────────────────────────────────
+        px_rows = n.decoder(A[:6])
+        plot = n.AND(op["PLOT"], n.NOT(clk))
+        pixels = [n.LATCH(A[6], n.AND(px_rows[p], plot)) for p in range(64)]
+        test = n.select([(px_rows[p], [pixels[p]]) for p in range(64)], 1)[0]
+        for p in range(64):
+            n.output(f"PX{p // 8}{p % 8}", pixels[p])
+        stall = n.ZERO
 
     # ── Buttons: a press is kept till an IN has read it ──────────────────
     # A flip-flop per button, clocked with everything else: pressed on the
@@ -156,6 +182,8 @@ def build(program, debug=True):
 
     jump = n.any([op["JMP"], n.AND(op["JZ"], z), n.AND(op["JNZ"], n.NOT(z)), n.AND(op["JC"], c_new)])
     next_pc = n.mux_word(jump, n.inc(PC), k)
+    # An OUT or PUT waiting for the Display stays where it is.
+    next_pc = n.mux_word(stall, next_pc, PC)
     new = n.register(next_pc, n.ONE, clk)
     for ph, q in zip(PC, new):
         n.alias(ph, q)

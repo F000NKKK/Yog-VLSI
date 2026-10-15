@@ -6,7 +6,9 @@ mod chip;
 mod commands;
 mod compile;
 mod designs;
+mod display;
 mod editor;
+mod gpu;
 mod nbt;
 mod resources;
 pub mod vm;
@@ -84,6 +86,8 @@ impl Mod for YogVlsi {
         alu::setup(registry);
         board::setup(registry);
         port::setup(registry);
+        ui::display::setup(registry);
+        display::register(registry);
         editor::register(registry);
         commands::register(registry);
         cables::register(registry);
@@ -93,6 +97,7 @@ impl Mod for YogVlsi {
         registry.on_tick(|srv| {
             cables::tick_inputs(srv);
             board::tick(srv);
+            display::tick(srv);
             cables::tick_outputs(srv);
             workbench::tick(srv);
         });
@@ -104,6 +109,7 @@ impl Mod for YogVlsi {
             cables::load(srv);
             editor::load(srv);
             port::load(srv);
+            display::load(srv);
         });
         registry.on_server_stopping(|srv| {
             editor::save_sessions(srv);
@@ -111,6 +117,7 @@ impl Mod for YogVlsi {
             board::save(srv);
             cables::save(srv);
             port::save(srv);
+            display::save(srv);
         });
 
         info!("[yog-vlsi] ready.");

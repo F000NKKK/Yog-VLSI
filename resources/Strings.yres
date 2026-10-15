@@ -39,8 +39,14 @@
     "value": "§7Place inside a chip's virtual circuit.\n§7Right-click to name it and set Input/Output/Bidirectional.",
     "comment": "Tooltip shared by the three VLSI port blocks"
   },
-  "chip.info": {"value": "§7{tier} · §bup to {steps} steps a tick", "comment": "A fabricated chip's tooltip: its tier and speed"},
-  "chip.ports": {"value": "§7Ports: {ports}", "comment": "A fabricated chip's tooltip: its ports (→in, out→, ↔both)"},
+  "chip.info": {
+    "value": "§7{tier} · §bup to {steps} steps a tick",
+    "comment": "A fabricated chip's tooltip: its tier and speed"
+  },
+  "chip.ports": {
+    "value": "§7Ports: {ports}",
+    "comment": "A fabricated chip's tooltip: its ports (→in, out→, ↔both)"
+  },
   "chip.no_ports": "§7Ports: none",
   "item.chip_wood": "Wooden Microchip",
   "item.chip_wood.desc": "§7Tier: §eWood§7 | §b8 steps/tick§7 | §a16×16 world\n§7Place in a §6VLSI Workbench§7 to design circuits.\n§7Ports: none (unprogrammed)",
@@ -138,10 +144,19 @@
     "comment": "A chip in a slot past the ALU tier's limit"
   },
   "screen.alu.empty": "Put programmed chips in the slots below",
-  "screen.alu.bus": {"value": "Bus {side}", "comment": "A bus node's title in the ALU graph (a side a digital cable reaches)"},
+  "screen.alu.bus": {
+    "value": "Bus {side}",
+    "comment": "A bus node's title in the ALU graph (a side a digital cable reaches)"
+  },
   "screen.alu.help": {
     "value": "Inputs (left): what each side's cable brings in. Outputs (right): what goes out into it.\nDrag from an output pin (right edge) to an input pin (left edge) to wire them — chip to chip stays inside the ALU.\nDrag a wire off its input pin to move it, or into empty space to remove it. Drag a chip, or the In and Out panels, by its title.\nDrag empty space to move the view; the wheel zooms it.\nA side a Digital Cable reaches is a bus: wire into a channel's left pin to drive it, out of its right pin to read it; pull the bar at its bottom down for more channels.\nName a Redstone Port (right-click it) and its name shows on the side its cable reaches.",
     "comment": "Tooltip of the (i) in the ALU screen"
   },
-  "screen.port.redstone_title": "Redstone Port"
+  "screen.port.redstone_title": "Redstone Port",
+  "block.display": "Display",
+  "block.display.desc": "§7A 256×256 screen with a GPU, driven over a Digital Cable.\n§7Vertex and index buffers, lines and shaded faces.\n§7Right-click to set its size and bus channels.",
+  "screen.display.title": "Display",
+  "screen.display.size_placeholder": "Size in blocks (1–32)",
+  "screen.display.channel_placeholder": "First bus channel",
+  "screen.display.channels": "Channels {first}–{last}: data 8, register 8, toggle, acknowledge"
 }
