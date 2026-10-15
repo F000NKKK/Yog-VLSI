@@ -1,22 +1,32 @@
-//! The Display's GPU: a 256 × 256 screen behind registers written over a
-//! digital bus (`display.rs` reads the bus; this is what the writes do).
+//! The Display's GPU: a screen of up to 1024 × 1024 pixels behind 16-bit
+//! registers written over a digital bus a byte at a time (`display.rs` reads
+//! the bus; this is what the writes do).
 //!
-//! A program fills a **vertex buffer** (x, y, z — signed bytes) and an
-//! **index buffer** (bytes, each a vertex), sets the transform, and draws
+//! A write is `REG ← DATA`, a byte. A register's high byte is what was
+//! written to [`reg::HIGH`] just before; without one the byte stands for a
+//! small number — sign-extended for the signed registers (coordinates,
+//! spins), so an 8-bit machine writes -100 in one go.
+//!
+//! A program fills a **vertex buffer** (x, y, z — signed 16-bit) and an
+//! **index buffer** (16-bit, each a vertex), sets the transform, and draws
 //! a range of indices as lines, wire triangles or flat-shaded faces. Draws
 //! go into the back frame; SWAP shows it. Spin registers keep the shown
 //! frame turning on their own — every tick, as long as nothing replaces it.
 //!
-//! Colors are RGB332 bytes (`rrrgggbb`).
+//! Colors are RGB332 bytes (`rrrgggbb`). Turns are in 256ths of a turn.
 
 use serde::{Deserialize, Serialize};
 
-/// The screen's side, in pixels.
-pub const SIZE: usize = 256;
+/// The widest and tallest a screen can be, in pixels.
+pub const MAX_SIZE: u16 = 1024;
+/// A new screen's width and height.
+pub const DEFAULT_SIZE: u16 = 256;
+/// Vertices and indices the buffers hold.
+pub const BUFFER: usize = 4096;
 /// Draw calls a frame keeps (a program that never clears stops adding).
 const MAX_OPS: usize = 1024;
 
-/// The registers (written as `REG ← DATA`).
+/// The registers.
 pub mod reg {
     /// Writing runs a command: [`super::cmd`].
     pub const CMD: u8 = 0;
@@ -40,80 +50,96 @@ pub mod reg {
     /// The first index DRAW reads, and how many.
     pub const FIRST: u8 = 12;
     pub const COUNT: u8 = 13;
-    /// Turns, 256 to a full turn: about y, x, z.
+    /// Turns about y, x and z.
     pub const YAW: u8 = 14;
     pub const PITCH: u8 = 15;
     pub const ROLL: u8 = 16;
     /// Pixels per 16 units.
     pub const SCALE: u8 = 17;
-    /// What the turns gain each tick (signed).
+    /// What the turns gain each tick.
     pub const SPIN_YAW: u8 = 18;
     pub const SPIN_PITCH: u8 = 19;
     pub const SPIN_ROLL: u8 = 20;
-    pub const COUNT_OF: usize = 21;
+    /// The screen's size in pixels (1–1024), from the next CLEAR on.
+    pub const WIDTH: u8 = 21;
+    pub const HEIGHT: u8 = 22;
+    pub const COUNT_OF: usize = 23;
+    /// The high byte of the next write.
+    pub const HIGH: u8 = 255;
+
+    /// Whether a byte written without a high byte is sign-extended.
+    pub fn signed(r: u8) -> bool {
+        matches!(r, VDATA | SPIN_YAW | SPIN_PITCH | SPIN_ROLL)
+    }
 }
 
 /// What a write to CMD does.
 pub mod cmd {
-    /// Starts a new back frame, filled with BG.
-    pub const CLEAR: u8 = 0;
+    /// Starts a new back frame, filled with BG, WIDTH × HEIGHT.
+    pub const CLEAR: u16 = 0;
     /// Draws COUNT indices from FIRST.
-    pub const DRAW: u8 = 1;
+    pub const DRAW: u16 = 1;
     /// Shows the back frame.
-    pub const SWAP: u8 = 2;
+    pub const SWAP: u16 = 2;
     /// A pixel at (X, Y).
-    pub const PIXEL: u8 = 3;
+    pub const PIXEL: u16 = 3;
     /// A line from (X, Y) to (X2, Y2).
-    pub const LINE: u8 = 4;
+    pub const LINE: u16 = 4;
 }
 
 /// How DRAW reads its indices.
 pub mod mode {
     /// Two to a line.
-    pub const LINES: u8 = 0;
+    pub const LINES: u16 = 0;
     /// Three to a triangle, its edges.
-    pub const WIRE: u8 = 1;
+    pub const WIRE: u16 = 1;
     /// Three to a triangle, filled and shaded; the side facing away isn't
     /// drawn (counter-clockwise faces the viewer).
-    pub const FACES: u8 = 2;
+    pub const FACES: u16 = 2;
 }
 
 /// A mesh drawn with a transform.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Draw {
-    pub mode: u8,
+    pub mode: u16,
     pub color: u8,
     /// Yaw, pitch, roll when drawn; then the spin they gain each tick.
-    pub turn: [u8; 3],
-    pub spin: [i8; 3],
-    pub scale: u8,
-    pub vertices: Vec<[i8; 3]>,
-    pub indices: Vec<u8>,
+    pub turn: [u16; 3],
+    pub spin: [i16; 3],
+    pub scale: u16,
+    pub vertices: Vec<[i16; 3]>,
+    pub indices: Vec<u16>,
 }
 
 /// One thing drawn into a frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Op {
-    Clear(u8),
-    Pixel { x: u8, y: u8, color: u8 },
-    Line { from: (u8, u8), to: (u8, u8), color: u8 },
+    Clear { color: u8, width: u16, height: u16 },
+    Pixel { x: u16, y: u16, color: u8 },
+    Line { from: (u16, u16), to: (u16, u16), color: u8 },
     Draw(Draw),
 }
 
 /// The GPU's state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Gpu {
-    pub regs: Vec<u8>,
-    pub vertices: Vec<[i8; 3]>,
-    pub indices: Vec<u8>,
-    vptr: u8,
+    pub regs: Vec<u16>,
+    /// A high byte waiting for the next write.
+    high: Option<u8>,
+    pub vertices: Vec<[i16; 3]>,
+    pub indices: Vec<u16>,
+    vptr: u16,
     /// The coordinate VDATA writes next (0 x, 1 y, 2 z).
     component: u8,
-    iptr: u8,
+    iptr: u16,
     back: Vec<Op>,
     /// What's shown, and a number that changes when it does.
     pub front: Vec<Op>,
     pub version: u64,
+}
+
+fn blank() -> Vec<Op> {
+    vec![Op::Clear { color: 0, width: DEFAULT_SIZE, height: DEFAULT_SIZE }]
 }
 
 impl Default for Gpu {
@@ -121,76 +147,93 @@ impl Default for Gpu {
         let mut regs = vec![0; reg::COUNT_OF];
         regs[reg::COLOR as usize] = 0xFF;
         regs[reg::SCALE as usize] = 32;
-        regs[reg::COUNT as usize] = 0;
+        regs[reg::WIDTH as usize] = DEFAULT_SIZE;
+        regs[reg::HEIGHT as usize] = DEFAULT_SIZE;
         Gpu {
             regs,
-            vertices: vec![[0; 3]; 256],
-            indices: vec![0; 256],
+            high: None,
+            vertices: vec![[0; 3]; BUFFER],
+            indices: vec![0; BUFFER],
             vptr: 0,
             component: 0,
             iptr: 0,
-            back: vec![Op::Clear(0)],
-            front: vec![Op::Clear(0)],
+            back: blank(),
+            front: blank(),
             version: 0,
         }
     }
 }
 
 impl Gpu {
-    fn r(&self, r: u8) -> u8 {
+    fn r(&self, r: u8) -> u16 {
         self.regs[r as usize]
     }
 
-    /// `REG ← DATA`.
+    /// `REG ← DATA`: a byte off the bus.
     pub fn write(&mut self, r: u8, data: u8) {
+        if r == reg::HIGH {
+            self.high = Some(data);
+            return;
+        }
+        let value = match self.high.take() {
+            Some(h) => (h as u16) << 8 | data as u16,
+            None if reg::signed(r) => data as i8 as i16 as u16,
+            None => data as u16,
+        };
+        self.set(r, value);
+    }
+
+    /// A register gets a 16-bit value.
+    pub fn set(&mut self, r: u8, value: u16) {
         if (r as usize) < reg::COUNT_OF {
-            self.regs[r as usize] = data;
+            self.regs[r as usize] = value;
         }
         match r {
-            reg::CMD => self.command(data),
+            reg::CMD => self.command(value),
             reg::VPTR => {
-                self.vptr = data;
+                self.vptr = value % BUFFER as u16;
                 self.component = 0;
             }
             reg::VDATA => {
-                self.vertices[self.vptr as usize][self.component as usize] = data as i8;
+                self.vertices[self.vptr as usize][self.component as usize] = value as i16;
                 self.component += 1;
                 if self.component == 3 {
                     self.component = 0;
-                    self.vptr = self.vptr.wrapping_add(1);
+                    self.vptr = (self.vptr + 1) % BUFFER as u16;
                 }
             }
-            reg::IPTR => self.iptr = data,
+            reg::IPTR => self.iptr = value % BUFFER as u16,
             reg::IDATA => {
-                self.indices[self.iptr as usize] = data;
-                self.iptr = self.iptr.wrapping_add(1);
+                self.indices[self.iptr as usize] = value % BUFFER as u16;
+                self.iptr = (self.iptr + 1) % BUFFER as u16;
             }
             _ => {}
         }
     }
 
-    fn command(&mut self, c: u8) {
+    fn command(&mut self, c: u16) {
         let op = match c {
             cmd::CLEAR => {
                 self.back.clear();
-                Op::Clear(self.r(reg::BG))
+                let size = |r| self.r(r).clamp(1, MAX_SIZE);
+                Op::Clear { color: self.r(reg::BG) as u8, width: size(reg::WIDTH), height: size(reg::HEIGHT) }
             }
             cmd::DRAW => {
                 let first = self.r(reg::FIRST) as usize;
-                let count = self.r(reg::COUNT) as usize;
-                let indices: Vec<u8> = (first..first + count).map(|i| self.indices[i % 256]).collect();
+                let count = (self.r(reg::COUNT) as usize).min(BUFFER);
+                let indices: Vec<u16> = (first..first + count).map(|i| self.indices[i % BUFFER]).collect();
                 // Only the vertices it uses, renumbered.
-                let mut used: Vec<u8> = indices.clone();
+                let mut used = indices.clone();
                 used.sort_unstable();
                 used.dedup();
                 Op::Draw(Draw {
                     mode: self.r(reg::MODE),
-                    color: self.r(reg::COLOR),
+                    color: self.r(reg::COLOR) as u8,
                     turn: [self.r(reg::YAW), self.r(reg::PITCH), self.r(reg::ROLL)],
-                    spin: [self.r(reg::SPIN_YAW) as i8, self.r(reg::SPIN_PITCH) as i8, self.r(reg::SPIN_ROLL) as i8],
+                    spin: [self.r(reg::SPIN_YAW) as i16, self.r(reg::SPIN_PITCH) as i16, self.r(reg::SPIN_ROLL) as i16],
                     scale: self.r(reg::SCALE),
                     vertices: used.iter().map(|&v| self.vertices[v as usize]).collect(),
-                    indices: indices.iter().map(|i| used.binary_search(i).unwrap() as u8).collect(),
+                    indices: indices.iter().map(|i| used.binary_search(i).unwrap() as u16).collect(),
                 })
             }
             cmd::SWAP => {
@@ -198,11 +241,11 @@ impl Gpu {
                 self.version += 1;
                 return;
             }
-            cmd::PIXEL => Op::Pixel { x: self.r(reg::X), y: self.r(reg::Y), color: self.r(reg::COLOR) },
+            cmd::PIXEL => Op::Pixel { x: self.r(reg::X), y: self.r(reg::Y), color: self.r(reg::COLOR) as u8 },
             cmd::LINE => Op::Line {
                 from: (self.r(reg::X), self.r(reg::Y)),
                 to: (self.r(reg::X2), self.r(reg::Y2)),
-                color: self.r(reg::COLOR),
+                color: self.r(reg::COLOR) as u8,
             },
             _ => return,
         };
@@ -230,14 +273,21 @@ fn rgba(c: u8, light: f32) -> [u8; 4] {
 
 /// A screen being drawn: colors and depths.
 struct Raster {
+    w: i32,
+    h: i32,
     px: Vec<[u8; 4]>,
     depth: Vec<f32>,
 }
 
 impl Raster {
+    fn new(w: u16, h: u16, c: u8) -> Self {
+        let n = w as usize * h as usize;
+        Raster { w: w as i32, h: h as i32, px: vec![rgba(c, 1.0); n], depth: vec![f32::MIN; n] }
+    }
+
     fn put(&mut self, x: i32, y: i32, c: [u8; 4]) {
-        if (0..SIZE as i32).contains(&x) && (0..SIZE as i32).contains(&y) {
-            self.px[y as usize * SIZE + x as usize] = c;
+        if (0..self.w).contains(&x) && (0..self.h).contains(&y) {
+            self.px[(y * self.w + x) as usize] = c;
         }
     }
 
@@ -245,8 +295,9 @@ impl Raster {
         let (dx, dy) = ((x1 - x0).abs(), -(y1 - y0).abs());
         let (sx, sy) = (if x0 < x1 { 1 } else { -1 }, if y0 < y1 { 1 } else { -1 });
         let mut err = dx + dy;
-        // Off-screen ends are clipped by `put`; a line can't be longer than this.
-        for _ in 0..4 * SIZE {
+        // Points far off the screen aren't walked to the end.
+        let limit = 2 * (self.w + self.h) + dx - dy;
+        for _ in 0..limit.min(1 << 17) {
             self.put(x0, y0, c);
             if x0 == x1 && y0 == y1 {
                 break;
@@ -271,14 +322,14 @@ impl Raster {
             return;
         }
         let lo = |i: usize| p.iter().map(|q| q[i]).fold(f32::MAX, f32::min).floor().max(0.0) as i32;
-        let hi = |i: usize| p.iter().map(|q| q[i]).fold(f32::MIN, f32::max).ceil().min(SIZE as f32 - 1.0) as i32;
-        for y in lo(1)..=hi(1) {
-            for x in lo(0)..=hi(0) {
+        let hi = |i: usize, max: i32| p.iter().map(|q| q[i]).fold(f32::MIN, f32::max).ceil().min(max as f32 - 1.0) as i32;
+        for y in lo(1)..=hi(1, self.h) {
+            for x in lo(0)..=hi(0, self.w) {
                 let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
                 let w = [edge(p[1], p[2], fx, fy) / area, edge(p[2], p[0], fx, fy) / area, edge(p[0], p[1], fx, fy) / area];
                 if w.iter().all(|&w| w >= 0.0) {
                     let z = w[0] * p[0][2] + w[1] * p[1][2] + w[2] * p[2][2];
-                    let i = y as usize * SIZE + x as usize;
+                    let i = (y * self.w + x) as usize;
                     if z >= self.depth[i] {
                         self.depth[i] = z;
                         self.px[i] = c;
@@ -310,23 +361,29 @@ fn transform(d: &Draw, turn: [f32; 3]) -> Vec<[f32; 3]> {
         .collect()
 }
 
-/// Where the eye is, in pixels in front of the screen.
-const EYE: f32 = 600.0;
-
-/// A view-space point on the screen: x, y and its depth.
-fn project(v: [f32; 3]) -> [f32; 3] {
-    let f = EYE / (EYE - v[2]).max(1.0);
-    let c = SIZE as f32 / 2.0;
-    [c + v[0] * f, c - v[1] * f, v[2]]
-}
-
-/// Draws a frame `ticks` after it was shown: RGBA, rows from the top.
-pub fn render(ops: &[Op], ticks: f32) -> Vec<u8> {
-    let mut r = Raster { px: vec![rgba(0, 1.0); SIZE * SIZE], depth: vec![f32::MIN; SIZE * SIZE] };
+/// A frame as an image `ticks` after it was shown: its width, height and
+/// RGBA bytes, rows from the top.
+pub fn render(ops: &[Op], ticks: f32) -> (u16, u16, Vec<u8>) {
+    let (w, h) = ops
+        .iter()
+        .find_map(|op| match op {
+            Op::Clear { width, height, .. } => Some((*width, *height)),
+            _ => None,
+        })
+        .unwrap_or((DEFAULT_SIZE, DEFAULT_SIZE));
+    let (w, h) = (w.clamp(1, MAX_SIZE), h.clamp(1, MAX_SIZE));
+    let mut r = Raster::new(w, h, 0);
+    // The eye stands back as far for any size: a picture looks the same.
+    let eye = 600.0 * w.max(h) as f32 / DEFAULT_SIZE as f32;
+    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+    let project = |v: [f32; 3]| {
+        let f = eye / (eye - v[2]).max(1.0);
+        [cx + v[0] * f, cy - v[1] * f, v[2]]
+    };
     for op in ops {
         match op {
-            Op::Clear(c) => {
-                r.px.fill(rgba(*c, 1.0));
+            Op::Clear { color, .. } => {
+                r.px.fill(rgba(*color, 1.0));
                 r.depth.fill(f32::MIN);
             }
             Op::Pixel { x, y, color } => r.put(*x as i32, *y as i32, rgba(*color, 1.0)),
@@ -335,7 +392,7 @@ pub fn render(ops: &[Op], ticks: f32) -> Vec<u8> {
                 let turn = [0, 1, 2].map(|i| d.turn[i] as f32 + d.spin[i] as f32 * ticks);
                 let view = transform(d, turn);
                 let screen: Vec<[f32; 3]> = view.iter().map(|&v| project(v)).collect();
-                let at = |i: u8| screen.get(i as usize).copied();
+                let at = |i: u16| screen.get(i as usize).copied();
                 let xy = |p: [f32; 3]| (p[0].round() as i32, p[1].round() as i32);
                 let color = rgba(d.color, 1.0);
                 match d.mode {
@@ -381,23 +438,23 @@ pub fn render(ops: &[Op], ticks: f32) -> Vec<u8> {
             }
         }
     }
-    r.px.into_iter().flatten().collect()
+    (w, h, r.px.into_iter().flatten().collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn px(img: &[u8], x: usize, y: usize) -> [u8; 4] {
-        let i = (y * SIZE + x) * 4;
-        [img[i], img[i + 1], img[i + 2], img[i + 3]]
+    fn px(img: &(u16, u16, Vec<u8>), x: usize, y: usize) -> [u8; 4] {
+        let i = (y * img.0 as usize + x) * 4;
+        [img.2[i], img.2[i + 1], img.2[i + 2], img.2[i + 3]]
     }
 
-    fn cube(g: &mut Gpu) {
+    fn cube(g: &mut Gpu, half: i8) {
         g.write(reg::VPTR, 0);
         for v in [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]] {
             for c in v {
-                g.write(reg::VDATA, (c * 40) as u8);
+                g.write(reg::VDATA, (c * half) as u8);
             }
         }
         g.write(reg::IPTR, 0);
@@ -408,23 +465,30 @@ mod tests {
                 g.write(reg::IDATA, i);
             }
         }
+        g.write(reg::COUNT, 36);
+    }
+
+    fn frame(g: &mut Gpu) {
+        g.write(reg::CMD, cmd::CLEAR as u8);
+        g.write(reg::CMD, cmd::DRAW as u8);
+        g.write(reg::CMD, cmd::SWAP as u8);
     }
 
     #[test]
     fn a_pixel_and_a_line_land_where_asked() {
         let mut g = Gpu::default();
         g.write(reg::BG, 0b000_000_01);
-        g.write(reg::CMD, cmd::CLEAR);
+        g.write(reg::CMD, cmd::CLEAR as u8);
         g.write(reg::COLOR, 0b111_000_00);
         g.write(reg::X, 10);
         g.write(reg::Y, 20);
-        g.write(reg::CMD, cmd::PIXEL);
+        g.write(reg::CMD, cmd::PIXEL as u8);
         g.write(reg::X2, 50);
         g.write(reg::Y2, 20);
-        g.write(reg::CMD, cmd::LINE);
+        g.write(reg::CMD, cmd::LINE as u8);
         // Not shown till SWAP.
-        assert_eq!(g.front, vec![Op::Clear(0)]);
-        g.write(reg::CMD, cmd::SWAP);
+        assert_eq!(g.front, blank());
+        g.write(reg::CMD, cmd::SWAP as u8);
         let img = render(&g.front, 0.0);
         assert_eq!(px(&img, 10, 20), [255, 0, 0, 255]);
         assert_eq!(px(&img, 30, 20), [255, 0, 0, 255]);
@@ -432,15 +496,34 @@ mod tests {
     }
 
     #[test]
+    fn sixteen_bits_reach_a_big_screen() {
+        let mut g = Gpu::default();
+        for (r, v) in [(reg::WIDTH, 1024u16), (reg::HEIGHT, 600), (reg::X, 1000), (reg::Y, 590)] {
+            g.write(reg::HIGH, (v >> 8) as u8);
+            g.write(r, v as u8);
+        }
+        g.write(reg::CMD, cmd::CLEAR as u8);
+        g.write(reg::CMD, cmd::PIXEL as u8);
+        g.write(reg::CMD, cmd::SWAP as u8);
+        let img = render(&g.front, 0.0);
+        assert_eq!((img.0, img.1, img.2.len()), (1024, 600, 1024 * 600 * 4));
+        assert_eq!(px(&img, 1000, 590), [255, 255, 255, 255]);
+        // A byte alone: small and, for a coordinate, signed.
+        g.write(reg::VPTR, 0);
+        g.write(reg::VDATA, -100i8 as u8);
+        g.write(reg::HIGH, 0x12);
+        g.write(reg::VDATA, 0x34);
+        assert_eq!(&g.vertices[0][..2], &[-100, 0x1234]);
+        assert_eq!(g.regs[reg::X as usize], 1000);
+    }
+
+    #[test]
     fn a_cube_of_faces_covers_the_middle_and_hides_its_back() {
         let mut g = Gpu::default();
-        cube(&mut g);
-        g.write(reg::MODE, mode::FACES);
-        g.write(reg::COUNT, 36);
+        cube(&mut g, 40);
+        g.write(reg::MODE, mode::FACES as u8);
         g.write(reg::COLOR, 0b111_111_11);
-        g.write(reg::CMD, cmd::CLEAR);
-        g.write(reg::CMD, cmd::DRAW);
-        g.write(reg::CMD, cmd::SWAP);
+        frame(&mut g);
         let Op::Draw(d) = &g.front[1] else { panic!() };
         assert_eq!((d.vertices.len(), d.indices.len()), (8, 36));
         let img = render(&g.front, 0.0);
@@ -450,9 +533,7 @@ mod tests {
         assert_eq!(px(&img, 5, 5), [0, 0, 0, 255]);
         // Turned an eighth about y, two faces show, lit differently.
         g.write(reg::YAW, 32);
-        g.write(reg::CMD, cmd::CLEAR);
-        g.write(reg::CMD, cmd::DRAW);
-        g.write(reg::CMD, cmd::SWAP);
+        frame(&mut g);
         let img = render(&g.front, 0.0);
         assert_ne!(px(&img, 108, 128), px(&img, 148, 128));
     }
@@ -460,17 +541,37 @@ mod tests {
     #[test]
     fn spin_turns_the_shown_frame_and_the_registers() {
         let mut g = Gpu::default();
-        cube(&mut g);
-        g.write(reg::MODE, mode::WIRE);
-        g.write(reg::COUNT, 36);
+        cube(&mut g, 40);
+        g.write(reg::MODE, mode::WIRE as u8);
         g.write(reg::SPIN_YAW, 4);
-        g.write(reg::CMD, cmd::DRAW);
-        g.write(reg::CMD, cmd::SWAP);
+        frame(&mut g);
         assert_ne!(render(&g.front, 0.0), render(&g.front, 3.0));
         // 64 ticks of 4: a full turn, the cube as it was.
         assert_eq!(render(&g.front, 0.0), render(&g.front, 64.0));
         g.tick();
         assert_eq!(g.regs[reg::YAW as usize], 4);
+        // A negative spin turns back.
+        g.write(reg::SPIN_YAW, -4i8 as u8);
+        g.tick();
+        assert_eq!(g.regs[reg::YAW as usize], 0);
+    }
+
+    #[test]
+    fn the_buffers_fill_in_order_and_wrap() {
+        let mut g = Gpu::default();
+        g.write(reg::HIGH, 0x0F);
+        g.write(reg::VPTR, 0xFF);
+        for c in [1, 2, 3, 4] {
+            g.write(reg::VDATA, c);
+        }
+        assert_eq!(g.vertices[BUFFER - 1], [1, 2, 3]);
+        assert_eq!(g.vertices[0], [4, 0, 0]);
+        g.write(reg::HIGH, 0x0F);
+        g.write(reg::IPTR, 0xFE);
+        for i in [7, 8, 9] {
+            g.write(reg::IDATA, i);
+        }
+        assert_eq!((g.indices[BUFFER - 2], g.indices[BUFFER - 1], g.indices[0]), (7, 8, 9));
     }
 
     /// `OUT=dir`: the cube in each mode, as PPM pictures (for the docs).
@@ -479,35 +580,17 @@ mod tests {
         let Ok(dir) = std::env::var("OUT") else { return };
         for (name, m, color) in [("lines", mode::WIRE, 0b000_111_00), ("faces", mode::FACES, 0b111_101_00)] {
             let mut g = Gpu::default();
-            cube(&mut g);
-            g.write(reg::MODE, m);
-            g.write(reg::COUNT, 36);
+            cube(&mut g, 30);
+            g.write(reg::MODE, m as u8);
             g.write(reg::COLOR, color);
             g.write(reg::YAW, 20);
             g.write(reg::PITCH, 18);
-            g.write(reg::CMD, cmd::DRAW);
-            g.write(reg::CMD, cmd::SWAP);
-            let img = render(&g.front, 0.0);
+            frame(&mut g);
+            let (w, h, img) = render(&g.front, 0.0);
             let rgb: Vec<u8> = img.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
-            let mut ppm = format!("P6 {SIZE} {SIZE} 255\n").into_bytes();
+            let mut ppm = format!("P6 {w} {h} 255\n").into_bytes();
             ppm.extend(rgb);
             std::fs::write(format!("{dir}/cube-{name}.ppm"), ppm).unwrap();
         }
-    }
-
-    #[test]
-    fn the_buffers_fill_in_order_and_wrap() {
-        let mut g = Gpu::default();
-        g.write(reg::VPTR, 255);
-        for c in [1, 2, 3, 4] {
-            g.write(reg::VDATA, c);
-        }
-        assert_eq!(g.vertices[255], [1, 2, 3]);
-        assert_eq!(g.vertices[0], [4, 0, 0]);
-        g.write(reg::IPTR, 254);
-        for i in [7, 8, 9] {
-            g.write(reg::IDATA, i);
-        }
-        assert_eq!((g.indices[254], g.indices[255], g.indices[0]), (7, 8, 9));
     }
 }
