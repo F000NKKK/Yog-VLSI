@@ -920,9 +920,9 @@ dependencies = [
 
 [[package]]
 name = "yog-kit"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e90f2f3466d1ad5c3de2c5ffdafe159a9f61be2a6ac9b63a1bfea671b63dd266"
+checksum = "08f436ab7b99708b7e01db37ce1c2ccfa2288c559eecf01d0e8d00dce31c7d8f"
 dependencies = [
  "yog-api",
 ]
