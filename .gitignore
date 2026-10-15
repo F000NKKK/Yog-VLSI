@@ -3,3 +3,4 @@ target/
 artifacts/
 .yog-idle/
 *.designer.rs
+__pycache__/

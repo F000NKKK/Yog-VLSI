@@ -6,6 +6,9 @@ import re
 from cpu import OP
 
 
+LABELS = {}
+
+
 def assemble(text):
     names, lines = {}, []
     for raw in text.splitlines():
@@ -29,4 +32,6 @@ def assemble(text):
             a = arg[0]
             k = names[a] if a in names else int(a, 0)
         words.append(OP[op.upper()] << 8 | (k & 0xFF))
+    LABELS.clear()
+    LABELS.update(names)
     return words
