@@ -23,7 +23,7 @@
     },
     "stone": {
       "name": "@Strings.tier_stone",
-      "steps_per_tick": 16,
+      "steps_per_tick": 32,
       "world_size": 32,
       "max_chips": 3,
       "digital_channels": 16,
@@ -32,7 +32,7 @@
     },
     "gold": {
       "name": "@Strings.tier_gold",
-      "steps_per_tick": 32,
+      "steps_per_tick": 128,
       "world_size": 64,
       "max_chips": 4,
       "digital_channels": 24,
@@ -41,7 +41,7 @@
     },
     "iron": {
       "name": "@Strings.tier_iron",
-      "steps_per_tick": 48,
+      "steps_per_tick": 512,
       "world_size": 64,
       "max_chips": 5,
       "digital_channels": 32,
@@ -50,7 +50,7 @@
     },
     "diamond": {
       "name": "@Strings.tier_diamond",
-      "steps_per_tick": 64,
+      "steps_per_tick": 4096,
       "world_size": 128,
       "max_chips": 6,
       "digital_channels": 48,
@@ -59,7 +59,7 @@
     },
     "netherite": {
       "name": "@Strings.tier_netherite",
-      "steps_per_tick": 128,
+      "steps_per_tick": 32768,
       "world_size": 256,
       "max_chips": 8,
       "digital_channels": 64,
