@@ -1,20 +1,15 @@
 {
   "pin_input": {
     "type": "color",
-    "value": "#FF1F4FB0"
+    "value": "#FF4F8FFF"
   },
   "pin_output": {
     "type": "color",
-    "value": "#FFB04A10"
+    "value": "#FFFF8A3A"
   },
   "pin_bidi": {
     "type": "color",
-    "value": "#FF6A2AB0"
-  },
-  "pin_selected": {
-    "type": "color",
-    "value": "#FF8A6A00",
-    "comment": "The port a new link starts from"
+    "value": "#FFB070FF"
   },
   "vial.redstone": {
     "type": "color",
