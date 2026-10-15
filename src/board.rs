@@ -484,7 +484,8 @@ fn nested_pin(pin: &Pin) -> Option<NestedPin> {
         Node::In => NestedPin::In(side_index(&pin.name)?),
         Node::Out => NestedPin::Out(side_index(&pin.name)?),
         Node::Chip(slot) => NestedPin::Chip(slot, pin.name.clone()),
-        Node::Bus(_) => return None,
+        // A bus pin is its channel's number, from 1.
+        Node::Bus(side) => NestedPin::Bus(side, pin.name.parse::<u16>().ok()?.checked_sub(1)?),
     })
 }
 
@@ -506,6 +507,7 @@ pub fn restore(alu: AluId, tier: Tier, wires: &[(NestedPin, NestedPin)]) {
         NestedPin::In(i) => Pin::new(Node::In, SIDES[*i as usize % 6]),
         NestedPin::Out(i) => Pin::new(Node::Out, SIDES[*i as usize % 6]),
         NestedPin::Chip(slot, name) => Pin::new(Node::Chip(*slot), name.as_str()),
+        NestedPin::Bus(side, ch) => Pin::new(Node::Bus(*side), (ch + 1).to_string()),
     };
     let mut board = Board::new(tier);
     board.saved.wires = wires.iter().map(|(f, t)| Wire { from: pin(f), to: pin(t) }).collect();

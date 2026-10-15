@@ -163,8 +163,7 @@ impl CircuitBlock {
         let path = id.strip_prefix("minecraft:").unwrap_or(id);
         match path {
             _ if id == Blocks::ANALOG_CABLE => BlockType::Cable,
-            // Buses don't run inside a chip: a digital cable there is just a block.
-            _ if id == Blocks::DIGITAL_CABLE => BlockType::Transparent,
+            _ if id == Blocks::DIGITAL_CABLE => BlockType::Bus,
             _ if id == Blocks::REDSTONE_PORT => BlockType::RedstonePort { output: self.redstone_port.as_ref().is_some_and(|p| p.output) },
             "air" | "cave_air" | "void_air" => BlockType::Air,
             "redstone_wire" => BlockType::RedstoneWire,
@@ -312,7 +311,7 @@ impl CircuitData {
                     Some(NestedChip::new(*slot, ports, meta.tier.steps_per_tick(), circuit.vm_with(load, depth + 1)))
                 })
                 .collect();
-            vm.set_nested(a.x, a.y, a.z, NestedAlu { chips, wires: a.wires.clone() });
+            vm.set_nested(a.x, a.y, a.z, NestedAlu::new(chips, a.wires.clone()));
         }
         vm
     }
