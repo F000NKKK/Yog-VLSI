@@ -99,7 +99,7 @@ const PIN_OUT: u32 = Colors::PIN_OUTPUT;
 const PIN_RIM: u32 = 0xFF101214;
 const WIRE_OFF: u32 = 0xFF6A2424;
 const WIRE_ON: u32 = 0xFFFF4040;
-const WIRE_GLOW: u32 = 0x50FF4040;
+const WIRE_GLOW: u32 = 0x38FF4040;
 const WIRE_NEW: u32 = 0xFFFFE070;
 
 /// The view of the chips: their place `(x, y)` is drawn at
@@ -699,7 +699,7 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
         let (Some(a), Some(b)) = (g.layout.pin(from, true), g.layout.pin(to, false)) else { continue };
         let level = levels.get(from).copied().unwrap_or(0);
         if level > 0 {
-            trace(&c, at(a.x, a.y), at(b.x, b.y), WIRE_GLOW, 3.5);
+            trace(&c, at(a.x, a.y), at(b.x, b.y), WIRE_GLOW, 3.0);
         }
         trace(&c, at(a.x, a.y), at(b.x, b.y), level_color(level), 1.5);
     }
@@ -983,18 +983,41 @@ mod tests {
         assert!(l.hit(180.0, 139.0).is_none());
     }
 
-    /// A recording of what's drawn: one JSON line a rect or a text.
-    struct Recorder(std::cell::RefCell<Vec<String>>);
+    /// A recording of what's drawn: one JSON line a rect or a text. Texts
+    /// come in untranslated (no game in tests): they're translated here
+    /// from a `.yres` (`LANG`), measured as the game's font would be.
+    struct Recorder(std::cell::RefCell<Vec<String>>, HashMap<String, String>);
+
+    impl Recorder {
+        fn new() -> Self {
+            let mut lang = HashMap::new();
+            if let Ok(path) = std::env::var("LANG_YRES")
+                && let Ok(text) = std::fs::read_to_string(path)
+                && let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&text)
+            {
+                for (k, v) in map {
+                    let v = v.as_str().map(str::to_string).or_else(|| v.get("value").and_then(|v| v.as_str()).map(str::to_string));
+                    if let Some(v) = v {
+                        lang.insert(format!("{}.{k}", crate::MOD_ID), v);
+                    }
+                }
+            }
+            Recorder(Default::default(), lang)
+        }
+        fn shown(&self, text: &str) -> String {
+            self.1.get(text).cloned().unwrap_or_else(|| text.to_string())
+        }
+    }
 
     impl Canvas for Recorder {
         fn rect(&self, x0: f32, y0: f32, x1: f32, y1: f32, color: u32) {
             self.0.borrow_mut().push(format!("{{\"r\":[{x0},{y0},{x1},{y1},{color}]}}"));
         }
         fn text(&self, text: &str, x: f32, y: f32, scale: f32, color: u32) {
-            self.0.borrow_mut().push(format!("{{\"t\":[{:?},{x},{y},{scale},{color}]}}", text));
+            self.0.borrow_mut().push(format!("{{\"t\":[{:?},{x},{y},{scale},{color}]}}", self.shown(text)));
         }
         fn text_width(&self, text: &str) -> f32 {
-            text.chars().count() as f32 * 6.0
+            self.shown(text).chars().count() as f32 * 6.0
         }
     }
 
@@ -1042,7 +1065,7 @@ mod tests {
         let boards = [("simple", view()), ("full_adder", design_board("Full adder")), ("decoder", design_board("Decoder 2:4"))];
         for (name, v) in boards {
             let mut g = Graph { view: Some(v), layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default() };
-            let rec = Recorder(Default::default());
+            let rec = Recorder::new();
             draw(&rec, &mut g, Rect { x: 0.0, y: 0.0, w: 420.0, h: 200.0 });
             std::fs::write(format!("{dir}/{name}.jsonl"), rec.0.borrow().join("\n")).unwrap();
         }
