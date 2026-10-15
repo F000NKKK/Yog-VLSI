@@ -1,0 +1,22 @@
+// D goes out on Q0 while S is off, on Q1 while it's on.
+name DEMUX 1:2
+port d D in
+port s S in
+port p Q0 out
+port q Q1 out
+alu U stone
+chip U 0 NOT
+chip U 1 AND
+chip U 2 AND
+wire U in:S 0:A
+wire U in:W 1:A
+wire U 0:Q 1:B
+wire U in:W 2:A
+wire U in:S 2:B
+wire U 1:Q out:E
+wire U 2:Q out:N
+layer
+..q.
+d-Up
+..-.
+..s.

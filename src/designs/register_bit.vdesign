@@ -1,0 +1,21 @@
+// On C going on, takes D if L is on, else keeps Q: a D flip-flop fed by a MUX.
+name Register bit
+port d D in
+port l L in
+port c C in
+port q Q out
+alu U wood
+chip U 0 MUX 2:1
+chip U 1 D flip-flop
+wire U 1:Q 0:A
+wire U in:W 0:B
+wire U in:N 0:S
+wire U 0:Q 1:D
+wire U in:S 1:C
+wire U 1:Q out:E
+layer
+..l.
+..-.
+d-Uq
+..-.
+..c.

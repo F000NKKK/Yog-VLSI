@@ -5,11 +5,11 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::chip::{CircuitBlock, CircuitData, Port};
+use crate::chip::{ChipMeta, CircuitBlock, CircuitData, Port, SavedAlu};
 use crate::content::Tier;
-use crate::vm::PortMode;
+use crate::vm::{NestedPin, PortMode};
 
-const FILES: [&str; 11] = [
+const FILES: [&str; 18] = [
     include_str!("designs/not.vdesign"),
     include_str!("designs/and.vdesign"),
     include_str!("designs/or.vdesign"),
@@ -21,7 +21,26 @@ const FILES: [&str; 11] = [
     include_str!("designs/d_latch.vdesign"),
     include_str!("designs/d_flip_flop.vdesign"),
     include_str!("designs/t_flip_flop.vdesign"),
+    include_str!("designs/half_adder.vdesign"),
+    include_str!("designs/full_adder.vdesign"),
+    include_str!("designs/mux.vdesign"),
+    include_str!("designs/demux.vdesign"),
+    include_str!("designs/decoder.vdesign"),
+    include_str!("designs/register_bit.vdesign"),
+    include_str!("designs/memory_bit.vdesign"),
 ];
+
+/// The chip id of a ready-made design's chip in a ready-made design's ALU:
+/// its circuit is the design's ([`CircuitData::load_for_chip`]).
+pub const CHIP_PREFIX: &str = "design:";
+
+/// An ALU in a design: its tier, the designs in its slots, its board.
+#[derive(Debug, Clone, Default)]
+struct Alu {
+    tier: Option<Tier>,
+    chips: Vec<(u8, String)>,
+    wires: Vec<(NestedPin, NestedPin)>,
+}
 
 /// A design, as drawn.
 #[derive(Debug, Clone)]
@@ -32,6 +51,20 @@ pub struct Design {
     ports: HashMap<char, (String, PortMode)>,
     delays: HashMap<(u32, u32, u32), u8>,
     unlit: Vec<(u32, u32, u32)>,
+    alus: HashMap<char, Alu>,
+}
+
+/// A board pin: `in:W`, `out:E`, `bus:E:3` (channel from 1), `0:A` (slot: port).
+fn pin(s: &str) -> Result<NestedPin, String> {
+    let face = |f: &str| ["N", "S", "E", "W", "U", "D"].iter().position(|x| *x == f).map(|i| i as u8).ok_or(format!("pin {s}: face {f}"));
+    let parts: Vec<&str> = s.split(':').collect();
+    Ok(match parts[..] {
+        ["in", f] => NestedPin::In(face(f)?),
+        ["out", f] => NestedPin::Out(face(f)?),
+        ["bus", f, ch] => NestedPin::Bus(face(f)?, ch.parse::<u16>().ok().and_then(|c| c.checked_sub(1)).ok_or(format!("pin {s}: channel"))?),
+        [slot, label] => NestedPin::Chip(slot.parse().map_err(|_| format!("pin {s}: slot"))?, label.to_string()),
+        _ => return Err(format!("pin {s}: in:<face>, out:<face>, bus:<face>:<channel> or <slot>:<port>")),
+    })
 }
 
 static ALL: LazyLock<Vec<Design>> =
@@ -69,7 +102,15 @@ fn opposite(facing: &str) -> &'static str {
 
 impl Design {
     pub fn parse(text: &str) -> Result<Design, String> {
-        let mut d = Design { name: String::new(), layers: Vec::new(), ports: HashMap::new(), delays: HashMap::new(), unlit: Vec::new() };
+        let mut d = Design {
+            name: String::new(),
+            layers: Vec::new(),
+            ports: HashMap::new(),
+            delays: HashMap::new(),
+            unlit: Vec::new(),
+            alus: HashMap::new(),
+        };
+        let ch = |w: Option<&str>| w.and_then(|w| w.chars().next()).ok_or_else(|| format!("{text:?}: no char"));
         let num = |s: Option<&str>| s.and_then(|s| s.parse::<u32>().ok()).ok_or_else(|| format!("bad number in {text:?}"));
         for line in text.lines().map(str::trim_end).filter(|l| !l.is_empty() && !l.starts_with("//")) {
             let mut words = line.split_whitespace();
@@ -91,12 +132,32 @@ impl Design {
                     d.delays.insert(at, num(words.next())?.clamp(1, 4) as u8);
                 }
                 Some("unlit") => d.unlit.push((num(words.next())?, num(words.next())?, num(words.next())?)),
+                Some("alu") => {
+                    let c = ch(words.next())?;
+                    let tier = words.next().and_then(Tier::from_id).ok_or(format!("alu {c}: tier"))?;
+                    d.alus.entry(c).or_default().tier = Some(tier);
+                }
+                Some("chip") => {
+                    let c = ch(words.next())?;
+                    let slot = num(words.next())? as u8;
+                    let name = words.collect::<Vec<_>>().join(" ");
+                    d.alus.entry(c).or_default().chips.push((slot, name));
+                }
+                Some("wire") => {
+                    let c = ch(words.next())?;
+                    let from = pin(words.next().ok_or("wire: from")?)?;
+                    let to = pin(words.next().ok_or("wire: to")?)?;
+                    d.alus.entry(c).or_default().wires.push((from, to));
+                }
                 Some("layer") => d.layers.push(Vec::new()),
                 _ => d.layers.last_mut().ok_or("a row before any layer")?.push(line.chars().collect()),
             }
         }
         if d.name.is_empty() {
             return Err("no name".into());
+        }
+        if let Some((c, _)) = d.alus.iter().find(|(_, a)| a.tier.is_none()) {
+            return Err(format!("{}: alu {c} has no tier", d.name));
         }
         Ok(d)
     }
@@ -118,6 +179,7 @@ impl Design {
     fn connects(&self, x: i32, y: i32, z: i32, dx: i32, dz: i32) -> bool {
         match self.at(x + dx, y, z + dz) {
             '-' | 'T' | '^' | '>' | 'v' | '<' | '△' | '▷' | '▽' | '◁' => true,
+            c if self.alus.contains_key(&c) => true,
             c @ ('↑' | '→' | '↓' | '←') => dir(c).is_some_and(|(rx, rz, _)| rx.abs() == dx.abs() && rz.abs() == dz.abs()),
             c => self.ports.contains_key(&c),
         }
@@ -145,6 +207,14 @@ impl Design {
         }
         let props: Vec<String> = sides.iter().map(|(n, h)| format!("{n}={h}")).collect();
         format!("minecraft:redstone_wire[{},power=0]", props.join(","))
+    }
+
+    /// The smallest tier its drawing fits.
+    pub fn tier(&self) -> Tier {
+        let width = self.layers.iter().flatten().map(Vec::len).max().unwrap_or(0) as u32;
+        let depth = self.layers.iter().map(Vec::len).max().unwrap_or(0) as u32;
+        let extent = width.max(depth).max(self.layers.len() as u32);
+        Tier::ALL.into_iter().find(|t| t.world_size() >= extent).unwrap_or(Tier::Netherite)
     }
 
     /// The design as a circuit for a `tier` chip, in the middle of its world.
@@ -178,6 +248,21 @@ impl Design {
                             "minecraft:comparator[facing={},mode=subtract,powered=false]",
                             opposite(dir(ch).map_or("north", |d| d.2))
                         ),
+                        a if self.alus.contains_key(&a) => {
+                            let alu = &self.alus[&a];
+                            let t = alu.tier.unwrap_or(Tier::Wood);
+                            let chips = alu
+                                .chips
+                                .iter()
+                                .filter_map(|(slot, name)| {
+                                    let d = named(name)?;
+                                    let inner = d.circuit(d.tier());
+                                    Some((*slot, ChipMeta { id: format!("{CHIP_PREFIX}{name}"), tier: d.tier(), name: name.clone(), ports: inner.ports }))
+                                })
+                                .collect();
+                            c.alus.push(SavedAlu { x: at.0, y: at.1, z: at.2, tier: t, chips, wires: alu.wires.clone() });
+                            t.alu().to_string()
+                        }
                         p => {
                             if let Some((label, mode)) = self.ports.get(&p) {
                                 c.ports.push(Port { label: label.clone(), x: at.0, y: at.1, z: at.2, dir: *mode });
@@ -208,7 +293,8 @@ mod tests {
         fn new(name: &str) -> Bench {
             let c = named(name).unwrap_or_else(|| panic!("no design {name}")).circuit(Tier::Wood);
             let ports = c.ports.iter().map(|p| (p.label.clone(), (p.x, p.y, p.z))).collect();
-            let mut b = Bench { vm: c.vm(), ports };
+            let vm = c.vm_with(&|id| CircuitData::load_for_chip("", id), 1);
+            let mut b = Bench { vm, ports };
             b.run(4);
             b
         }

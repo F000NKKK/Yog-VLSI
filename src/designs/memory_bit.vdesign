@@ -1,0 +1,24 @@
+// One bit of RAM: while S (select) and W (write) are on it takes D; Q
+// shows it while S is on.
+name Memory bit
+port d D in
+port w W in
+port s S in
+port q Q out
+alu U stone
+chip U 0 AND
+chip U 1 D latch
+chip U 2 AND
+wire U in:S 0:A
+wire U in:N 0:B
+wire U in:W 1:D
+wire U 0:Q 1:E
+wire U 1:Q 2:A
+wire U in:S 2:B
+wire U 2:Q out:E
+layer
+..w.
+..-.
+d-Uq
+..-.
+..s.

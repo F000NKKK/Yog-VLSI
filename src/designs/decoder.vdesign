@@ -1,0 +1,45 @@
+// The output A1 A0 names goes on: Y0 (north), Y1 (east), Y2 (top), Y3 (bottom).
+name Decoder 2:4
+port a A0 in
+port b A1 in
+port w Y0 out
+port x Y1 out
+port y Y2 out
+port z Y3 out
+alu U diamond
+chip U 0 NOT
+chip U 1 NOT
+chip U 2 AND
+chip U 3 AND
+chip U 4 AND
+chip U 5 AND
+wire U in:W 0:A
+wire U in:S 1:A
+wire U 0:Q 2:A
+wire U 1:Q 2:B
+wire U in:W 3:A
+wire U 1:Q 3:B
+wire U 0:Q 4:A
+wire U in:S 4:B
+wire U in:W 5:A
+wire U in:S 5:B
+wire U 2:Q out:N
+wire U 3:Q out:E
+wire U 4:Q out:U
+wire U 5:Q out:D
+layer
+....
+....
+..z.
+....
+....
+layer
+..w.
+....
+a-Ux
+..-.
+..b.
+layer
+....
+....
+..y.

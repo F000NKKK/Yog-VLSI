@@ -1,0 +1,25 @@
+// Q = A while S is off, B while it's on.
+name MUX 2:1
+port a A in
+port b B in
+port s S in
+port q Q out
+alu U gold
+chip U 0 NOT
+chip U 1 AND
+chip U 2 AND
+chip U 3 OR
+wire U in:S 0:A
+wire U in:W 1:A
+wire U 0:Q 1:B
+wire U in:N 2:A
+wire U in:S 2:B
+wire U 1:Q 3:A
+wire U 2:Q 3:B
+wire U 3:Q out:E
+layer
+..b.
+..-.
+a-Uq
+..-.
+..s.
