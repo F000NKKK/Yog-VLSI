@@ -465,3 +465,19 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod export {
+    /// Every ready-made design as a Blueprint's JSON (`OUT`), at its tier —
+    /// for tools that put them in a save or a README.
+    #[test]
+    #[ignore]
+    fn export_blueprints() {
+        let Ok(out) = std::env::var("OUT") else { return };
+        let all: Vec<_> = super::all()
+            .iter()
+            .map(|d| crate::chip::Blueprint { name: d.name.clone(), tier: d.tier(), circuit: d.circuit(d.tier()) })
+            .collect();
+        std::fs::write(out, serde_json::to_string(&all).unwrap()).unwrap();
+    }
+}
