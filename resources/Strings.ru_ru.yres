@@ -100,5 +100,6 @@
   "screen.display.title": "Дисплей",
   "screen.display.size_placeholder": "Размер в блоках (1–1024)",
   "screen.display.channel_placeholder": "Первый канал шины",
-  "screen.display.channels": "Каналы {first}–{last}: данные 8, регистр 8, переключатель, подтверждение"
+  "screen.display.channels": "Каналы {first}–{last}: данные 8, регистр 8, переключатель, подтверждение",
+  "display.no_room": "Здесь нет места для экрана {size}×{size}"
 }

@@ -1,0 +1,24 @@
+{
+  "name": "@Strings.block.display",
+  "block": {
+    "hardness": 2,
+    "resistance": 6,
+    "sound": "glass",
+    "drops": "none"
+  },
+  "model": {
+    "parent": "cube",
+    "textures": {
+      "north": "@Textures.display",
+      "south": "@Textures.display_top",
+      "east": "@Textures.display_side",
+      "west": "@Textures.display_side",
+      "up": "@Textures.display_top",
+      "down": "@Textures.display_top",
+      "particle": "@Textures.display_side"
+    }
+  },
+  "states": {
+    "facing": "horizontal"
+  }
+}

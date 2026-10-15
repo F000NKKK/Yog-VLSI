@@ -158,5 +158,6 @@
   "screen.display.title": "Display",
   "screen.display.size_placeholder": "Size in blocks (1–1024)",
   "screen.display.channel_placeholder": "First bus channel",
-  "screen.display.channels": "Channels {first}–{last}: data 8, register 8, toggle, acknowledge"
+  "screen.display.channels": "Channels {first}–{last}: data 8, register 8, toggle, acknowledge",
+  "display.no_room": "No room for a {size}×{size} screen here"
 }

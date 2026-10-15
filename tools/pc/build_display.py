@@ -57,10 +57,10 @@ def main(save, data, px, py, pz):
             put(x, floor, z, "minecraft:smooth_stone")
             for y in range(gy, gy + 4):
                 put(x, y, z, "minecraft:air")
-    # The screen's back: a wall the picture lies on.
+    # The Display and the blocks its picture stands in.
     for x in range(sx, sx + SCREEN):
         for y in range(sy, sy + SCREEN):
-            put(x, y, sz, "minecraft:black_concrete")
+            put(x, y, sz, "yog-vlsi:display_part", facing="south")
     put(*display, "yog-vlsi:display", facing="south")
 
     # Cables: ALU → Display; ALU down, under the gap and the platform, to the cross.

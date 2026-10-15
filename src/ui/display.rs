@@ -1,5 +1,6 @@
 //! The Display's screen (`display.yui`, this file is its code-behind):
-//! right-click a Display to set its size and first bus channel.
+//! right-click a Display (any block of its picture) to set its size and
+//! first bus channel.
 
 yog_api::ui_include!("ui/display");
 
@@ -71,17 +72,21 @@ pub fn setup(registry: &mut Registry) {
         let Ok(edit) = serde_json::from_slice::<DisplayEdit>(&ev.payload) else { return };
         let (x, y, z) = edit.pos;
         let pos = BlockPos { x, y, z };
-        if srv.get_block_state(&edit.dimension, pos).is_some_and(|s| s.starts_with(Blocks::DISPLAY)) {
-            display::configure(&edit.dimension, pos, edit.size, edit.channel);
+        if srv.get_block_state(&edit.dimension, pos).is_some_and(|s| s.starts_with(Blocks::DISPLAY))
+            && display::configure(srv, &edit.dimension, pos, edit.size, edit.channel).is_err()
+        {
+            srv.send_actionbar(&ev.player, &Strings::display_no_room(edit.size));
         }
     });
 
     registry.on_use_block(|e, phase, srv| -> bool {
-        if phase != EventPhase::Pre || e.block_id != Blocks::DISPLAY {
+        // The Display or any block of its picture.
+        if phase != EventPhase::Pre || (e.block_id != Blocks::DISPLAY && e.block_id != Blocks::DISPLAY_PART) {
             return true;
         }
-        let Some(d) = display::get(&e.dimension, e.pos) else { return true };
-        let edit = DisplayEdit { dimension: e.dimension.clone(), pos: (e.pos.x, e.pos.y, e.pos.z), size: d.size, channel: d.channel };
+        let Some(at) = display::owner(&e.dimension, e.pos) else { return true };
+        let Some(d) = display::get(&e.dimension, at) else { return true };
+        let edit = DisplayEdit { dimension: e.dimension.clone(), pos: (at.x, at.y, at.z), size: d.size, channel: d.channel };
         if let Ok(json) = serde_json::to_string(&edit) {
             srv.send_to_player(&e.player_name, CHANNEL, json.as_bytes());
         }

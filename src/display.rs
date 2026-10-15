@@ -32,7 +32,7 @@ pub const CHANNELS: u16 = 18;
 const TOGGLE: u16 = 16;
 const ACK: u16 = 17;
 /// Size, in blocks, a new Display shows its picture at.
-const DEFAULT_SIZE: u16 = 16;
+const DEFAULT_SIZE: u16 = 8;
 /// The biggest picture, in blocks a side.
 pub const MAX_SIZE: u16 = 1024;
 /// Server → client: what a Display shows.
@@ -107,11 +107,103 @@ pub fn get(dim: &str, pos: BlockPos) -> Option<Display> {
     DISPLAYS.lock().unwrap().get(&(dim.to_string(), pos.x, pos.y, pos.z)).cloned()
 }
 
-/// Sets a Display's size and first channel.
-pub fn configure(dim: &str, pos: BlockPos, size: u16, channel: u16) {
-    if let Some(d) = DISPLAYS.lock().unwrap().get_mut(&(dim.to_string(), pos.x, pos.y, pos.z)) {
-        d.size = size.clamp(1, MAX_SIZE);
-        d.channel = channel.clamp(1, cables::BUS_CHANNELS - CHANNELS + 1);
+/// Sets a Display's size and first channel; a size that doesn't fit is
+/// refused (`Err`), the channel set all the same.
+pub fn configure(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos, size: u16, channel: u16) -> Result<(), ()> {
+    let mut displays = DISPLAYS.lock().unwrap();
+    let Some(d) = displays.get_mut(&(dim.to_string(), pos.x, pos.y, pos.z)) else { return Ok(()) };
+    d.channel = channel.clamp(1, cables::BUS_CHANNELS - CHANNELS + 1);
+    let size = size.clamp(1, MAX_SIZE);
+    if size == d.size {
+        return Ok(());
+    }
+    let old = area(pos, d.facing, d.size);
+    if !fits(srv, dim, pos, d.facing, size, Some(old)) {
+        return Err(());
+    }
+    srv.fill_region(dim, old.0, old.1, "minecraft:air");
+    d.size = size;
+    stand(srv, dim, pos, d);
+    Ok(())
+}
+
+// ── The blocks a Display stands in ───────────────────────────────────────────
+
+impl Facing {
+    fn word(self) -> &'static str {
+        match self {
+            Facing::N => "north",
+            Facing::S => "south",
+            Facing::E => "east",
+            Facing::W => "west",
+        }
+    }
+
+    /// Right, seen from in front.
+    fn right(self) -> (i32, i32) {
+        match self {
+            Facing::S => (1, 0),
+            Facing::N => (-1, 0),
+            Facing::E => (0, -1),
+            Facing::W => (0, 1),
+        }
+    }
+}
+
+/// The box a Display's picture fills: from its block (bottom left, seen from
+/// the front) `size` blocks right and up.
+fn area(pos: BlockPos, facing: Facing, size: u16) -> (BlockPos, BlockPos) {
+    let n = size as i32 - 1;
+    let (dx, dz) = facing.right();
+    let far = (pos.x + dx * n, pos.y + n, pos.z + dz * n);
+    (
+        BlockPos { x: pos.x.min(far.0), y: pos.y, z: pos.z.min(far.2) },
+        BlockPos { x: pos.x.max(far.0), y: far.1, z: pos.z.max(far.2) },
+    )
+}
+
+fn inside(b: (BlockPos, BlockPos), p: BlockPos) -> bool {
+    (b.0.x..=b.1.x).contains(&p.x) && (b.0.y..=b.1.y).contains(&p.y) && (b.0.z..=b.1.z).contains(&p.z)
+}
+
+/// The world's top, a Display may not reach past.
+const WORLD_TOP: i32 = 319;
+
+/// Whether a picture `size` blocks a side fits at `pos`: nothing in its box
+/// but the Display itself and, resizing, the blocks it stands in now (`own`).
+fn fits(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos, facing: Facing, size: u16, own: Option<(BlockPos, BlockPos)>) -> bool {
+    let b = area(pos, facing, size);
+    b.1.y <= WORLD_TOP
+        && srv
+            .scan_region(dim, b.0, b.1)
+            .iter()
+            .all(|(p, _)| *p == pos || own.is_some_and(|o| inside(o, *p)))
+}
+
+/// Stands a Display's parts in its box and the Display at its corner.
+fn stand(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos, d: &Display) {
+    let b = area(pos, d.facing, d.size);
+    srv.fill_region(dim, b.0, b.1, &format!("{}[facing={}]", Blocks::DISPLAY_PART, d.facing.word()));
+    srv.set_block_state(dim, pos, &format!("{}[facing={}]", Blocks::DISPLAY, d.facing.word()));
+}
+
+/// The Display whose box holds `pos`.
+pub fn owner(dim: &str, pos: BlockPos) -> Option<BlockPos> {
+    DISPLAYS.lock().unwrap().iter().find_map(|((d, x, y, z), disp)| {
+        let at = BlockPos { x: *x, y: *y, z: *z };
+        (d == dim && inside(area(at, disp.facing, disp.size), pos)).then_some(at)
+    })
+}
+
+/// The way a player looks, as the block they place faces back at them.
+fn facing_toward(srv: &dyn yog_api::Server, player: &str) -> Facing {
+    let yaw = srv.player_info(player).and_then(|p| srv.entity_rotation(&p.uuid)).map_or(0.0, |r| r.0);
+    // Yaw 0 looks south, 90 west, 180 north, 270 east; the block faces back.
+    match ((yaw / 90.0).round() as i32).rem_euclid(4) {
+        0 => Facing::N,
+        1 => Facing::E,
+        2 => Facing::S,
+        _ => Facing::W,
     }
 }
 
@@ -223,20 +315,43 @@ pub fn save(srv: &dyn yog_api::Server) {
 }
 
 pub fn register(registry: &mut Registry) {
+    // A Display goes up only where its whole picture fits, and stands in
+    // blocks over all of it.
     registry.on_player_place_block(|e, phase, srv| {
-        if phase == EventPhase::Post && e.block_id == Blocks::DISPLAY {
-            let facing = facing_of(srv, &e.dimension, e.pos);
-            DISPLAYS
-                .lock()
-                .unwrap()
-                .insert((e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z), Display::new(facing));
+        if e.block_id != Blocks::DISPLAY {
+            return true;
         }
-        true
+        match phase {
+            EventPhase::Pre => {
+                let fits = fits(srv, &e.dimension, e.pos, facing_toward(srv, &e.player_name), DEFAULT_SIZE, None);
+                if !fits {
+                    srv.send_actionbar(&e.player_name, &crate::res::Strings::display_no_room(DEFAULT_SIZE));
+                }
+                fits
+            }
+            _ => {
+                let d = Display::new(facing_of(srv, &e.dimension, e.pos));
+                stand(srv, &e.dimension, e.pos, &d);
+                DISPLAYS.lock().unwrap().insert((e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z), d);
+                true
+            }
+        }
     });
+    // Breaking any block of it takes the whole Display down; a part drops
+    // the Display (the Display's own block drops itself).
     registry.on_block_break(|e, phase, srv| {
-        if phase == EventPhase::Post && e.block_id == Blocks::DISPLAY {
-            let key = (e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z);
+        let part = e.block_id == Blocks::DISPLAY_PART;
+        if phase == EventPhase::Post && (part || e.block_id == Blocks::DISPLAY) {
+            let at = if part { owner(&e.dimension, e.pos) } else { Some(e.pos) };
+            let Some(at) = at else { return true };
+            let key = (e.dimension.clone(), at.x, at.y, at.z);
             if let Some(d) = DISPLAYS.lock().unwrap().remove(&key) {
+                let b = area(at, d.facing, d.size);
+                srv.fill_region(&e.dimension, b.0, b.1, "minecraft:air");
+                let creative = srv.player_info(&e.player_name).is_some_and(|p| p.gamemode == "creative");
+                if part && !creative {
+                    srv.give_item(&e.player_name, Blocks::DISPLAY, 1);
+                }
                 let gone = Frame { pos: (key.1, key.2, key.3), facing: d.facing, size: 0, version: 0, age: 0, ops: Vec::new() };
                 if let Ok(json) = serde_json::to_string(&gone) {
                     for player in srv.online_players() {
@@ -416,5 +531,23 @@ void main() {
             }
         });
         registry.on_world_render(render);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_picture_goes_right_and_up_from_the_display() {
+        let at = BlockPos { x: 10, y: 64, z: -5 };
+        let b = |f| area(at, f, 3);
+        // Seen from the south (it faces south), right is east.
+        assert_eq!(b(Facing::S), (at, BlockPos { x: 12, y: 66, z: -5 }));
+        assert_eq!(b(Facing::N), (BlockPos { x: 8, y: 64, z: -5 }, BlockPos { x: 10, y: 66, z: -5 }));
+        assert_eq!(b(Facing::E), (BlockPos { x: 10, y: 64, z: -7 }, BlockPos { x: 10, y: 66, z: -5 }));
+        assert_eq!(b(Facing::W), (at, BlockPos { x: 10, y: 66, z: -3 }));
+        assert!(inside(b(Facing::S), BlockPos { x: 11, y: 65, z: -5 }));
+        assert!(!inside(b(Facing::S), BlockPos { x: 9, y: 65, z: -5 }));
     }
 }
