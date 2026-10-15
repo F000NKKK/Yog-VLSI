@@ -84,10 +84,14 @@ def build(program, debug=True):
         n.output(f"PX{p // 8}{p % 8}", pixels[p])
 
     # ── Buttons: a press is kept till an IN has read it ──────────────────
-    # (cleared in the first half of the cycle after the IN — A has it by then).
+    # A button opens its latch; what it takes is 1, but 0 for the cycle
+    # after an IN (A has it by then; the first half of that cycle opens
+    # every latch to clear it). The data never changes as a latch closes —
+    # a button let go, the half-cycle ending — so no race loses a press.
     after_in = n.DFF(op["IN"], clk)
     clear = n.AND(after_in, clk)
-    pressed = [n.LATCH(b, n.OR(b, clear)) for b in btn]
+    keep = n.NOT(after_in)
+    pressed = [n.LATCH(keep, n.OR(b, clear)) for b in btn]
 
     # ── ALU ───────────────────────────────────────────────────────────────
     sub = n.OR(op["SUB"], op["SUBI"])

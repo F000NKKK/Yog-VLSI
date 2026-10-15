@@ -70,9 +70,6 @@ static CABLES_CHANGED: AtomicBool = AtomicBool::new(false);
 /// Ports Yog Pipes was told about since the server started: one written
 /// into the world while it was down is joined to its cables by the first look.
 static PORTS_SEEN: LazyLock<Mutex<std::collections::HashSet<Key>>> = LazyLock::new(Default::default);
-/// The digital cable each bus port goes through ([`port_link_pos`]), looked
-/// for again with the ports.
-static LINKS: LazyLock<Mutex<HashMap<Key, Option<BlockPos>>>> = LazyLock::new(Default::default);
 /// Ticks since the ports were last looked for in the world.
 static PORT_TICKS: AtomicU64 = AtomicU64::new(0);
 /// How often: a port broken by hand goes at once (`register`); one blown
@@ -236,7 +233,7 @@ fn register_networks() {
         events: None,
         mechanic: Mechanic::Signal { channels, attenuation: 0 },
     };
-    let steps: [Result<(), String>; 5] = [
+    let steps: [Result<(), String>; 6] = [
         yog_pipes::register_capability(signal(ANALOG, "analog", 1)),
         yog_pipes::register_capability(signal(DIGITAL, "digital", BUS_CHANNELS)),
         yog_pipes::attach(AttachDef {
@@ -250,6 +247,20 @@ fn register_networks() {
             capability: DIGITAL.to_string(),
             groups: vec!["digital".into()],
             params: HashMap::new(),
+        }),
+        yog_pipes::register_endpoint(EndpointDef {
+            capability: DIGITAL.to_string(),
+            target: EndpointTarget::Block(Blocks::REDSTONE_PORT.to_string()),
+            kinds: Vec::new(),
+            can_insert: false,
+            can_extract: false,
+            listens_signals: true,
+            listens_messages: false,
+            groups: Vec::new(),
+            priority: 0,
+            max_packet: 0,
+            pressure: 0,
+            handler: None,
         }),
         yog_pipes::register_endpoint(EndpointDef {
             capability: ANALOG.to_string(),
@@ -297,18 +308,14 @@ fn ports(srv: &dyn yog_api::Server, check: bool) -> Vec<(Key, RedstonePort)> {
 /// tick is in its network for them this tick.
 pub fn tick_inputs(srv: &dyn yog_api::Server) {
     let check = PORT_TICKS.fetch_add(1, Ordering::Relaxed).is_multiple_of(PORT_CHECK_EVERY);
-    if check {
-        LINKS.lock().unwrap().clear();
-    }
     for ((dim, x, y, z), port) in ports(srv, check) {
         let pos = BlockPos { x, y, z };
         if PORTS_SEEN.lock().unwrap().insert((dim.clone(), x, y, z)) {
             refresh_around(srv, &dim, pos);
         }
         let (cap, ch) = port.link();
-        let Some(at) = port_link_pos(srv, &dim, pos, &port) else { continue };
         let power = if port.output { 0 } else { srv.redstone_power(&dim, pos).unwrap_or(0) };
-        let _ = yog_pipes::emit(cap.to_string(), pipe_pos(&dim, at), ch, power);
+        let _ = yog_pipes::emit(cap.to_string(), pipe_pos(&dim, pos), ch, power);
     }
 }
 
@@ -319,28 +326,10 @@ pub fn tick_outputs(srv: &dyn yog_api::Server) {
         if port.output {
             let pos = BlockPos { x, y, z };
             let (cap, ch) = port.link();
-            let level = port_link_pos(srv, &dim, pos, &port)
-                .and_then(|at| yog_pipes::level(cap.to_string(), pipe_pos(&dim, at), ch).ok())
-                .unwrap_or(0);
+            let level = yog_pipes::level(cap.to_string(), pipe_pos(&dim, pos), ch).unwrap_or(0);
             srv.set_redstone_output(&dim, pos, level);
         }
     }
-}
-
-/// Where a Redstone Port's signal goes in and out: itself on an analog
-/// cable (it's an endpoint of those); on a bus, the digital cable beside
-/// it, as an ALU's side (each port its own cable block: a plate behind a
-/// screen of them).
-fn port_link_pos(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos, port: &RedstonePort) -> Option<BlockPos> {
-    if port.channel == 0 {
-        return Some(pos);
-    }
-    *LINKS.lock().unwrap().entry((dim.to_string(), pos.x, pos.y, pos.z)).or_insert_with(|| {
-        ["N", "S", "E", "W", "U", "D"]
-            .into_iter()
-            .map(|side| beside((pos.x, pos.y, pos.z), side))
-            .find(|&at| cable_at(srv, dim, at) == Some(DIGITAL))
-    })
 }
 
 /// Yog Pipes looks again at `pos` and the cables beside it — joining up
