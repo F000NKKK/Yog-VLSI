@@ -36,23 +36,6 @@ impl PortMode {
         }
     }
 
-    /// Short tag shown on pins (`IN`, `OUT`, `BIDI`).
-    pub fn short(self) -> String {
-        match self {
-            PortMode::Input => Strings::port_short_input(),
-            PortMode::Output => Strings::port_short_output(),
-            PortMode::Bidirectional => Strings::port_short_bidi(),
-        }
-    }
-
-    pub fn next(self) -> PortMode {
-        match self {
-            PortMode::Input => PortMode::Output,
-            PortMode::Output => PortMode::Bidirectional,
-            PortMode::Bidirectional => PortMode::Input,
-        }
-    }
-
     /// The color its pins are drawn in.
     pub fn color(self) -> u32 {
         match self {
@@ -431,12 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn port_modes_cycle() {
-        let mut m = PortMode::Input;
-        for _ in 0..3 {
-            m = m.next();
-        }
-        assert_eq!(m, PortMode::Input);
+    fn a_bidirectional_port_goes_both_ways() {
         assert!(PortMode::Bidirectional.inputs() && PortMode::Bidirectional.outputs());
     }
 }

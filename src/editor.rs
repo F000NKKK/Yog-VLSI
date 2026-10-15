@@ -108,7 +108,9 @@ const INVENTORY_TAG: &str = "Inventory";
 /// Stable per-player lane index, assigned on first use.
 static LANES: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// Where each player last was outside the editor dimension.
-static LAST_OUTSIDE: LazyLock<Mutex<HashMap<String, (String, (f64, f64, f64))>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// A dimension and a position in it.
+type Place = (String, (f64, f64, f64));
+static LAST_OUTSIDE: LazyLock<Mutex<HashMap<String, Place>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static SESSIONS: LazyLock<Mutex<HashMap<String, EditorSession>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn lane_for(player_name: &str) -> u32 {

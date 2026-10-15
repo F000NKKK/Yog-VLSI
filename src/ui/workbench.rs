@@ -234,7 +234,8 @@ fn send(request: &Request) {
 /// Each workbench's store.
 static STORES: LazyLock<Mutex<HashMap<BenchId, Amounts>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// Who has which workbench open, and what they were last sent.
-static WATCHERS: LazyLock<Mutex<HashMap<String, (BenchId, Option<BenchState>)>>> =
+type Watching = (BenchId, Option<BenchState>);
+static WATCHERS: LazyLock<Mutex<HashMap<String, Watching>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static TICKS: Mutex<u64> = Mutex::new(0);
 

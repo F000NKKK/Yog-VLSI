@@ -32,7 +32,7 @@ pub const PORT_BIDI: &str = Blocks::PORT_BIDI;
 const CHANNEL: &str = "yog-vlsi:port";
 
 /// Every named port: (dimension, x, y, z) → name.
-static LABELS: LazyLock<Mutex<HashMap<(String, i32, i32, i32), String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static LABELS: LazyLock<Mutex<HashMap<crate::cables::Key, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn key(dimension: &str, pos: BlockPos) -> (String, i32, i32, i32) {
     (dimension.to_string(), pos.x, pos.y, pos.z)

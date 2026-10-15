@@ -39,7 +39,8 @@ pub struct RedstonePort {
     pub name: String,
 }
 
-type Key = (String, i32, i32, i32);
+/// (dimension, x, y, z) of a block.
+pub type Key = (String, i32, i32, i32);
 
 /// Every Redstone Port, by (dimension, position).
 static PORTS: LazyLock<Mutex<HashMap<Key, RedstonePort>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -69,10 +70,10 @@ pub fn redstone_port(dimension: &str, pos: BlockPos) -> RedstonePort {
 /// field), not a player: Yog Pipes looks at it again, and a port gone is
 /// forgotten.
 pub fn refresh(dim: &str, pos: BlockPos, block: &str) {
-    if is_cable(block) || block == Blocks::REDSTONE_PORT {
-        if let Err(e) = yog_pipes::refresh(pipe_pos(dim, pos)) {
-            warn!("[yog-vlsi] Yog Pipes: {e}");
-        }
+    if (is_cable(block) || block == Blocks::REDSTONE_PORT)
+        && let Err(e) = yog_pipes::refresh(pipe_pos(dim, pos))
+    {
+        warn!("[yog-vlsi] Yog Pipes: {e}");
     }
 }
 
@@ -263,7 +264,7 @@ fn ports(srv: &dyn yog_api::Server, check: bool) -> Vec<((String, i32, i32, i32)
 /// Redstone into the cables, before the ALUs step: what reaches a port this
 /// tick is in its network for them this tick.
 pub fn tick_inputs(srv: &dyn yog_api::Server) {
-    let check = PORT_TICKS.fetch_add(1, Ordering::Relaxed) % PORT_CHECK_EVERY == 0;
+    let check = PORT_TICKS.fetch_add(1, Ordering::Relaxed).is_multiple_of(PORT_CHECK_EVERY);
     for ((dim, x, y, z), output) in ports(srv, check) {
         let pos = BlockPos { x, y, z };
         if output {

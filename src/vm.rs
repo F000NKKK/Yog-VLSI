@@ -477,11 +477,13 @@ impl RedstoneVM {
     }
 
     /// Number of non-air cells.
+    #[cfg(test)]
     pub fn block_count(&self) -> usize {
         self.active.len()
     }
 
     /// Bytes held by the grid (allocated layers + the active index).
+    #[cfg(test)]
     pub fn memory_bytes(&self) -> usize {
         let layer = self.layer_len() as usize * std::mem::size_of::<Cell>();
         self.layers.iter().flatten().count() * layer + self.active.capacity() * 4
@@ -543,6 +545,7 @@ impl RedstoneVM {
     }
 
     /// The items in the container at `(x, y, z)`: (slot, item id, count).
+    #[cfg(test)]
     pub fn items_at(&self, x: u32, y: u32, z: u32) -> Vec<(u8, String, u8)> {
         let i = self.idx(x, y, z);
         self.inventories.get(&i).into_iter().flatten().enumerate()
@@ -596,6 +599,7 @@ impl RedstoneVM {
     }
 
     /// `(x, z, power)` of every output/bidirectional port on layer `y`.
+    #[cfg(test)]
     pub fn read_outputs(&self, y: u32) -> Vec<(u32, u32, u8)> {
         self.active
             .iter()

@@ -27,8 +27,7 @@ use yog_api::{GfxContext, Registry};
 use yog_kit::prelude::*;
 
 use crate::board::{self, BoardView, Node, Pin, Request, Wire};
-use crate::res::Strings;
-use crate::vm::PortMode;
+use crate::res::{Colors, Strings};
 
 // ── The screen's view model ──────────────────────────────────────────────────
 
@@ -86,9 +85,8 @@ const HEADER: u32 = 0xFF4A4A4A;
 const HEADER_SLEEPING: u32 = 0xFF3A2626;
 const TEXT: u32 = 0xFFFFFFFF;
 const TEXT_DIM: u32 = 0xFF8A8A8A;
-const PIN_IN: u32 = 0xFF4F8FFF;
-const PIN_OUT: u32 = 0xFFFF8A3A;
-const PIN_BIDI: u32 = 0xFFB070FF;
+const PIN_IN: u32 = Colors::PIN_INPUT;
+const PIN_OUT: u32 = Colors::PIN_OUTPUT;
 const WIRE_OFF: u32 = 0xFF5A1818;
 const WIRE_ON: u32 = 0xFFFF3A3A;
 const WIRE_NEW: u32 = 0xFFFFE070;
@@ -213,14 +211,6 @@ struct Graph {
 static GRAPH: LazyLock<Mutex<Graph>> = LazyLock::new(|| {
     Mutex::new(Graph { view: None, layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default() })
 });
-
-fn mode_color(mode: PortMode) -> u32 {
-    match mode {
-        PortMode::Input => PIN_IN,
-        PortMode::Output => PIN_OUT,
-        PortMode::Bidirectional => PIN_BIDI,
-    }
-}
 
 fn level_color(level: u8) -> u32 {
     if level == 0 {
@@ -417,7 +407,7 @@ fn pin_color(view: &BoardView, p: &PinAt) -> u32 {
             .iter()
             .find(|c| c.slot == slot)
             .and_then(|c| c.pins.iter().find(|(n, _)| *n == p.pin.name))
-            .map_or(TEXT_DIM, |(_, m)| mode_color(*m)),
+            .map_or(TEXT_DIM, |(_, m)| m.color()),
         // Left: driven onto the bus; right: read from it.
         Node::Bus(_) => {
             if p.source {
@@ -713,6 +703,7 @@ pub fn setup(registry: &mut Registry) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vm::PortMode;
     use crate::board::{ChipView, SideView};
     use crate::tier::Tier;
 
