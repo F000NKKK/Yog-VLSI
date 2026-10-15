@@ -10,11 +10,38 @@
     "inventory": "yog-vlsi:workbench"
   },
   "model": {
-    "parent": "cube_bottom_top",
     "textures": {
       "top": "@Textures.workbench_top",
       "bottom": "@Textures.workbench_bottom",
       "side": "@Textures.workbench_side"
-    }
+    },
+    "elements": [
+      {
+        "name": "core",
+        "from": [0, 0, 0],
+        "to": [16, 16, 16],
+        "faces": {
+          "down": { "texture": "#bottom", "cullface": "down" },
+          "up": { "texture": "#top", "cullface": "up" },
+          "north": { "texture": "#side", "cullface": "north" },
+          "south": { "texture": "#side", "cullface": "south" },
+          "west": { "texture": "#side", "cullface": "west" },
+          "east": { "texture": "#side", "cullface": "east" }
+        }
+      },
+      {
+        "name": "top",
+        "from": [2, 15, 2],
+        "to": [14, 17, 14],
+        "faces": {
+          "down": { "texture": "#top" },
+          "up": { "texture": "#top" },
+          "north": { "texture": "#top" },
+          "south": { "texture": "#top" },
+          "west": { "texture": "#top" },
+          "east": { "texture": "#top" }
+        }
+      }
+    ]
   }
 }
