@@ -384,9 +384,18 @@ impl Board {
                     })
                 })
                 .collect(),
+            // A side shows where an analog cable reaches it — or a wire
+            // still does (to take it off).
             sides: SIDES
                 .iter()
-                .map(|&side| SideView {
+                .enumerate()
+                .filter(|&(i, &side)| {
+                    self.cables[i] == Some(cables::ANALOG)
+                        || self.saved.wires.iter().any(|w| {
+                            [&w.from, &w.to].iter().any(|p| matches!(p.node, Node::In | Node::Out) && p.name == side)
+                        })
+                })
+                .map(|(_, &side)| SideView {
                     side: side.to_string(),
                     name: self.side_names.get(side).cloned(),
                     output: self.side_is_output(side),
