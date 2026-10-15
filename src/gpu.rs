@@ -574,6 +574,26 @@ mod tests {
         assert_eq!((g.indices[BUFFER - 2], g.indices[BUFFER - 1], g.indices[0]), (7, 8, 9));
     }
 
+    /// `WRITES=file OUT=dir`: (register, byte) writes replayed, every shown
+    /// frame a PPM picture.
+    #[test]
+    fn replay_writes() {
+        let (Ok(file), Ok(dir)) = (std::env::var("WRITES"), std::env::var("OUT")) else { return };
+        let writes: Vec<(u8, u8)> = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+        let mut g = Gpu::default();
+        for (r, d) in writes {
+            let shown = g.version;
+            g.write(r, d);
+            if g.version != shown {
+                let (w, h, img) = render(&g.front, 10.0);
+                let rgb: Vec<u8> = img.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+                let mut ppm = format!("P6 {w} {h} 255\n").into_bytes();
+                ppm.extend(rgb);
+                std::fs::write(format!("{dir}/frame-{}.ppm", g.version), ppm).unwrap();
+            }
+        }
+    }
+
     /// `OUT=dir`: the cube in each mode, as PPM pictures (for the docs).
     #[test]
     fn render_cubes() {
