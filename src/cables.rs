@@ -47,7 +47,7 @@ pub struct RedstonePort {
 }
 
 impl RedstonePort {
-    fn new() -> Self {
+    pub fn new() -> Self {
         RedstonePort { output: false, name: String::new(), channel: 0 }
     }
 

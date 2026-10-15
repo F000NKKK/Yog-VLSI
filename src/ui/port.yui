@@ -2,7 +2,7 @@
 <!-- A port block's settings: its name and mode. View model: PortVm in port.rs. -->
 <Screen id="yog-vlsi:port"
         width="200"
-        height="96"
+        height="114"
         anchor="center"
         theme="minecraft:vanilla"
         x:ViewModel="PortVm">
@@ -38,6 +38,13 @@
                           checked="{x:Bind mode == PortMode::Bidirectional}"
                           command="{x:Bind set_mode(PortMode::Bidirectional)}" />
         </Row>
+        <TextBox x:Name="channel"
+                 w="100%"
+                 h="14"
+                 max_length="3"
+                 visible="{x:Bind !chip_port()}"
+                 text="{x:Bind channel, Mode=TwoWay}"
+                 placeholder="@Strings.screen.port.channel_placeholder" />
         <Button x:Name="done" w="60" h="20" halign="right" text="@Strings.screen.port.done" command="{x:Bind done()}" />
     </Column>
 </Screen>

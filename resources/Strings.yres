@@ -80,6 +80,7 @@
   "screen.workbench.edit": "Design",
   "screen.workbench.fabricate": "Fabricate",
   "screen.port.title": "Port",
+  "screen.port.channel_placeholder": "Bus channel (on a digital cable)",
   "screen.port.name_placeholder": "Pin name",
   "screen.port.done": "Done",
   "screen.alu.chips": "Chips",

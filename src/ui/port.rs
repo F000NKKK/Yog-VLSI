@@ -83,6 +83,9 @@ struct PortEdit {
     mode: PortMode,
     /// A Redstone Port (Input or Output only), not a VLSI Port.
     redstone: bool,
+    /// A Redstone Port's bus channel (0: on an analog cable).
+    #[serde(default)]
+    channel: u16,
 }
 
 // ── The screen's view model ──────────────────────────────────────────────────
@@ -91,11 +94,13 @@ pub struct PortVm {
     edit: Option<PortEdit>,
     label: String,
     mode: PortMode,
+    /// A Redstone Port's bus channel, as typed (empty: an analog cable).
+    channel: String,
 }
 
 impl Default for PortVm {
     fn default() -> Self {
-        Self { edit: None, label: String::new(), mode: PortMode::Input }
+        Self { edit: None, label: String::new(), mode: PortMode::Input, channel: String::new() }
     }
 }
 
@@ -105,6 +110,7 @@ impl PortVm {
     fn load(&mut self, edit: PortEdit) {
         self.label = edit.label.clone();
         self.mode = edit.mode;
+        self.channel = if edit.channel == 0 { String::new() } else { edit.channel.to_string() };
         self.edit = Some(edit);
     }
     pub fn title(&self) -> String {
@@ -119,7 +125,8 @@ impl PortVm {
     }
     pub fn done(&mut self) {
         if let Some(edit) = &self.edit {
-            let out = PortEdit { label: self.label.trim().to_string(), mode: self.mode, ..edit.clone() };
+            let channel = self.channel.trim().parse::<u16>().map_or(0, |c| c.min(cables::BUS_CHANNELS));
+            let out = PortEdit { label: self.label.trim().to_string(), mode: self.mode, channel, ..edit.clone() };
             if let (Some(srv), Ok(json)) = (yog_api::server(), serde_json::to_string(&out)) {
                 srv.send_to_server(CHANNEL, json.as_bytes());
             }
@@ -171,7 +178,7 @@ pub fn setup(registry: &mut Registry) {
         let Some(state) = srv.get_block_state(&edit.dimension, pos) else { return };
         let id = state.split('[').next().unwrap_or(&state);
         if edit.redstone && id == Blocks::REDSTONE_PORT {
-            let port = RedstonePort { output: edit.mode == PortMode::Output, name: edit.label.trim().to_string() };
+            let port = RedstonePort { output: edit.mode == PortMode::Output, name: edit.label.trim().to_string(), channel: edit.channel };
             cables::set_redstone_port(srv, &edit.dimension, pos, port);
         } else if !edit.redstone && is_port_block(id) {
             write_label(srv, &edit.dimension, pos, &edit.label);
@@ -192,6 +199,7 @@ pub fn setup(registry: &mut Registry) {
                 label: read_label(srv, &e.dimension, e.pos).unwrap_or_default(),
                 mode: dir_for_block(&e.block_id).unwrap_or(PortMode::Input),
                 redstone: false,
+                channel: 0,
             }
         } else if e.block_id == Blocks::REDSTONE_PORT {
             let port = cables::redstone_port(&e.dimension, e.pos);
@@ -201,6 +209,7 @@ pub fn setup(registry: &mut Registry) {
                 label: port.name,
                 mode: if port.output { PortMode::Output } else { PortMode::Input },
                 redstone: true,
+                channel: port.channel,
             }
         } else {
             return true;

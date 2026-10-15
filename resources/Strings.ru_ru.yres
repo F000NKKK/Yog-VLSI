@@ -67,6 +67,7 @@
   "screen.workbench.edit": "Редактор",
   "screen.workbench.fabricate": "Изготовить",
   "screen.port.title": "Порт",
+  "screen.port.channel_placeholder": "Канал шины (на цифровом кабеле)",
   "screen.port.name_placeholder": "Имя пина",
   "screen.port.done": "Готово",
   "screen.alu.chips": "Чипы",

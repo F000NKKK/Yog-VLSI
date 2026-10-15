@@ -278,7 +278,7 @@ pub fn enter(
         }
         // A Redstone Port as it was set (an old design's: an unnamed input).
         if block.id() == Blocks::REDSTONE_PORT {
-            let port = block.redstone_port.clone().unwrap_or(RedstonePort { output: false, name: String::new() });
+            let port = block.redstone_port.clone().unwrap_or_else(RedstonePort::new);
             cables::set_redstone_port(srv, DIMENSION_ID, pos, port);
         }
     }
