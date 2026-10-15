@@ -456,7 +456,9 @@ mod tests {
             }
             vm.new_tick();
             vm.settle(Tier::Netherite.steps_per_tick());
-            if t % 10 == 9 || t + 1 == ticks {
+            if std::env::var("TRACE").is_ok() {
+                println!("T {} {}", word(&vm, "PC"), word(&vm, "A"));
+            } else if t % 10 == 9 || t + 1 == ticks {
                 println!("tick {t}: PC {} A {} ({:?}/tick)", word(&vm, "PC"), word(&vm, "A"), started.elapsed() / (t + 1));
             }
         }
