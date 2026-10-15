@@ -1105,7 +1105,8 @@ mod tests {
         for (name, v) in boards {
             let mut g = Graph { view: Some(v), layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default() };
             let rec = Recorder::new();
-            draw(&rec, &mut g, Rect { x: 0.0, y: 0.0, w: 460.0, h: 170.0 });
+            let size = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+            draw(&rec, &mut g, Rect { x: 0.0, y: 0.0, w: size("BOARD_W", 460.0), h: size("BOARD_H", 170.0) });
             std::fs::write(format!("{dir}/{name}.jsonl"), rec.0.borrow().join("\n")).unwrap();
         }
     }
