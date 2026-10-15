@@ -219,10 +219,12 @@ struct Graph {
     /// Bus rows pulled here but not yet echoed back by the server.
     rows: HashMap<u8, u16>,
     camera: Camera,
+    /// The camera fits this board already (it's the player's from then on).
+    fitted: bool,
 }
 
 static GRAPH: LazyLock<Mutex<Graph>> = LazyLock::new(|| {
-    Mutex::new(Graph { view: None, layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default() })
+    Mutex::new(Graph { view: None, layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default(), fitted: false })
 });
 
 fn level_color(level: u8) -> u32 {
@@ -678,7 +680,16 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
     d2.rect(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, BG);
     let Some(view) = g.view.clone() else { return };
     let width_of = |t: &str| d2.text_width(t);
-    g.layout = layout(&view, &g.moved, &g.rows, rect.w, rect.h, g.camera, &width_of);
+    // First shown, the whole board in the box: zoomed out as far as needed.
+    if !g.fitted {
+        let whole = layout(&view, &g.moved, &g.rows, rect.w, rect.h, Camera::default(), &width_of);
+        let right = whole.nodes.iter().map(|n| n.x + n.w).fold(rect.w, f32::max) + 4.0;
+        let bottom = whole.nodes.iter().map(|n| n.y + n.h).fold(rect.h, f32::max) + 4.0;
+        let zoom = (rect.w / right).min(rect.h / bottom).clamp(Camera::MIN, 1.0);
+        g.camera = Camera { zoom, pan: (0.0, 0.0) };
+        g.fitted = true;
+    }
+    g.layout = layout(&view, &g.moved, &g.rows, rect.w / g.camera.zoom, rect.h, g.camera, &width_of);
     let (ox, oy) = (rect.x, rect.y);
     let at = |x: f32, y: f32| (ox + x, oy + y);
     let levels: HashMap<&Pin, u8> = view.levels.iter().map(|(p, l)| (p, *l)).collect();
@@ -908,8 +919,9 @@ pub fn setup(registry: &mut Registry) {
             // The server has the moves it was sent.
             g.moved.retain(|node, p| !view.layout.iter().any(|(n, q)| n == node && q == p));
             g.rows.retain(|side, r| !view.buses.iter().any(|b| b.index == *side && b.rows == *r));
-            if g.view.as_ref().is_some_and(|v| v.alu != view.alu) {
+            if g.view.as_ref().is_none_or(|v| v.alu != view.alu) {
                 g.moved.clear();
+                g.fitted = false;
             }
             g.view = Some(view.clone());
         }
@@ -1103,7 +1115,7 @@ mod tests {
         let Ok(dir) = std::env::var("OUT") else { return };
         let boards = [("simple", view()), ("full_adder", design_board("Full adder")), ("decoder", design_board("Decoder 2:4"))];
         for (name, v) in boards {
-            let mut g = Graph { view: Some(v), layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default() };
+            let mut g = Graph { view: Some(v), layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default(), fitted: false };
             let rec = Recorder::new();
             let size = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
             draw(&rec, &mut g, Rect { x: 0.0, y: 0.0, w: size("BOARD_W", 460.0), h: size("BOARD_H", 170.0) });
