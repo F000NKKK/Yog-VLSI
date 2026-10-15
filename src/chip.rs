@@ -422,4 +422,52 @@ mod tests {
     fn a_bidirectional_port_goes_both_ways() {
         assert!(PortMode::Bidirectional.inputs() && PortMode::Bidirectional.outputs());
     }
+
+    /// Runs a chip's circuit from a file (`CHIP=…`) for `TICKS` server
+    /// ticks, `PRESS=<port>:<from tick>:<to tick>,…` held, printing its
+    /// PC, A and 8×8 screen ports (`PXrc`) and how long a tick took.
+    #[test]
+    #[ignore]
+    fn run_a_chip_file() {
+        let Ok(path) = std::env::var("CHIP") else { return };
+        let c: CircuitData = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let ticks: u32 = std::env::var("TICKS").ok().and_then(|t| t.parse().ok()).unwrap_or(100);
+        let press: Vec<(String, u32, u32)> = std::env::var("PRESS")
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|p| {
+                let mut f = p.split(':');
+                Some((f.next()?.to_string(), f.next()?.parse().ok()?, f.next()?.parse().ok()?))
+            })
+            .collect();
+        let started = std::time::Instant::now();
+        let mut vm = c.vm_with(&|id| CircuitData::load_for_chip("", id), 1);
+        println!("built in {:?}", started.elapsed());
+        let port = |l: &str| c.ports.iter().find(|p| p.label == l).map(|p| (p.x, p.y, p.z));
+        let word = |vm: &RedstoneVM, prefix: &str| {
+            (0..8).filter_map(|i| port(&format!("{prefix}{i}")).map(|(x, y, z)| ((vm.get_port_output(x, y, z) > 0) as u32) << i)).sum::<u32>()
+        };
+        let started = std::time::Instant::now();
+        for t in 0..ticks {
+            for (label, from, to) in &press {
+                if let Some((x, y, z)) = port(label) {
+                    vm.set_port_input(x, y, z, if (*from..*to).contains(&t) { 15 } else { 0 });
+                }
+            }
+            vm.new_tick();
+            vm.settle(Tier::Netherite.steps_per_tick());
+            if t % 10 == 9 || t + 1 == ticks {
+                println!("tick {t}: PC {} A {} ({:?}/tick)", word(&vm, "PC"), word(&vm, "A"), started.elapsed() / (t + 1));
+            }
+        }
+        for r in 0..8 {
+            let row: String = (0..8)
+                .map(|c| match port(&format!("PX{r}{c}")) {
+                    Some((x, y, z)) if vm.get_port_output(x, y, z) > 0 => '#',
+                    _ => '.',
+                })
+                .collect();
+            println!("{row}");
+        }
+    }
 }

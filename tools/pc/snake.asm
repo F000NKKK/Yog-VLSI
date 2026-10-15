@@ -47,9 +47,13 @@ right:
 
 moved:
     LD HEAD | SUB FOOD | JNZ notfood
-    LD GROW | ADDI 1 | ST GROW
+    ; Eaten: the head goes on, the tail stays — one longer, while the
+    ; ring of 16 has room.
     LD HEAD | ORI 64 | PLOT
     LD HP | ADDI 1 | ANDI 15 | ORI 16 | ST HP | TAX | LD HEAD | STX
+    LD HP | SUB TP | ANDI 15 | SUBI 15 | JNZ newfood
+    LD TP | TAX | LDX | PLOT
+    LD TP | ADDI 1 | ANDI 15 | ORI 16 | ST TP
     JMP newfood
 notfood:
     LD HEAD | TEST | JNZ dead
