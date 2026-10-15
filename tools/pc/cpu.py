@@ -99,11 +99,12 @@ def build(program, debug=True, gpu=False):
         go = n.AND(put, n.NOT(busy))
         data = n.register(n.mux_word(op["PUT"], A, k), go, clk)
         regs = n.register(k, n.AND(op["OUT"], n.NOT(busy)), clk)
-        n.alias(T, n.register([n.NOT(T)], go, clk)[0])
+        toggle = n.register([n.NOT(T)], go, clk)[0]
+        n.alias(T, toggle)
         for i in range(8):
             n.output(f"D{i}", data[i])
             n.output(f"R{i}", regs[i])
-        n.output("T", T)
+        n.output("T", toggle)
         test = n.ZERO
     else:
         # ── Screen: 64 pixel latches ──────────────────────────────────────

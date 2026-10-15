@@ -469,7 +469,12 @@ mod tests {
             (0..8).filter_map(|i| port(&format!("{prefix}{i}")).map(|(x, y, z)| ((vm.get_port_output(x, y, z) > 0) as u32) << i)).sum::<u32>()
         };
         let started = std::time::Instant::now();
+        // With a Display port: a Display's side of it, one write a tick.
+        let (mut toggle, mut writes) = (false, Vec::<(u32, u32)>::new());
         for t in 0..ticks {
+            if let Some((x, y, z)) = port("ACK") {
+                vm.set_port_input(x, y, z, if toggle { 15 } else { 0 });
+            }
             for (label, from, to) in &press {
                 if let Some((x, y, z)) = port(label) {
                     vm.set_port_input(x, y, z, if (*from..*to).contains(&t) { 15 } else { 0 });
@@ -477,11 +482,24 @@ mod tests {
             }
             vm.new_tick();
             vm.settle(std::env::var("STEPS").ok().and_then(|s| s.parse().ok()).unwrap_or(Tier::Netherite.steps_per_tick()));
+            if let Some((x, y, z)) = port("T")
+                && (vm.get_port_output(x, y, z) > 0) != toggle
+            {
+                toggle = !toggle;
+                writes.push((word(&vm, "R"), word(&vm, "D")));
+            }
             if std::env::var("TRACE").is_ok() {
                 println!("T {} {}", word(&vm, "PC"), word(&vm, "A"));
             } else if t % 10 == 9 || t + 1 == ticks {
                 println!("tick {t}: PC {} A {} ({:?}/tick)", word(&vm, "PC"), word(&vm, "A"), started.elapsed() / (t + 1));
             }
+        }
+        if port("T").is_some() {
+            println!("{} writes to the Display", writes.len());
+            if let Ok(out) = std::env::var("WRITES") {
+                std::fs::write(out, serde_json::to_string(&writes).unwrap()).unwrap();
+            }
+            return;
         }
         for r in 0..8 {
             let row: String = (0..8)
