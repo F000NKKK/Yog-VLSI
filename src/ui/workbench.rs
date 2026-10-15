@@ -478,7 +478,6 @@ mod tests {
                 assert!((a.x - b.x).abs() >= 18.0 || (a.y - b.y).abs() >= 18.0, "{a:?} overlaps {b:?}");
             }
         }
-        assert_eq!(def.layout[1].accepts, ["minecraft:redstone", "minecraft:redstone_block"]);
     }
 
     #[test]
@@ -504,12 +503,10 @@ mod tests {
     /// The screen's resource slots take what the resources' table says they're worth.
     #[test]
     fn resource_slots_take_the_resources_inputs() {
-        let yui = include_str!("workbench.yui");
+        let def = yog_kit::inventory_of::<View>().unwrap();
         for r in Resource::ALL {
-            let at = format!("<Slot index=\"{}\" accepts=\"", r.slot());
-            let start = yui.find(&at).unwrap_or_else(|| panic!("no slot {}", r.slot())) + at.len();
-            let mut accepts: Vec<&str> = yui[start..].split('"').next().unwrap().split_whitespace().collect();
-            let mut inputs: Vec<&str> = r.inputs().iter().map(|(i, _)| &**i).collect();
+            let mut accepts = def.layout[r.slot() as usize].accepts.clone();
+            let mut inputs: Vec<String> = r.inputs().iter().map(|(i, _)| i.to_string()).collect();
             accepts.sort();
             inputs.sort();
             assert_eq!(accepts, inputs, "{}", r.name());
