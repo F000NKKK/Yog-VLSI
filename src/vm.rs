@@ -1654,7 +1654,7 @@ pub struct NestedAlu {
     pub chips: Vec<NestedChip>,
     pub wires: Vec<(NestedPin, NestedPin)>,
     /// What it drives onto the buses on its faces: (face, channel) → level.
-    pub drives: FastMap<(u8, u16), u8>,
+    pub(crate) drives: FastMap<(u8, u16), u8>,
     /// The bus channels its board reads, (face, channel).
     reads: Vec<(u8, u16)>,
     /// Every pin its board drives.
