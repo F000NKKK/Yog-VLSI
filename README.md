@@ -2,116 +2,133 @@
 
 <a id="top"></a>
 
-# 🔲 Yog VLSI
+# Yog VLSI
 
-### Design, fabricate and deploy redstone microchips — simulated in Rust
+**Design redstone circuits, print them onto microchips and build computers out of them**
 
 [![Yog Mod Loader](https://img.shields.io/badge/Yog-Mod%20Loader-8a5cf6.svg)](https://github.com/F000NKKK/Yog-Mod-Loader)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.0-informational.svg)](yog.toml)
-[![yog-api 0.93](https://img.shields.io/badge/yog--api-0.93-orange.svg)](https://crates.io/crates/yog-api)
+![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1%20%7C%201.21.1-success)
+![Loaders](https://img.shields.io/badge/Fabric%20%7C%20Forge%20%7C%20NeoForge-supported-success)
 
-![Fabric](https://img.shields.io/badge/Fabric-1.20.1%20%7C%201.21.1-success)
-![Forge](https://img.shields.io/badge/Forge-1.20.1%20%7C%201.21.1-success)
-![NeoForge](https://img.shields.io/badge/NeoForge-1.20.1%20%7C%201.21.1-success)
+**English** · [Русский](README.ru.md)
 
-🇺🇸 **English** | 🇷🇺 [Русский](README.ru.md)
-
-[Overview](#-overview) • [Features](#-features) • [Screens](#-screens) • [Chip tiers](#-chip-tiers) • [Building](#-building) • [Status](#-status)
+[How it works](#-how-it-works) · [Ready-made circuits](#-ready-made-circuits) · [YOG-8](#-yog-8-a-computer-on-one-chip) · [Tiers](#-tiers) · [Install](#-install) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
 ---
 
-## 📖 Overview
+Yog VLSI (Very Large Scale Integration) turns redstone circuits into items.
+Build a circuit in a private editing world, print it onto a chip at the VLSI
+Workbench, and put chips into an ALU block. There they run in a fast native
+redstone simulator — far faster than the world itself — and talk to the world
+through ports and cables. Chips can hold other chips, so a whole computer
+fits into one block.
 
-**Yog VLSI** (*Very Large Scale Integration*) turns redstone circuits into
-items. You design a circuit in a private editing world, fabricate it onto a
-microchip at the VLSI Workbench, and put chips into an ALU block, where they
-run inside a native Rust redstone VM — up to twice vanilla's speed — and
-talk to the world through named redstone ports.
+<p align="center"><img src="docs/images/yog8-snake.jpg" alt="Snake running on the YOG-8 computer: an 8×8 lamp screen and four buttons" width="820"></p>
 
-The mod runs on the [Yog Mod Loader](https://github.com/F000NKKK/Yog-Mod-Loader):
-one `.yog` file for Fabric, Forge and NeoForge, Minecraft 1.20.1 and 1.21.1.
+## 🔧 How it works
 
-## 🌟 Features
+**1. Design.** Put a blank chip into the VLSI Workbench and press Design. You
+are taken into a flat, private world sized by the chip's tier. Build any
+redstone you like and mark its inputs and outputs with ports. Leaving saves
+the design.
 
-### 🛠️ VLSI Workbench
+<p align="center"><img src="docs/images/screen-workbench.png" alt="The VLSI Workbench screen" width="640"></p>
 
-- **A design library per player**: designs are saved on the server and
-  reachable from any workbench.
-- **An editing world**: open a design and you are put into a flat, private
-  dimension sized by the chip's tier. Build any redstone you like; the field
-  is cleared when you save or leave, and nobody stays behind in it.
-- **Ports**: place `yog-vlsi:port` blocks anywhere in the circuit and name
-  them; each is an input, an output or both.
-- **Fabrication**: printing a chip spends resources from the workbench's
-  refillable store — about a quarter of what the blocks would cost.
+**2. Fabricate.** Press Fabricate to print the design onto the chip. It costs
+resources from the workbench's store — about a quarter of what the blocks
+themselves would cost. A design can also be saved onto a Blueprint to share
+or to print again.
 
-### 🔌 ALU
+**3. Wire up.** Put chips into an ALU. Its screen is a board: chips are nodes,
+the ALU's six faces are inputs and outputs, and you drag wires between them.
+Every face can also carry a digital bus with dozens of channels.
 
-- **Chips in slots**: an ALU holds several chips and runs them every tick.
-- **A node graph**: wire one chip's output port to another's input in the
-  ALU's screen; the graph is drawn and edited right there.
-- **Named redstone ports** on the ALU's sides connect the graph to the world.
+<p align="center"><img src="docs/images/screen-alu.png" alt="The ALU board: a full adder built from XOR, AND and OR chips" width="640"></p>
 
-### ⚡ The Redstone VM
+**4. Connect to the world.** Redstone Ports turn redstone into a channel of
+a digital cable and back — lamps, buttons, doors, anything. Name a port and
+pick its channel, and it shows up on the ALU's board under that name.
 
-- **Vanilla's rules**: dust shapes and power levels, torches, repeaters,
-  comparators (with container reading), observers, pistons with slime and
-  honey, hoppers, droppers and containers behave as in the game.
-- **Fast**: wire shapes are worked out once a step; a full Netherite layer
-  steps in about 6 ms (`cargo bench`).
+<p align="center"><img src="docs/images/screen-port.png" alt="A Redstone Port: name, direction and bus channel" width="640"></p>
 
-## 🖼️ Screens
+### The simulator
 
-Drawn by [Yog-IDLE](https://github.com/F000NKKK/Yog-IDLE)'s screen designer
-with the game's font and textures — the same yog-ui code the game runs.
+The circuit inside a chip follows vanilla's rules: dust and its power levels,
+torches, repeaters, comparators reading containers, observers, pistons with
+slime and honey, hoppers and droppers. A chip whose logic is pure is also
+compiled into a lookup table in the background, so a chip of chips costs
+almost nothing to run. All ALUs in a world share a fixed time budget per
+tick, so even a large machine can't slow the server down.
 
-<div align="center">
+## 📚 Ready-made circuits
 
-| | |
-|:---:|:---:|
-| ![VLSI Workbench](docs/images/screen-workbench.png) | ![ALU](docs/images/screen-alu.png) |
-| The workbench: chip, resources, design and cost | The ALU: node graph, chip slots, inventory |
-| ![Port](docs/images/screen-port.png) | |
-| A port: its name and direction | |
+An empty Blueprint can be written with one of the built-in designs, so you
+don't have to build the basics by hand:
 
-</div>
+| Gates | Memory | Arithmetic and routing |
+|---|---|---|
+| NOT, AND, OR, NAND, NOR, XOR, XNOR | RS latch, D latch, D flip-flop, T flip-flop, register bit, memory bit | half adder, full adder, multiplexer, demultiplexer, 2-to-4 decoder |
 
-## 📊 Chip tiers
+Each is a real redstone circuit with a test of its truth table. Designs are
+plain text files — see [src/designs](src/designs/README.md) to add your own.
 
-| Tier | Ticks/s | Editing world | vs vanilla |
-|---|---:|---|---:|
-| Wood | 5 | 16×16×16 | 0.25× |
-| Stone | 10 | 32×32×32 | 0.5× |
-| Gold | 20 | 64×64×64 | 1× |
-| Iron | 25 | 64×64×64 | 1.25× |
-| Diamond | 30 | 128×128×128 | 1.5× |
-| Netherite | 40 | 256×256×256 | 2× |
+<p align="center"><img src="docs/images/board-decoder.png" alt="A 2-to-4 decoder on an ALU board" width="820"></p>
 
-## 🔨 Building
+## 🖥 YOG-8: a computer on one chip
 
-```bash
-yog build                           # every platform
-YOG_TARGETS=linux-x86_64 yog build  # one platform, faster
-```
+YOG-8 is an 8-bit computer of about 2,500 gates — VLSI chips on 334
+netherite ALUs, all inside a single chip: a program ROM, 32 bytes of
+RAM, an accumulator, an index register, a random number generator, an 8×8
+screen and four buttons. It plays Snake.
 
-Produces `artifacts/yog-vlsi.yog` — put it into `<game dir>/yog-mods/`
-next to the Yog loader's jar in `mods/`.
+<p align="center"><img src="docs/images/yog8-editor.jpg" alt="YOG-8 in the editing world: the clock, the bus and the rows of ALUs" width="820"></p>
 
-## 🚧 Status
+The computer is generated from a description of its gates: an assembler, an
+emulator to check programs, a gate-level simulator and a generator that lays
+the gates out into ALUs. Everything is in [tools/pc](tools/pc/README.md).
 
-Playable and in active development. Next: digital (bus) channels between
-ALUs, blueprints as items for sharing designs. See [DESIGN.md](DESIGN.md)
-(Russian) for the full design.
+<p align="center"><img src="docs/images/yog8-snake-2.jpg" alt="The snake growing on the lamp screen" width="820"></p>
+
+## 📊 Tiers
+
+| Tier | Steps per tick | Editing world | Chips in an ALU | Bus channels per face |
+|---|---:|---|---:|---:|
+| Wood | 8 | 16 × 16 × 16 | 2 | 8 |
+| Stone | 32 | 32 × 32 × 32 | 3 | 16 |
+| Gold | 128 | 64 × 64 × 64 | 4 | 24 |
+| Iron | 512 | 64 × 64 × 64 | 5 | 32 |
+| Diamond | 4096 | 128 × 128 × 128 | 6 | 48 |
+| Netherite | 32768 | 256 × 256 × 256 | 8 | 64 |
+
+A step is one redstone tick of the circuit inside the chip; the world does one
+per game tick. Tiers, resources and costs are data tables in [content](content)
+that a modpack can change.
+
+## 📦 Install
+
+1. Install the [Yog loader](https://github.com/F000NKKK/Yog-Mod-Loader) for
+   Fabric, Forge or NeoForge.
+2. Put yog-vlsi.yog into the yog-mods folder of your game directory.
+
+To build it yourself, run `yog build` in this folder; the package appears in
+artifacts. The mod is edited in [Yog IDLE](https://github.com/F000NKKK/Yog-IDLE),
+which shows its screens, blocks, recipes and tables visually.
+
+## 🤝 Contributing
+
+Ideas, bug reports and pull requests are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md). The full design (in Russian) is in
+[DESIGN.md](DESIGN.md).
 
 ## 📄 License
 
-AGPL-3.0-only — see [LICENSE](LICENSE).
+[AGPL-3.0](LICENSE).
 
 <div align="center">
 
-[⬆ Back to top](#top)
+Part of the [Yog](https://github.com/F000NKKK/Yog-Mod-Loader) project · [Back to top](#top)
 
 </div>
