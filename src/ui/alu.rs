@@ -693,12 +693,8 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
             c.rect(x + n.w / 3.0, gy + s, x + 2.0 * n.w / 3.0, gy + 2.0 * s, HEAD_BUS);
         }
     };
-    // The nodes, under the wires.
-    for n in &g.layout.nodes {
-        node(n);
-    }
-
-    // Wires: a glow under those carrying a signal.
+    // Wires under the nodes (a wire behind a node doesn't cross its
+    // names): a glow under those carrying a signal.
     for Wire { from, to } in &view.wires {
         if lifted.as_ref() == Some(to) {
             continue;
@@ -709,6 +705,9 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
             trace(&c, at(a.x, a.y), at(b.x, b.y), WIRE_GLOW, 3.0);
         }
         trace(&c, at(a.x, a.y), at(b.x, b.y), level_color(level), 1.5);
+    }
+    for n in &g.layout.nodes {
+        node(n);
     }
     for p in &g.layout.pins {
         let (x, y) = at(p.x, p.y);
