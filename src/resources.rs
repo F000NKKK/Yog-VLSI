@@ -27,6 +27,15 @@ impl Resource {
             .map(|(_, n)| *n)
     }
 
+    /// `units` of it for people, in whole pieces of it (an ingot, not a
+    /// nugget): `2`, `2.3`, `1.5k`.
+    pub fn shown(self, units: u64) -> String {
+        let unit = self.unit().max(1);
+        let whole = units / unit;
+        let tenth = units % unit * 10 / unit;
+        if whole < 10 && tenth > 0 { format!("{whole}.{tenth}") } else { compact(whole) }
+    }
+
     /// Whether `id` is this resource itself in a design.
     fn is(self, id: &str) -> bool {
         self.base().iter().any(|p| fits(p, id))
@@ -119,7 +128,7 @@ pub fn circuit_cost(circuit: &crate::chip::CircuitData, load: &dyn Fn(&str) -> O
 /// (`cost.ydef`, down to the resources themselves).
 fn add_block(id: &str, n: f64, total: &mut [f64; 6]) {
     if let Some(r) = Resource::ALL.into_iter().find(|r| r.is(id)) {
-        total[r.index()] += n;
+        total[r.index()] += n * r.unit() as f64;
     } else if let Some(c) = Cost::ALL.into_iter().find(|c| c.of().iter().any(|p| fits(p, id))) {
         for (what, k) in c.takes() {
             add_block(what, n * k, total);

@@ -26,7 +26,7 @@ use crate::chip::{Blueprint, ChipMeta};
 use crate::content::Items;
 use crate::editor;
 use crate::res::Strings;
-use crate::resources::{Amounts, Resource, compact};
+use crate::resources::{Amounts, Resource};
 use crate::designs;
 use crate::content::Tier;
 
@@ -126,11 +126,11 @@ impl WorkbenchVm {
     }
 
     pub fn amount(&self, r: Resource) -> String {
-        compact(self.stored(r))
+        r.shown(self.stored(r))
     }
     /// Fill height of `r`'s vial — log scale, full at a million.
     pub fn vial(&self, r: Resource) -> f32 {
-        let n = self.stored(r) as f32;
+        let n = (self.stored(r) / r.unit().max(1)) as f32;
         VIAL_HEIGHT * ((n + 1.0).log10() / VIAL_FULL_LOG10).min(1.0)
     }
     pub fn resource_tooltip(&self, r: Resource) -> String {
@@ -176,7 +176,7 @@ impl WorkbenchVm {
             .map(|r| {
                 let (need, have) = (cost[r.index()], self.stored(r));
                 CostRow {
-                    text: Strings::screen_workbench_cost_row(r.name(), compact(need), compact(have)),
+                    text: Strings::screen_workbench_cost_row(r.name(), r.shown(need), r.shown(have)),
                     color: if have >= need { 0xFF_404040 } else { 0xFF_B02020 },
                 }
             })
@@ -376,7 +376,7 @@ fn fabricate(srv: &dyn yog_api::Server, bench: &BenchId) -> String {
         let missing: Vec<String> = Resource::ALL
             .iter()
             .filter(|r| stored[r.index()] < cost[r.index()])
-            .map(|r| format!("{} {}", compact(cost[r.index()] - stored[r.index()]), r.name()))
+            .map(|r| format!("{} {}", r.shown(cost[r.index()] - stored[r.index()]), r.name()))
             .collect();
         if !missing.is_empty() {
             return format!("§cNot enough: {}.", missing.join(", "));
