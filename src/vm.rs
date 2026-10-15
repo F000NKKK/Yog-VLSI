@@ -63,7 +63,6 @@ use serde::{Deserialize, Serialize};
 /// A fast hasher for fingerprints (FNV-1a): not for maps an adversary fills.
 #[derive(Default)]
 struct Fnv(u64);
-pub static COUNTS: [std::sync::atomic::AtomicU64; 4] = [const { std::sync::atomic::AtomicU64::new(0) }; 4];
 
 impl std::hash::Hasher for Fnv {
     fn finish(&self) -> u64 {
@@ -383,6 +382,11 @@ pub struct RedstoneVM {
     layers: Vec<Option<Box<[Cell]>>>,
     /// Indices of every non-air cell, ascending (= y, z, x order).
     active: Vec<u32>,
+    /// The same, but ALUs and buses: what the redstone passes look at
+    /// (a big design is mostly those).
+    logic: Vec<u32>,
+    /// Bumped whenever an ALU's faces change: part of the fingerprint.
+    alu_changes: u64,
     pub tick: u64,
     /// The items of every container, by cell: (item, count) per slot.
     inventories: HashMap<u32, Vec<(u16, u8)>>,
@@ -430,6 +434,8 @@ impl RedstoneVM {
             shift: size.trailing_zeros(),
             layers: vec![None; size as usize],
             active: Vec::new(),
+            logic: Vec::new(),
+            alu_changes: 0,
             tick: 0,
             inventories: HashMap::new(),
             nested: HashMap::new(),
@@ -542,6 +548,15 @@ impl RedstoneVM {
     fn put(&mut self, i: u32, cell: Cell) {
         self.buses = None;
         let found = self.active.binary_search(&i);
+        let in_logic = self.logic.binary_search(&i);
+        let logic = !cell.is_air() && !matches!(cell.block, BlockType::Alu | BlockType::Bus);
+        match (in_logic, logic) {
+            (Ok(at), false) => {
+                self.logic.remove(at);
+            }
+            (Err(at), true) => self.logic.insert(at, i),
+            _ => {}
+        }
         if cell.is_air() {
             if let Ok(at) = found {
                 self.active.remove(at);
@@ -680,7 +695,8 @@ impl RedstoneVM {
             h ^= v;
             h = h.wrapping_mul(0x0100_0000_01b3);
         };
-        for &i in &self.active {
+        mix(self.alu_changes);
+        for &i in &self.logic {
             let c = self.get(i);
             let mut bh = Fnv::default();
             std::hash::Hash::hash(&c.block, &mut bh);
@@ -768,8 +784,8 @@ impl RedstoneVM {
 
     /// 0. Every wire's shape, for this step.
     fn shape_wire(&mut self) {
-        for k in 0..self.active.len() {
-            let i = self.active[k];
+        for k in 0..self.logic.len() {
+            let i = self.logic[k];
             if self.get(i).is_wire() {
                 let shape = self.wire_shape(i);
                 self.get_mut(i).points = shape;
@@ -805,8 +821,8 @@ impl RedstoneVM {
 
     /// 1. Solid blocks take the strong power going into them.
     fn strong_power(&mut self) {
-        for k in 0..self.active.len() {
-            let i = self.active[k];
+        for k in 0..self.logic.len() {
+            let i = self.logic[k];
             if !self.get(i).is_solid() {
                 continue;
             }
@@ -828,8 +844,8 @@ impl RedstoneVM {
     ///    along it strongest first, one less per block.
     fn settle_wire(&mut self) {
         let mut buckets: [Vec<u32>; 16] = Default::default();
-        for k in 0..self.active.len() {
-            let i = self.active[k];
+        for k in 0..self.logic.len() {
+            let i = self.logic[k];
             if !self.get(i).is_wire() {
                 continue;
             }
@@ -856,8 +872,8 @@ impl RedstoneVM {
 
     /// 3. Solid blocks add the wire leading into them.
     fn wire_power(&mut self) {
-        for k in 0..self.active.len() {
-            let i = self.active[k];
+        for k in 0..self.logic.len() {
+            let i = self.logic[k];
             if !self.get(i).is_solid() {
                 continue;
             }
@@ -876,8 +892,8 @@ impl RedstoneVM {
 
     /// 4. Lamps and output ports read what's around them.
     fn read_power(&mut self) {
-        for k in 0..self.active.len() {
-            let i = self.active[k];
+        for k in 0..self.logic.len() {
+            let i = self.logic[k];
             let cell = *self.get(i);
             let level = match cell.block {
                 BlockType::RedstoneLamp => {
@@ -912,8 +928,8 @@ impl RedstoneVM {
     fn cable_networks(&mut self) {
         let mut seen: HashSet<u32> = HashSet::new();
         let mut changes: Vec<(u32, u8)> = Vec::new();
-        for k in 0..self.active.len() {
-            let start = self.active[k];
+        for k in 0..self.logic.len() {
+            let start = self.logic[k];
             if self.get(start).block != BlockType::Cable || !seen.insert(start) {
                 continue;
             }
@@ -1075,7 +1091,6 @@ impl RedstoneVM {
         run.extend(self.nested.iter().filter(|(_, a)| !a.stable || a.reads_faces).map(|(&i, _)| i));
         run.sort_unstable();
         run.dedup();
-        COUNTS[0].fetch_add(run.len() as u64, std::sync::atomic::Ordering::Relaxed);
         for i in run {
             if self.get(i).block != BlockType::Alu {
                 continue;
@@ -1119,6 +1134,7 @@ impl RedstoneVM {
             if cell.watched != packed {
                 let power = outputs.iter().copied().max().unwrap_or(0);
                 changes.push((i, Cell { watched: packed, power, ..cell }));
+                self.alu_changes += 1;
             }
         }
         for (i, next) in changes {
@@ -1335,8 +1351,8 @@ impl RedstoneVM {
     /// Hoppers move an item every 4 steps unless powered; droppers drop
     /// theirs.
     fn move_items(&mut self) {
-        for k in 0..self.active.len() {
-            let Some(&i) = self.active.get(k) else { break };
+        for k in 0..self.logic.len() {
+            let Some(&i) = self.logic.get(k) else { break };
             let cell = *self.get(i);
             match cell.block {
                 BlockType::Hopper { facing } => {
@@ -1550,11 +1566,7 @@ impl NestedAlu {
             if c.left == 0 {
                 continue;
             }
-            COUNTS[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let t0 = std::time::Instant::now();
             let used = c.vm.settle(c.left);
-            COUNTS[1].fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
-            COUNTS[3].fetch_add(used as u64, std::sync::atomic::Ordering::Relaxed);
             let settled = used < c.left;
             c.left -= used;
             c.settled_on = settled.then_some(ins);
