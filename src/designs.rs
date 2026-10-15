@@ -393,6 +393,64 @@ mod tests {
     }
 
     #[test]
+    fn adders() {
+        let mut b = Bench::new("Half adder");
+        for (x, y) in [(false, false), (true, false), (false, true), (true, true)] {
+            b.set(&[("A", x), ("B", y)], 4);
+            assert_eq!((b.out("S"), b.out("C")), (x != y, x && y), "half adder {x} {y}");
+        }
+        let mut b = Bench::new("Full adder");
+        for n in 0..8 {
+            let (x, y, c) = (n & 1 != 0, n & 2 != 0, n & 4 != 0);
+            b.set(&[("A", x), ("B", y), ("CI", c)], 4);
+            let sum = x as u8 + y as u8 + c as u8;
+            assert_eq!((b.out("S"), b.out("CO")), (sum & 1 != 0, sum > 1), "full adder {x} {y} {c}");
+        }
+    }
+
+    #[test]
+    fn mux_demux_decoder() {
+        let mut b = Bench::new("MUX 2:1");
+        b.set(&[("A", true), ("B", false), ("S", false)], 4);
+        assert!(b.out("Q"));
+        assert!(!b.set(&[("S", true)], 4).out("Q"));
+        assert!(b.set(&[("B", true)], 4).out("Q"));
+        let mut b = Bench::new("DEMUX 1:2");
+        b.set(&[("D", true), ("S", false)], 4);
+        assert!(b.out("Q0") && !b.out("Q1"));
+        b.set(&[("S", true)], 4);
+        assert!(!b.out("Q0") && b.out("Q1"));
+        let mut b = Bench::new("Decoder 2:4");
+        for n in 0..4u8 {
+            b.set(&[("A0", n & 1 != 0), ("A1", n & 2 != 0)], 4);
+            let on: Vec<bool> = ["Y0", "Y1", "Y2", "Y3"].iter().map(|y| b.out(y)).collect();
+            assert_eq!(on, (0..4).map(|i| i == n).collect::<Vec<_>>(), "decoder {n}");
+        }
+    }
+
+    #[test]
+    fn register_and_memory_bits() {
+        let mut b = Bench::new("Register bit");
+        b.set(&[("D", true), ("L", false)], 4);
+        b.set(&[("C", true)], 4).set(&[("C", false)], 4);
+        assert!(!b.out("Q"), "not loaded");
+        b.set(&[("L", true)], 4);
+        b.set(&[("C", true)], 4).set(&[("C", false)], 4);
+        assert!(b.out("Q"), "loaded on the edge");
+        b.set(&[("D", false), ("L", false)], 4);
+        b.set(&[("C", true)], 4).set(&[("C", false)], 4);
+        assert!(b.out("Q"), "kept");
+        let mut m = Bench::new("Memory bit");
+        m.set(&[("D", true), ("S", true), ("W", true)], 4).set(&[("W", false)], 4);
+        assert!(m.out("Q"), "written");
+        m.set(&[("D", false)], 4);
+        assert!(m.out("Q"), "held without W");
+        assert!(!m.set(&[("S", false)], 4).out("Q"), "hidden unselected");
+        m.set(&[("W", true)], 4);
+        assert!(m.set(&[("W", false), ("S", true)], 4).out("Q"), "not written unselected");
+    }
+
+    #[test]
     fn t_flip_flop() {
         let mut b = Bench::new("T flip-flop");
         let mut q = b.out("Q");
