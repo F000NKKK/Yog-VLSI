@@ -795,9 +795,9 @@ dependencies = [
 
 [[package]]
 name = "yog-api"
-version = "0.96.0"
+version = "0.96.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bdb0f5c49120c2d41db25d1bf5e2293a22eaf7c774b8fa3c54a9a5570985f04"
+checksum = "8c167592182ce496df096dc050d82658db45e52ceab302bc0640223e814b4abe"
 dependencies = [
  "ctor",
  "rkyv",
@@ -978,7 +978,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4fd224cc0738ed8a8fb9eff0331d6ca3b6daabefad0fbf3d7eb85af119bc699"
 dependencies = [
- "yog-api 0.96.0",
+ "yog-api 0.96.1",
 ]
 
 [[package]]
@@ -1051,7 +1051,7 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
- "yog-api 0.96.0",
+ "yog-api 0.96.1",
  "yog-kit",
  "yog_pipes_exports",
 ]

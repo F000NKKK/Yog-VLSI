@@ -138,8 +138,11 @@ impl WorkbenchVm {
             .inputs()
             .iter()
             .map(|(id, units)| {
-                // A tag: any of the resource.
-                let name = if id.starts_with('#') { r.name() } else { crate::resources::item_name(id) };
+                // A tag: its name (Iron Nuggets).
+                let name = match id.strip_prefix('#') {
+                    Some(tag) => yog_api::tag_name("item", tag),
+                    None => crate::resources::item_name(id),
+                };
                 match units {
                     1 => name,
                     n => format!("{name} ×{n}"),
