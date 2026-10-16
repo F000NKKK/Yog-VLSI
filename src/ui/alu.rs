@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex, Once};
 
 use yog_api::gfx_draw2d::Draw2D;
-use yog_api::ui::{Pointer, Rect, Surface};
+use yog_api::ui::{Color, Pointer, Rect, Surface, Vec2};
 use yog_api::{GfxContext, Registry};
 use yog_kit::prelude::*;
 
@@ -578,10 +578,10 @@ trait Canvas {
 
 impl Canvas for Draw2D<'_> {
     fn rect(&self, x0: f32, y0: f32, x1: f32, y1: f32, color: u32) {
-        Draw2D::rect(self, x0, y0, x1, y1, color);
+        Draw2D::rect(self, Rect::from_edges(x0, y0, x1, y1), Color(color));
     }
     fn text(&self, text: &str, x: f32, y: f32, scale: f32, color: u32) {
-        self.text_scaled(text, "", x, y, scale, color, false);
+        self.text_scaled(text, "", Vec2::new(x, y), scale, Color(color), false);
     }
     fn text_width(&self, text: &str) -> f32 {
         Draw2D::text_width(self, text, "")
@@ -602,7 +602,7 @@ impl Clip<'_> {
     fn rect(&self, x0: f32, y0: f32, x1: f32, y1: f32, color: u32) {
         let (x0, y0, x1, y1) = (x0.max(self.x0), y0.max(self.y0), x1.min(self.x1), y1.min(self.y1));
         if x1 > x0 && y1 > y0 {
-            self.d2.rect(Rect::from_edges(x0, y0, x1, y1), color);
+            self.d2.rect(x0, y0, x1, y1, color);
         }
     }
 
@@ -630,7 +630,7 @@ impl Clip<'_> {
         }
         if end > start {
             let to = chars.get(end).map_or(text.len(), |(i, _)| *i);
-            self.d2.text(&text[from..to], Vec2::new(x, y), scale, color);
+            self.d2.text(&text[from..to], x, y, scale, color);
         }
     }
 
@@ -677,7 +677,7 @@ fn trace(c: &Clip<'_>, (x1, y1): (f32, f32), (x2, y2): (f32, f32), color: u32, w
 
 /// Draws the graph `g` into `rect`.
 fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
-    d2.rect(Rect::from_edges(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h), BG);
+    d2.rect(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, BG);
     let Some(view) = g.view.clone() else { return };
     let width_of = |t: &str| d2.text_width(t);
     // First shown, the whole board in the box: zoomed out as far as needed.
@@ -781,7 +781,7 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
     if view.chips.is_empty() {
         let hint = Strings::screen_alu_empty();
         let w = width_of(&hint);
-        d2.text(&hint, Vec2::new(ox + (rect.w - w) / 2.0, oy + rect.h / 2.0 - 4.0), 1.0, TEXT_DIM);
+        d2.text(&hint, ox + (rect.w - w) / 2.0, oy + rect.h / 2.0 - 4.0, 1.0, TEXT_DIM);
     }
 }
 
