@@ -285,7 +285,7 @@ fn blueprint_in(srv: &dyn yog_api::Server, bench: &BenchId) -> (BlueprintView, O
                     tier: bp.tier,
                     ports: bp.circuit.ports.len(),
                     blocks: bp.circuit.blocks.len(),
-                    cost: crate::resources::circuit_cost(&bp.circuit, &|id| crate::chip::CircuitData::load_for_chip(&srv.game_dir(), id)),
+                    cost: crate::resources::circuit_cost(&bp.circuit, &|id| crate::chip::CircuitData::load_for_chip(&srv.world_dir(), id)),
                 };
                 (view, Some(bp))
             }
@@ -369,7 +369,7 @@ fn fabricate(srv: &dyn yog_api::Server, bench: &BenchId) -> String {
     if srv.get_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT).is_some() {
         return "§cTake the chip out of the chip slot first.".into();
     }
-    let cost = crate::resources::circuit_cost(&bp.circuit, &|id| crate::chip::CircuitData::load_for_chip(&srv.game_dir(), id));
+    let cost = crate::resources::circuit_cost(&bp.circuit, &|id| crate::chip::CircuitData::load_for_chip(&srv.world_dir(), id));
     {
         let stores = STORES.lock().unwrap();
         let stored = stores.get(bench).copied().unwrap_or_default();
@@ -383,7 +383,7 @@ fn fabricate(srv: &dyn yog_api::Server, bench: &BenchId) -> String {
         }
     }
     let meta = ChipMeta { id: crate::chip::new_id(), tier: bp.tier, name: bp.name.clone(), ports: bp.circuit.ports.clone() };
-    bp.circuit.save_for_chip(&srv.game_dir(), &meta.id);
+    bp.circuit.save_for_chip(&srv.world_dir(), &meta.id);
     if !srv.set_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT, bp.tier.chip(), 1, &meta.to_nbt()) {
         return "§cCouldn't put the chip in the chip slot.".into();
     }
@@ -433,7 +433,7 @@ const STORE_FILE: &str = "yog-vlsi/workbenches";
 const STORE_KEY: &str = "stores";
 
 pub fn load_resources(srv: &dyn yog_api::Server) {
-    let store = Storage::open(&srv.game_dir(), STORE_FILE);
+    let store = Storage::open(&srv.world_dir(), STORE_FILE);
     let saved: Vec<(BenchId, Amounts)> = store
         .get(STORE_KEY)
         .and_then(|v| v.as_str())
@@ -445,7 +445,7 @@ pub fn load_resources(srv: &dyn yog_api::Server) {
 pub fn save_resources(srv: &dyn yog_api::Server) {
     let stores: Vec<(BenchId, Amounts)> = STORES.lock().unwrap().iter().map(|(k, v)| (k.clone(), *v)).collect();
     if let Ok(json) = serde_json::to_string(&stores) {
-        let mut store = Storage::open(&srv.game_dir(), STORE_FILE);
+        let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
         store.set(STORE_KEY, &*json);
         let _ = store.flush();
     }

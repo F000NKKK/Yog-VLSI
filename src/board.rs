@@ -254,11 +254,11 @@ impl Board {
             match meta {
                 Some(meta) if entry.as_ref().is_some_and(|c| c.meta.id == meta.id) => {}
                 Some(meta) => {
-                    let circuit = CircuitData::load_for_chip(&srv.game_dir(), &meta.id)
+                    let circuit = CircuitData::load_for_chip(&srv.world_dir(), &meta.id)
                         .unwrap_or_else(|| CircuitData::empty(meta.tier));
                     // Its ALUs run inside it, their chips' circuits from the store.
-                    let game_dir = srv.game_dir();
-                    let vm = circuit.vm_with(&|id| CircuitData::load_for_chip(&game_dir, id), 1);
+                    let world_dir = srv.world_dir();
+                    let vm = circuit.vm_with(&|id| CircuitData::load_for_chip(&world_dir, id), 1);
                     *entry = Some(Installed::new(meta, circuit, vm));
                 }
                 None => *entry = None,
@@ -614,7 +614,7 @@ const STORE_FILE: &str = "yog-vlsi/boards";
 const STORE_KEY: &str = "boards";
 
 pub fn load(srv: &dyn yog_api::Server) {
-    let store = Storage::open(&srv.game_dir(), STORE_FILE);
+    let store = Storage::open(&srv.world_dir(), STORE_FILE);
     let saved: Vec<(AluId, Saved)> = store
         .get(STORE_KEY)
         .and_then(|v| v.as_str())
@@ -633,7 +633,7 @@ pub fn load(srv: &dyn yog_api::Server) {
 pub fn save(srv: &dyn yog_api::Server) {
     let saved: Vec<(AluId, Saved)> = BOARDS.lock().unwrap().iter().map(|(k, b)| (k.clone(), b.saved.clone())).collect();
     if let Ok(json) = serde_json::to_string(&saved) {
-        let mut store = Storage::open(&srv.game_dir(), STORE_FILE);
+        let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
         store.set(STORE_KEY, &*json);
         let _ = store.flush();
     }

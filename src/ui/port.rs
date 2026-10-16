@@ -141,7 +141,7 @@ const STORE_FILE: &str = "yog-vlsi/port_labels";
 const STORE_KEY: &str = "labels";
 
 pub fn load(srv: &dyn yog_api::Server) {
-    let store = Storage::open(&srv.game_dir(), STORE_FILE);
+    let store = Storage::open(&srv.world_dir(), STORE_FILE);
     let saved: Vec<((String, i32, i32, i32), String)> = store
         .get(STORE_KEY)
         .and_then(|v| v.as_str())
@@ -153,7 +153,7 @@ pub fn load(srv: &dyn yog_api::Server) {
 pub fn save(srv: &dyn yog_api::Server) {
     let labels: Vec<_> = LABELS.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     if let Ok(json) = serde_json::to_string(&labels) {
-        let mut store = Storage::open(&srv.game_dir(), STORE_FILE);
+        let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
         store.set(STORE_KEY, &*json);
         let _ = store.flush();
     }

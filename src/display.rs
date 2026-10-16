@@ -283,7 +283,7 @@ const STORE_FILE: &str = "yog-vlsi/displays";
 const STORE_KEY: &str = "displays";
 
 pub fn load(srv: &dyn yog_api::Server) {
-    let store = Storage::open(&srv.game_dir(), STORE_FILE);
+    let store = Storage::open(&srv.world_dir(), STORE_FILE);
     let saved: Vec<(Key, Display)> = store
         .get(STORE_KEY)
         .and_then(|v| v.as_str())
@@ -296,7 +296,7 @@ pub fn load(srv: &dyn yog_api::Server) {
 pub fn save(srv: &dyn yog_api::Server) {
     let saved: Vec<(Key, Display)> = DISPLAYS.lock().unwrap().iter().map(|(k, d)| (k.clone(), d.clone())).collect();
     if let Ok(json) = serde_json::to_string(&saved) {
-        let mut store = Storage::open(&srv.game_dir(), STORE_FILE);
+        let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
         store.set(STORE_KEY, &*json);
         let _ = store.flush();
     }

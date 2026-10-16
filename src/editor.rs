@@ -121,7 +121,7 @@ fn lane_for(player_name: &str) -> u32 {
 
 /// Writes the sessions and lanes to disk: a session survives a crash.
 fn persist(srv: &dyn yog_api::Server) {
-    let mut store = Storage::open(&srv.game_dir(), STORE_FILE);
+    let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
     if let Ok(json) = serde_json::to_string(&*SESSIONS.lock().unwrap()) {
         store.set(SESSIONS_KEY, &*json);
     }
@@ -135,7 +135,7 @@ fn persist(srv: &dyn yog_api::Server) {
 
 /// Reads the sessions and lanes back (the server started).
 pub fn load(srv: &dyn yog_api::Server) {
-    let store = Storage::open(&srv.game_dir(), STORE_FILE);
+    let store = Storage::open(&srv.world_dir(), STORE_FILE);
     let read = |key: &str| store.get(key).and_then(|v| v.as_str().map(str::to_string));
     *SESSIONS.lock().unwrap() = read(SESSIONS_KEY).and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
     *LANES.lock().unwrap() = read(LANES_KEY).and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();

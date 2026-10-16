@@ -376,7 +376,7 @@ const STORE_KEY: &str = "ports";
 
 pub fn load(srv: &dyn yog_api::Server) {
     register_networks();
-    let store = Storage::open(&srv.game_dir(), STORE_FILE);
+    let store = Storage::open(&srv.world_dir(), STORE_FILE);
     let saved: Vec<(Key, RedstonePort)> = store
         .get(STORE_KEY)
         .and_then(|v| v.as_str())
@@ -388,7 +388,7 @@ pub fn load(srv: &dyn yog_api::Server) {
 pub fn save(srv: &dyn yog_api::Server) {
     let ports: Vec<(Key, RedstonePort)> = PORTS.lock().unwrap().iter().map(|(k, p)| (k.clone(), p.clone())).collect();
     if let Ok(json) = serde_json::to_string(&ports) {
-        let mut store = Storage::open(&srv.game_dir(), STORE_FILE);
+        let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
         store.set(STORE_KEY, &*json);
         let _ = store.flush();
     }
