@@ -17,7 +17,7 @@ yog-api    = "0.98"
 yog-kit    = "0.9"
 
 [dependencies.exports]
-yog-pipes = "0.9"
+yog-pipes = "0.9.1"
 
 ## `yog run <name>` — build, drop the .yog into the loader's own Gradle dev-run
 # instance, then launch it.
