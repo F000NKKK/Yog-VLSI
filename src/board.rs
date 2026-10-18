@@ -746,7 +746,7 @@ mod tests {
         let ch = |n: &str| Pin::new(Node::Bus(2), n);
         assert!(!b.is_source(&ch("1")), "no digital cable on E yet");
         b.cables[2] = Some(cables::DIGITAL);
-        assert_eq!(b.bus_channels(), 32, "wood: 8 × 4 colours");
+        assert_eq!(b.bus_channels(), 32, "wood: 8 × 4 colors");
         assert!(b.is_source(&ch("1")) && b.is_sink(&ch("1")));
         assert!(b.is_sink(&ch("32")) && !b.is_sink(&ch("33")) && !b.is_source(&ch("0")));
         assert_eq!(b.bus_channel(2, "32"), Some(31), "pins count from 1, Pipes' channels from 0");
