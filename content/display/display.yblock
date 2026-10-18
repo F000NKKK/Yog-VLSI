@@ -12,13 +12,13 @@
   "model": {
     "parent": "cube",
     "textures": {
-      "north": "@Textures.display",
-      "south": "@Textures.display_back",
-      "east": "@Textures.display_side",
-      "west": "@Textures.display_side",
-      "up": "@Textures.display_top",
-      "down": "@Textures.display_top",
-      "particle": "@Textures.display_side"
+      "north": "@texture:yog-vlsi:block/display",
+      "south": "@texture:yog-vlsi:block/display_back",
+      "east": "@texture:yog-vlsi:block/display_side",
+      "west": "@texture:yog-vlsi:block/display_side",
+      "up": "@texture:yog-vlsi:block/display_top",
+      "down": "@texture:yog-vlsi:block/display_top",
+      "particle": "@texture:yog-vlsi:block/display_side"
     }
   },
   "states": {

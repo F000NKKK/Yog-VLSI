@@ -1,0 +1,4 @@
+{
+  image: "@ItemImages.item.blueprint",
+  atlas: "minecraft:blocks",
+}

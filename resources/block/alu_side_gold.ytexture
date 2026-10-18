@@ -1,0 +1,4 @@
+{
+  image: "@BlockImages.block.alu_side_gold",
+  atlas: "minecraft:blocks",
+}

@@ -1,0 +1,4 @@
+{
+  image: "@ItemImages.item.chip_gold",
+  atlas: "minecraft:blocks",
+}

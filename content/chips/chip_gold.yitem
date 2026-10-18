@@ -8,7 +8,7 @@
   "model": {
     "parent": "generated",
     "textures": {
-      "layer0": "@Textures.chip_gold"
+      "layer0": "@texture:yog-vlsi:item/chip_gold"
     }
   }
 }

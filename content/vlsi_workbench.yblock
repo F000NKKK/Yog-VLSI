@@ -11,9 +11,9 @@
   },
   "model": {
     "textures": {
-      "top": "@Textures.workbench_top",
-      "bottom": "@Textures.workbench_bottom",
-      "side": "@Textures.workbench_side"
+      "top": "@texture:yog-vlsi:block/workbench_top",
+      "bottom": "@texture:yog-vlsi:block/workbench_bottom",
+      "side": "@texture:yog-vlsi:block/workbench_side"
     },
     "elements": [
       {

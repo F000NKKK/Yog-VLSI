@@ -10,7 +10,7 @@
   "model": {
     "parent": "cube_all",
     "textures": {
-      "all": "@Textures.port_bidi"
+      "all": "@texture:yog-vlsi:block/port_bidi"
     }
   }
 }

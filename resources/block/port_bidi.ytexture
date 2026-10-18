@@ -1,0 +1,4 @@
+{
+  image: "@BlockImages.block.port_bidi",
+  atlas: "minecraft:blocks",
+}

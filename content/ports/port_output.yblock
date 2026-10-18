@@ -10,7 +10,7 @@
   "model": {
     "parent": "cube_all",
     "textures": {
-      "all": "@Textures.port_output"
+      "all": "@texture:yog-vlsi:block/port_output"
     }
   }
 }

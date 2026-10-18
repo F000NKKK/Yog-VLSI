@@ -13,7 +13,7 @@
   },
   "model": {
     "parent": "minecraft:block/block",
-    "textures": { "all": "@Textures.analog_cable" },
+    "textures": { "all": "@texture:yog-vlsi:block/analog_cable" },
     "elements": [
       {
         "from": [5, 5, 5],
@@ -32,7 +32,7 @@
   "states": {
     "connect": {
       "arm": {
-        "textures": { "all": "@Textures.analog_cable" },
+        "textures": { "all": "@texture:yog-vlsi:block/analog_cable" },
         "elements": [
           {
             "from": [5, 5, 0],

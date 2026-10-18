@@ -1,0 +1,4 @@
+{
+  image: "@BlockImages.block.analog_cable",
+  atlas: "minecraft:blocks",
+}

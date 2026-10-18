@@ -1,0 +1,4 @@
+{
+  image: "@BlockImages.block.display_top",
+  atlas: "minecraft:blocks",
+}

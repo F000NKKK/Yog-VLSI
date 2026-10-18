@@ -1,0 +1,4 @@
+{
+  image: "@ItemImages.item.chip_netherite",
+  atlas: "minecraft:blocks",
+}

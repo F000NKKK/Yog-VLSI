@@ -18,9 +18,9 @@
   "model": {
     "parent": "cube_bottom_top",
     "textures": {
-      "top": "@Textures.alu_top_stone",
-      "bottom": "@Textures.alu_top_stone",
-      "side": "@Textures.alu_side_stone"
+      "top": "@texture:yog-vlsi:block/alu_top_stone",
+      "bottom": "@texture:yog-vlsi:block/alu_top_stone",
+      "side": "@texture:yog-vlsi:block/alu_side_stone"
     }
   }
 }

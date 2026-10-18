@@ -1,0 +1,4 @@
+{
+  image: "@BlockImages.block.workbench_side",
+  atlas: "minecraft:blocks",
+}
