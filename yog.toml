@@ -47,6 +47,19 @@ env        = [
     "__VK_LAYER_NV_optimus=NVIDIA_only",
 ]
 
+[run."fabric-26.2"]
+name       = "Fabric 26.2"
+export_dir = "../Yog-Mod-Loader/fabric/run/yog-mods"
+command    = "./gradlew"
+args       = ["runClient", "-Pminecraft_version=26.2"]
+cwd        = "../Yog-Mod-Loader/fabric/modern"
+env        = [
+    "JAVA_HOME=/usr/lib/jvm/java-25-openjdk-amd64",
+    "__NV_PRIME_RENDER_OFFLOAD=1",
+    "__GLX_VENDOR_LIBRARY_NAME=nvidia",
+    "__VK_LAYER_NV_optimus=NVIDIA_only",
+]
+
 [run."fabric-1.21.1"]
 name       = "Fabric 1.21.1"
 export_dir = "../Yog-Mod-Loader/fabric/run/yog-mods"
