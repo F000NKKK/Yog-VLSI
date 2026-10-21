@@ -32,7 +32,8 @@ pub const PORT_BIDI: &str = Blocks::PORT_BIDI;
 const CHANNEL: &str = "yog-vlsi:port";
 
 /// Every named port: (dimension, x, y, z) → name.
-static LABELS: LazyLock<Mutex<HashMap<crate::cables::Key, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static LABELS: LazyLock<Mutex<HashMap<crate::cables::Key, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn key(dimension: &str, pos: BlockPos) -> (String, i32, i32, i32) {
     (dimension.to_string(), pos.x, pos.y, pos.z)
@@ -100,7 +101,12 @@ pub struct PortVm {
 
 impl Default for PortVm {
     fn default() -> Self {
-        Self { edit: None, label: String::new(), mode: PortMode::Input, channel: String::new() }
+        Self {
+            edit: None,
+            label: String::new(),
+            mode: PortMode::Input,
+            channel: String::new(),
+        }
     }
 }
 
@@ -110,11 +116,19 @@ impl PortVm {
     fn load(&mut self, edit: PortEdit) {
         self.label = edit.label.clone();
         self.mode = edit.mode;
-        self.channel = if edit.channel == 0 { String::new() } else { edit.channel.to_string() };
+        self.channel = if edit.channel == 0 {
+            String::new()
+        } else {
+            edit.channel.to_string()
+        };
         self.edit = Some(edit);
     }
     pub fn title(&self) -> String {
-        if self.chip_port() { Strings::screen_port_title() } else { Strings::screen_port_redstone_title() }
+        if self.chip_port() {
+            Strings::screen_port_title()
+        } else {
+            Strings::screen_port_redstone_title()
+        }
     }
     /// A VLSI Port: it can be bidirectional too.
     pub fn chip_port(&self) -> bool {
@@ -125,8 +139,17 @@ impl PortVm {
     }
     pub fn done(&mut self) {
         if let Some(edit) = &self.edit {
-            let channel = self.channel.trim().parse::<u16>().map_or(0, |c| c.min(cables::BUS_CHANNELS));
-            let out = PortEdit { label: self.label.trim().to_string(), mode: self.mode, channel, ..edit.clone() };
+            let channel = self
+                .channel
+                .trim()
+                .parse::<u16>()
+                .map_or(0, |c| c.min(cables::BUS_CHANNELS));
+            let out = PortEdit {
+                label: self.label.trim().to_string(),
+                mode: self.mode,
+                channel,
+                ..edit.clone()
+            };
             if let (Some(srv), Ok(json)) = (yog_api::server(), serde_json::to_string(&out)) {
                 srv.send_to_server(CHANNEL, json.as_bytes());
             }
@@ -151,7 +174,12 @@ pub fn load(srv: &dyn yog_api::Server) {
 }
 
 pub fn save(srv: &dyn yog_api::Server) {
-    let labels: Vec<_> = LABELS.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let labels: Vec<_> = LABELS
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     if let Ok(json) = serde_json::to_string(&labels) {
         let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
         store.set(STORE_KEY, &*json);
@@ -172,13 +200,21 @@ pub fn setup(registry: &mut Registry) {
 
     // Client → server: the port's new name and mode.
     registry.on_packet(CHANNEL, |ev, srv| {
-        let Ok(edit) = serde_json::from_slice::<PortEdit>(&ev.payload) else { return };
+        let Ok(edit) = serde_json::from_slice::<PortEdit>(&ev.payload) else {
+            return;
+        };
         let (x, y, z) = edit.pos;
         let pos = BlockPos { x, y, z };
-        let Some(state) = srv.get_block_state(&edit.dimension, pos) else { return };
+        let Some(state) = srv.get_block_state(&edit.dimension, pos) else {
+            return;
+        };
         let id = state.split('[').next().unwrap_or(&state);
         if edit.redstone && id == Blocks::REDSTONE_PORT {
-            let port = RedstonePort { output: edit.mode == PortMode::Output, name: edit.label.trim().to_string(), channel: edit.channel };
+            let port = RedstonePort {
+                output: edit.mode == PortMode::Output,
+                name: edit.label.trim().to_string(),
+                channel: edit.channel,
+            };
             cables::set_redstone_port(srv, &edit.dimension, pos, port);
         } else if !edit.redstone && is_port_block(id) {
             write_label(srv, &edit.dimension, pos, &edit.label);
@@ -207,7 +243,11 @@ pub fn setup(registry: &mut Registry) {
                 dimension: e.dimension.clone(),
                 pos: at,
                 label: port.name,
-                mode: if port.output { PortMode::Output } else { PortMode::Input },
+                mode: if port.output {
+                    PortMode::Output
+                } else {
+                    PortMode::Input
+                },
                 redstone: true,
                 channel: port.channel,
             }

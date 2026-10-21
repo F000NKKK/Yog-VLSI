@@ -98,35 +98,74 @@ pub enum BlockType {
 
     RedstoneWire,
     /// `attach`: the direction of the block it hangs on (`Down` standing).
-    RedstoneTorch { lit: bool, attach: Facing },
-    Repeater { delay_ticks: u8, facing: Facing },
-    Comparator { mode: ComparatorMode, facing: Facing },
+    RedstoneTorch {
+        lit: bool,
+        attach: Facing,
+    },
+    Repeater {
+        delay_ticks: u8,
+        facing: Facing,
+    },
+    Comparator {
+        mode: ComparatorMode,
+        facing: Facing,
+    },
     RedstoneLamp,
     RedstoneBlock,
     /// `attach`: the direction of the block it's mounted on.
-    Lever { on: bool, attach: Facing },
-    Button { pressed: bool, attach: Facing },
+    Lever {
+        on: bool,
+        attach: Facing,
+    },
+    Button {
+        pressed: bool,
+        attach: Facing,
+    },
     /// Any pressure plate, at the power it gives.
-    PressurePlate { power: u8 },
-    Observer { facing: Facing },
-    TargetBlock { power: u8 },
+    PressurePlate {
+        power: u8,
+    },
+    Observer {
+        facing: Facing,
+    },
+    TargetBlock {
+        power: u8,
+    },
     /// Detector rail, trapped chest, …: a constant source.
-    Source { power: u8 },
+    Source {
+        power: u8,
+    },
 
     /// Movable, doesn't conduct, drags what touches it along.
     Slime,
     Honey,
     /// A full block pistons can't move (obsidian, bedrock, …).
     Immovable,
-    Piston { facing: Facing, sticky: bool, extended: bool },
-    PistonHead { facing: Facing, sticky: bool },
+    Piston {
+        facing: Facing,
+        sticky: bool,
+        extended: bool,
+    },
+    PistonHead {
+        facing: Facing,
+        sticky: bool,
+    },
     /// Holds `slots` items (in [`RedstoneVM`]'s inventories); `solid`
     /// conducts power; `partner`: the other half of a double chest.
-    Container { slots: u8, solid: bool, partner: Option<Facing> },
+    Container {
+        slots: u8,
+        solid: bool,
+        partner: Option<Facing>,
+    },
     /// `facing`: its spout.
-    Hopper { facing: Facing },
+    Hopper {
+        facing: Facing,
+    },
     /// A dropper or dispenser; `triggered` while powered.
-    Dropper { facing: Facing, triggered: bool },
+    Dropper {
+        facing: Facing,
+        triggered: bool,
+    },
 
     /// A VLSI port block.
     Port(PortMode),
@@ -139,7 +178,9 @@ pub enum BlockType {
     Cable,
     /// A Redstone Port: `output`, its cable's level comes out as redstone
     /// (weak, every side); else the redstone it receives goes into it.
-    RedstonePort { output: bool },
+    RedstonePort {
+        output: bool,
+    },
     /// A digital cable: a run of them is a bus, its channels driven and read
     /// by the ALUs on it (their boards' bus pins).
     Bus,
@@ -158,7 +199,10 @@ impl BlockType {
             Transparent => 2,
             RedstoneWire => 3,
             RedstoneTorch { lit, attach } => 4 | b(lit) << 8 | f(attach) << 9,
-            Repeater { delay_ticks, facing } => 5 | u64::from(delay_ticks) << 8 | f(facing) << 16,
+            Repeater {
+                delay_ticks,
+                facing,
+            } => 5 | u64::from(delay_ticks) << 8 | f(facing) << 16,
             Comparator { mode, facing } => 6 | (mode as u64) << 8 | f(facing) << 9,
             RedstoneLamp => 7,
             RedstoneBlock => 8,
@@ -171,9 +215,17 @@ impl BlockType {
             Slime => 15,
             Honey => 16,
             Immovable => 17,
-            Piston { facing, sticky, extended } => 18 | f(facing) << 8 | b(sticky) << 12 | b(extended) << 13,
+            Piston {
+                facing,
+                sticky,
+                extended,
+            } => 18 | f(facing) << 8 | b(sticky) << 12 | b(extended) << 13,
             PistonHead { facing, sticky } => 19 | f(facing) << 8 | b(sticky) << 12,
-            Container { slots, solid, partner } => 20 | u64::from(slots) << 8 | b(solid) << 16 | partner.map_or(7, f) << 17,
+            Container {
+                slots,
+                solid,
+                partner,
+            } => 20 | u64::from(slots) << 8 | b(solid) << 16 | partner.map_or(7, f) << 17,
             Hopper { facing } => 21 | f(facing) << 8,
             Dropper { facing, triggered } => 22 | f(facing) << 8 | b(triggered) << 12,
             Port(mode) => 23 | (mode as u64) << 8,
@@ -209,7 +261,14 @@ pub enum Facing {
 }
 
 impl Facing {
-    pub const ALL: [Facing; 6] = [Facing::North, Facing::South, Facing::East, Facing::West, Facing::Up, Facing::Down];
+    pub const ALL: [Facing; 6] = [
+        Facing::North,
+        Facing::South,
+        Facing::East,
+        Facing::West,
+        Facing::Up,
+        Facing::Down,
+    ];
     pub const HORIZONTAL: [Facing; 4] = [Facing::North, Facing::South, Facing::East, Facing::West];
 
     /// Its place in [`Facing::ALL`] (an ALU's sides N S E W U D).
@@ -300,10 +359,21 @@ impl Cell {
             | BlockType::Lever { on: true, .. }
             | BlockType::Button { pressed: true, .. }
             | BlockType::RedstoneBlock => 15,
-            BlockType::PressurePlate { power } | BlockType::TargetBlock { power } | BlockType::Source { power } => power,
+            BlockType::PressurePlate { power }
+            | BlockType::TargetBlock { power }
+            | BlockType::Source { power } => power,
             _ => 0,
         };
-        Cell { block, power, strong: 0, weak: 0, timer: 0, port_in: 0, watched: 0, points: 0 }
+        Cell {
+            block,
+            power,
+            strong: 0,
+            weak: 0,
+            timer: 0,
+            port_in: 0,
+            watched: 0,
+            points: 0,
+        }
     }
 
     fn is_solid(&self) -> bool {
@@ -322,7 +392,10 @@ impl Cell {
     }
 
     fn holds_items(&self) -> bool {
-        matches!(self.block, BlockType::Container { .. } | BlockType::Hopper { .. } | BlockType::Dropper { .. })
+        matches!(
+            self.block,
+            BlockType::Container { .. } | BlockType::Hopper { .. } | BlockType::Dropper { .. }
+        )
     }
 
     fn push(&self) -> Push {
@@ -355,7 +428,10 @@ impl Cell {
     }
 
     fn is_output_port(&self) -> bool {
-        matches!(self.block, BlockType::Port(PortMode::Output | PortMode::Bidirectional))
+        matches!(
+            self.block,
+            BlockType::Port(PortMode::Output | PortMode::Bidirectional)
+        )
     }
 
     /// Wire next to it turns toward it (`toward`: from the wire to it).
@@ -387,13 +463,22 @@ impl Cell {
             | BlockType::TargetBlock { .. }
             | BlockType::Source { .. }
             | BlockType::RedstonePort { output: true } => (p, 0),
-            BlockType::Lever { attach, .. } | BlockType::Button { attach, .. } => (p, if to == attach { p } else { 0 }),
-            BlockType::PressurePlate { .. } => (p, if to == Facing::Down { p } else { 0 }),
-            BlockType::RedstoneTorch { attach, .. } => {
-                (if to == attach { 0 } else { p }, if to == Facing::Up { p } else { 0 })
+            BlockType::Lever { attach, .. } | BlockType::Button { attach, .. } => {
+                (p, if to == attach { p } else { 0 })
             }
-            BlockType::Repeater { facing, .. } | BlockType::Comparator { facing, .. } | BlockType::Observer { facing } => {
-                if to == facing.opposite() { (p, p) } else { (0, 0) }
+            BlockType::PressurePlate { .. } => (p, if to == Facing::Down { p } else { 0 }),
+            BlockType::RedstoneTorch { attach, .. } => (
+                if to == attach { 0 } else { p },
+                if to == Facing::Up { p } else { 0 },
+            ),
+            BlockType::Repeater { facing, .. }
+            | BlockType::Comparator { facing, .. }
+            | BlockType::Observer { facing } => {
+                if to == facing.opposite() {
+                    (p, p)
+                } else {
+                    (0, 0)
+                }
             }
             BlockType::Port(PortMode::Input | PortMode::Bidirectional) => (self.port_in, 0),
             // A nested ALU's faces: a level each, packed in `watched`.
@@ -469,10 +554,32 @@ type Slot = (u16, u8);
 /// How many of an item stack in one slot.
 fn max_stack(item: &str) -> u8 {
     let path = item.strip_prefix("minecraft:").unwrap_or(item);
-    const SIXTEEN: [&str; 7] = ["ender_pearl", "snowball", "egg", "_sign", "_banner", "honey_bottle", "armor_stand"];
+    const SIXTEEN: [&str; 7] = [
+        "ender_pearl",
+        "snowball",
+        "egg",
+        "_sign",
+        "_banner",
+        "honey_bottle",
+        "armor_stand",
+    ];
     const ONE: [&str; 16] = [
-        "sword", "pickaxe", "_axe", "shovel", "_hoe", "helmet", "chestplate", "leggings", "boots", "potion",
-        "shulker_box", "minecart", "boat", "_bed", "saddle", "totem_of_undying",
+        "sword",
+        "pickaxe",
+        "_axe",
+        "shovel",
+        "_hoe",
+        "helmet",
+        "chestplate",
+        "leggings",
+        "boots",
+        "potion",
+        "shulker_box",
+        "minecart",
+        "boat",
+        "_bed",
+        "saddle",
+        "totem_of_undying",
     ];
     if path == "bucket" || SIXTEEN.iter().any(|p| path.ends_with(p)) {
         16
@@ -549,7 +656,8 @@ impl RedstoneVM {
             Facing::Up => (x, y + 1, z),
             Facing::Down => (x, y - 1, z),
         };
-        self.in_bounds(x, y, z).then(|| self.idx(x as u32, y as u32, z as u32))
+        self.in_bounds(x, y, z)
+            .then(|| self.idx(x as u32, y as u32, z as u32))
     }
 
     #[inline]
@@ -570,7 +678,9 @@ impl RedstoneVM {
     #[inline]
     fn get_mut(&mut self, i: u32) -> &mut Cell {
         let offset = (i & (self.layer_len() - 1)) as usize;
-        let cells = self.layers[(i >> (2 * self.shift)) as usize].as_mut().expect("only non-air cells are written");
+        let cells = self.layers[(i >> (2 * self.shift)) as usize]
+            .as_mut()
+            .expect("only non-air cells are written");
         &mut cells[offset]
     }
 
@@ -620,8 +730,15 @@ impl RedstoneVM {
         let kinds = [
             !air && cell.is_wire(),
             !air && cell.is_solid(),
-            !air && matches!(cell.block, BlockType::RedstoneLamp | BlockType::Port(PortMode::Output | PortMode::Bidirectional)),
-            !air && matches!(cell.block, BlockType::Hopper { .. } | BlockType::Dropper { .. }),
+            !air && matches!(
+                cell.block,
+                BlockType::RedstoneLamp
+                    | BlockType::Port(PortMode::Output | PortMode::Bidirectional)
+            ),
+            !air && matches!(
+                cell.block,
+                BlockType::Hopper { .. } | BlockType::Dropper { .. }
+            ),
             !air && matches!(
                 cell.block,
                 BlockType::RedstoneTorch { .. }
@@ -633,8 +750,16 @@ impl RedstoneVM {
             ),
             cell.block == BlockType::Cable,
         ];
-        for (list, want) in
-            [&mut self.wires, &mut self.solids, &mut self.readers, &mut self.movers, &mut self.components, &mut self.cables].into_iter().zip(kinds)
+        for (list, want) in [
+            &mut self.wires,
+            &mut self.solids,
+            &mut self.readers,
+            &mut self.movers,
+            &mut self.components,
+            &mut self.cables,
+        ]
+        .into_iter()
+        .zip(kinds)
         {
             match (list.binary_search(&i), want) {
                 (Ok(at), false) => {
@@ -676,8 +801,13 @@ impl RedstoneVM {
             return;
         }
         let i = self.idx(x, y, z);
-        let ids: Vec<u16> = items.iter().map(|(_, item, _)| self.item_index(item)).collect();
-        let Some(inv) = self.inventories.get_mut(&i) else { return };
+        let ids: Vec<u16> = items
+            .iter()
+            .map(|(_, item, _)| self.item_index(item))
+            .collect();
+        let Some(inv) = self.inventories.get_mut(&i) else {
+            return;
+        };
         for ((slot, _, count), id) in items.iter().zip(ids) {
             if let Some(s) = inv.get_mut(*slot as usize) {
                 *s = (id, *count);
@@ -689,7 +819,11 @@ impl RedstoneVM {
     #[cfg(test)]
     pub fn items_at(&self, x: u32, y: u32, z: u32) -> Vec<(u8, String, u8)> {
         let i = self.idx(x, y, z);
-        self.inventories.get(&i).into_iter().flatten().enumerate()
+        self.inventories
+            .get(&i)
+            .into_iter()
+            .flatten()
+            .enumerate()
             .filter(|(_, (_, n))| *n > 0)
             .map(|(slot, (id, n))| (slot as u8, self.items[*id as usize].clone(), *n))
             .collect()
@@ -724,7 +858,11 @@ impl RedstoneVM {
             return;
         }
         let i = self.idx(x, y, z);
-        if matches!(self.get(i).block, BlockType::Port(PortMode::Input | PortMode::Bidirectional)) && self.get(i).port_in != power.min(15) {
+        if matches!(
+            self.get(i).block,
+            BlockType::Port(PortMode::Input | PortMode::Bidirectional)
+        ) && self.get(i).port_in != power.min(15)
+        {
             self.get_mut(i).port_in = power.min(15);
             self.quiet = false;
             self.touch_around(i);
@@ -839,12 +977,23 @@ impl RedstoneVM {
 
     /// The smallest running timer (0: none).
     fn min_timer(&self) -> u32 {
-        self.components.iter().chain(&self.movers).map(|&i| u32::from(self.get(i).timer)).filter(|&t| t > 0).min().unwrap_or(0)
+        self.components
+            .iter()
+            .chain(&self.movers)
+            .map(|&i| u32::from(self.get(i).timer))
+            .filter(|&t| t > 0)
+            .min()
+            .unwrap_or(0)
     }
 
     /// `k` steps of timers only: each running timer `k` lower, the clock `k` on.
     fn count_down(&mut self, k: u32) {
-        let cells: Vec<u32> = self.components.iter().chain(&self.movers).copied().collect();
+        let cells: Vec<u32> = self
+            .components
+            .iter()
+            .chain(&self.movers)
+            .copied()
+            .collect();
         for i in cells {
             let c = self.get_mut(i);
             if c.timer > 0 {
@@ -860,7 +1009,11 @@ impl RedstoneVM {
     pub(crate) fn fingerprint(&self, inputs: &[(u32, u32, u32)]) -> u64 {
         let mut h = self.state() ^ u64::from(self.quiet) << 63;
         for &(x, y, z) in inputs {
-            let v = if self.in_bounds(x as i32, y as i32, z as i32) { self.get(self.idx(x, y, z)).port_in } else { 0 };
+            let v = if self.in_bounds(x as i32, y as i32, z as i32) {
+                self.get(self.idx(x, y, z)).port_in
+            } else {
+                0
+            };
             h = (h ^ u64::from(v)).wrapping_mul(0x0100_0000_01b3);
         }
         h
@@ -876,8 +1029,13 @@ impl RedstoneVM {
         for &i in &self.active {
             match self.get(i).block {
                 BlockType::Observer { .. } => return Err("an observer"),
-                BlockType::Piston { .. } | BlockType::PistonHead { .. } | BlockType::Slime | BlockType::Honey => return Err("pistons"),
-                BlockType::Container { .. } | BlockType::Hopper { .. } | BlockType::Dropper { .. } => return Err("items"),
+                BlockType::Piston { .. }
+                | BlockType::PistonHead { .. }
+                | BlockType::Slime
+                | BlockType::Honey => return Err("pistons"),
+                BlockType::Container { .. }
+                | BlockType::Hopper { .. }
+                | BlockType::Dropper { .. } => return Err("items"),
                 BlockType::Button { .. } => return Err("a button"),
                 BlockType::Alu | BlockType::Bus => return Err("it holds ALUs"),
                 _ => {}
@@ -904,10 +1062,14 @@ impl RedstoneVM {
             let c = self.get(i);
             let code = c.block.code();
             mix(code);
-            let untimed = u64::from(c.power) | u64::from(c.strong) << 8 | u64::from(c.weak) << 16 | u64::from(i) << 32;
+            let untimed = u64::from(c.power)
+                | u64::from(c.strong) << 8
+                | u64::from(c.weak) << 16
+                | u64::from(i) << 32;
             mix(untimed | u64::from(c.timer) << 24);
             mix(u64::from(c.watched));
-            u = (u ^ untimed ^ u64::from(c.watched) << 40 ^ code.rotate_left(17)).wrapping_mul(0x0100_0000_01b3);
+            u = (u ^ untimed ^ u64::from(c.watched) << 40 ^ code.rotate_left(17))
+                .wrapping_mul(0x0100_0000_01b3);
         }
         // A nested ALU still running (a clock in a chip, a chip out of
         // steps): the circuit isn't settled.
@@ -1011,7 +1173,11 @@ impl RedstoneVM {
         let Some(n) = self.at(i, d) else { return 0 };
         let c = self.get(n);
         if c.is_wire() {
-            return if wire && self.wire_points(n, d.opposite()) { c.power } else { 0 };
+            return if wire && self.wire_points(n, d.opposite()) {
+                c.power
+            } else {
+                0
+            };
         }
         if c.is_solid() {
             return if wire { c.weak } else { c.strong };
@@ -1021,7 +1187,11 @@ impl RedstoneVM {
 
     /// The strongest power around cell `i`.
     fn received(&self, i: u32, wire: bool) -> u8 {
-        Facing::ALL.into_iter().map(|d| self.input_from(i, d, wire)).max().unwrap_or(0)
+        Facing::ALL
+            .into_iter()
+            .map(|d| self.input_from(i, d, wire))
+            .max()
+            .unwrap_or(0)
     }
 
     /// 1. Solid blocks take the strong power going into them.
@@ -1086,7 +1256,8 @@ impl RedstoneVM {
                 .into_iter()
                 .filter_map(|d| {
                     let n = self.at(i, d)?;
-                    (self.get(n).is_wire() && self.wire_points(n, d.opposite())).then(|| self.get(n).power)
+                    (self.get(n).is_wire() && self.wire_points(n, d.opposite()))
+                        .then(|| self.get(n).power)
                 })
                 .max()
                 .unwrap_or(0);
@@ -1110,9 +1281,15 @@ impl RedstoneVM {
             let cell = *self.get(i);
             let level = match cell.block {
                 BlockType::RedstoneLamp => {
-                    if self.received(i, true) > 0 { 15 } else { 0 }
+                    if self.received(i, true) > 0 {
+                        15
+                    } else {
+                        0
+                    }
                 }
-                BlockType::Port(PortMode::Output | PortMode::Bidirectional) => self.received(i, true),
+                BlockType::Port(PortMode::Output | PortMode::Bidirectional) => {
+                    self.received(i, true)
+                }
                 _ => continue,
             };
             self.get_mut(i).power = level;
@@ -1159,7 +1336,9 @@ impl RedstoneVM {
                             }
                         }
                         BlockType::Alu => level = level.max(self.get(n).emits(d.opposite()).0),
-                        BlockType::RedstonePort { output: false } => level = level.max(self.received(n, true)),
+                        BlockType::RedstonePort { output: false } => {
+                            level = level.max(self.received(n, true))
+                        }
                         BlockType::RedstonePort { output: true } => outs.push(n),
                         _ => {}
                     }
@@ -1200,14 +1379,19 @@ impl RedstoneVM {
                             queue.push_back(n);
                         }
                         // The face of that ALU this cable touches.
-                        BlockType::Alu => b.alu_runs.entry(n).or_insert([None; 6])[d.opposite().index()] = Some(run),
+                        BlockType::Alu => {
+                            b.alu_runs.entry(n).or_insert([None; 6])[d.opposite().index()] =
+                                Some(run)
+                        }
                         _ => {}
                     }
                 }
             }
         }
         for (&i, alu) in &self.nested {
-            let Some(runs) = b.alu_runs.get(&i) else { continue };
+            let Some(runs) = b.alu_runs.get(&i) else {
+                continue;
+            };
             for &(f, ch) in &alu.reads {
                 if let Some(r) = runs[f as usize % 6] {
                     b.readers[r].entry(ch).or_default().push(i);
@@ -1225,13 +1409,31 @@ impl RedstoneVM {
         // What beside a cell changes only when an ALU or a port does.
         let calm = |vm: &RedstoneVM, i: u32| {
             Facing::ALL.into_iter().all(|f| {
-                matches!(vm.next(i, f).block, BlockType::Air | BlockType::Alu | BlockType::Bus | BlockType::Port(_))
+                matches!(
+                    vm.next(i, f).block,
+                    BlockType::Air | BlockType::Alu | BlockType::Bus | BlockType::Port(_)
+                )
             })
         };
-        b.always = self.nested.iter().filter(|&(&i, a)| a.reads_faces && !calm(self, i)).map(|(&i, _)| i).collect();
+        b.always = self
+            .nested
+            .iter()
+            .filter(|&(&i, a)| a.reads_faces && !calm(self, i))
+            .map(|(&i, _)| i)
+            .collect();
         b.always.sort_unstable();
-        b.fed = self.readers.iter().copied().filter(|&i| calm(self, i)).collect();
-        b.every_step = self.readers.iter().copied().filter(|i| !b.fed.contains(i)).collect();
+        b.fed = self
+            .readers
+            .iter()
+            .copied()
+            .filter(|&i| calm(self, i))
+            .collect();
+        b.every_step = self
+            .readers
+            .iter()
+            .copied()
+            .filter(|i| !b.fed.contains(i))
+            .collect();
         self.dirty.extend(self.nested.keys().copied());
         self.dirty_readers.extend(b.fed.iter().copied());
         self.buses = Some(b);
@@ -1258,7 +1460,13 @@ impl RedstoneVM {
             .get(&ch)
             .into_iter()
             .flatten()
-            .map(|(alu, f)| self.nested.get(alu).and_then(|a| a.drives.get(&(*f, ch))).copied().unwrap_or(0))
+            .map(|(alu, f)| {
+                self.nested
+                    .get(alu)
+                    .and_then(|a| a.drives.get(&(*f, ch)))
+                    .copied()
+                    .unwrap_or(0)
+            })
             .max()
             .unwrap_or(0);
         let levels = &mut b.levels[r];
@@ -1267,7 +1475,8 @@ impl RedstoneVM {
         }
         if levels[ch as usize] != level {
             levels[ch as usize] = level;
-            self.dirty.extend(b.readers[r].get(&ch).into_iter().flatten().copied());
+            self.dirty
+                .extend(b.readers[r].get(&ch).into_iter().flatten().copied());
         }
     }
 
@@ -1283,12 +1492,24 @@ impl RedstoneVM {
                 let next = match cell.block {
                     BlockType::RedstoneTorch { attach, .. } => {
                         let lit = self.input_from(i, attach, true) == 0;
-                        Cell { block: BlockType::RedstoneTorch { lit, attach }, power: if lit { 15 } else { 0 }, ..cell }
+                        Cell {
+                            block: BlockType::RedstoneTorch { lit, attach },
+                            power: if lit { 15 } else { 0 },
+                            ..cell
+                        }
                     }
-                    BlockType::Repeater { delay_ticks, facing } => self.next_repeater(i, cell, delay_ticks.max(1), facing),
+                    BlockType::Repeater {
+                        delay_ticks,
+                        facing,
+                    } => self.next_repeater(i, cell, delay_ticks.max(1), facing),
                     BlockType::Comparator { mode, facing } => {
                         let back = self.comparator_back(i, facing);
-                        let side = facing.sides().into_iter().map(|d| self.side_input(i, d)).max().unwrap_or(0);
+                        let side = facing
+                            .sides()
+                            .into_iter()
+                            .map(|d| self.side_input(i, d))
+                            .max()
+                            .unwrap_or(0);
                         let power = match mode {
                             ComparatorMode::Compare if back >= side => back,
                             ComparatorMode::Compare => 0,
@@ -1299,9 +1520,15 @@ impl RedstoneVM {
                     BlockType::Observer { facing } => {
                         let looks = self.next(i, facing).looks();
                         let changed = looks != cell.watched && self.tick > 1;
-                        Cell { power: if changed && cell.power == 0 { 15 } else { 0 }, watched: looks, ..cell }
+                        Cell {
+                            power: if changed && cell.power == 0 { 15 } else { 0 },
+                            watched: looks,
+                            ..cell
+                        }
                     }
-                    BlockType::Piston { facing, extended, .. } => {
+                    BlockType::Piston {
+                        facing, extended, ..
+                    } => {
                         if self.piston_powered(i, facing) != extended {
                             pistons.push(i);
                         }
@@ -1309,7 +1536,13 @@ impl RedstoneVM {
                     }
                     BlockType::Dropper { facing, triggered } => {
                         let powered = self.piston_powered(i, facing) || self.received(i, true) > 0;
-                        let mut next = Cell { block: BlockType::Dropper { facing, triggered: powered }, ..cell };
+                        let mut next = Cell {
+                            block: BlockType::Dropper {
+                                facing,
+                                triggered: powered,
+                            },
+                            ..cell
+                        };
                         if powered && !triggered {
                             next.timer = 2;
                         }
@@ -1317,7 +1550,10 @@ impl RedstoneVM {
                     }
                     _ => return None,
                 };
-                (next.block != cell.block || next.power != cell.power || next.timer != cell.timer || next.watched != cell.watched)
+                (next.block != cell.block
+                    || next.power != cell.power
+                    || next.timer != cell.timer
+                    || next.watched != cell.watched)
                     .then_some((i, next))
             })
             .collect();
@@ -1328,15 +1564,29 @@ impl RedstoneVM {
         self.ensure_buses();
         let mut run: Vec<u32> = std::mem::take(&mut self.dirty).into_iter().collect();
         run.extend(self.unstable.iter().copied());
-        run.extend(self.buses.as_ref().map(|b| b.always.as_slice()).unwrap_or_default().iter().copied());
+        run.extend(
+            self.buses
+                .as_ref()
+                .map(|b| b.always.as_slice())
+                .unwrap_or_default()
+                .iter()
+                .copied(),
+        );
         run.sort_unstable();
         run.dedup();
         for i in run {
             if self.get(i).block != BlockType::Alu {
                 continue;
             }
-            let Some(alu) = self.nested.get(&i) else { continue };
-            let runs = self.buses.as_ref().and_then(|b| b.alu_runs.get(&i)).copied().unwrap_or([None; 6]);
+            let Some(alu) = self.nested.get(&i) else {
+                continue;
+            };
+            let runs = self
+                .buses
+                .as_ref()
+                .and_then(|b| b.alu_runs.get(&i))
+                .copied()
+                .unwrap_or([None; 6]);
             // From a cable, its level; else the redstone into that face.
             let inputs = if alu.reads_faces {
                 Facing::ALL.map(|f| match self.next(i, f).block {
@@ -1351,7 +1601,9 @@ impl RedstoneVM {
             // The channels its board reads, into its own buffer.
             alu.read_now.clear();
             alu.read_now.extend(alu.reads.iter().map(|&(f, ch)| {
-                runs[f as usize % 6].and_then(|r| levels.and_then(|l| l[r].get(ch as usize)).copied()).unwrap_or(0)
+                runs[f as usize % 6]
+                    .and_then(|r| levels.and_then(|l| l[r].get(ch as usize)).copied())
+                    .unwrap_or(0)
             }));
             let outputs = alu.run(inputs, runs.map(|r| r.is_some()));
             let changed = std::mem::take(&mut alu.changed);
@@ -1369,11 +1621,21 @@ impl RedstoneVM {
             } else {
                 self.unstable.insert(i);
             }
-            let packed = outputs.iter().enumerate().fold(0u32, |p, (k, &l)| p | u32::from(l.min(15)) << (4 * k));
+            let packed = outputs
+                .iter()
+                .enumerate()
+                .fold(0u32, |p, (k, &l)| p | u32::from(l.min(15)) << (4 * k));
             let cell = *self.get(i);
             if cell.watched != packed {
                 let power = outputs.iter().copied().max().unwrap_or(0);
-                changes.push((i, Cell { watched: packed, power, ..cell }));
+                changes.push((
+                    i,
+                    Cell {
+                        watched: packed,
+                        power,
+                        ..cell
+                    },
+                ));
                 self.alu_changes += 1;
                 touched.push(i);
             }
@@ -1385,7 +1647,12 @@ impl RedstoneVM {
             self.touch_around(i);
         }
         for i in pistons {
-            if let BlockType::Piston { facing, sticky, extended } = self.get(i).block {
+            if let BlockType::Piston {
+                facing,
+                sticky,
+                extended,
+            } = self.get(i).block
+            {
                 if extended {
                     self.retract(i, facing, sticky);
                 } else {
@@ -1399,10 +1666,16 @@ impl RedstoneVM {
 
     /// Powered from any side but its front, or through the block above it.
     fn piston_powered(&self, i: u32, facing: Facing) -> bool {
-        let direct = Facing::ALL.into_iter().filter(|&d| d != facing).any(|d| self.input_from(i, d, true) > 0);
+        let direct = Facing::ALL
+            .into_iter()
+            .filter(|&d| d != facing)
+            .any(|d| self.input_from(i, d, true) > 0);
         direct
             || self.at(i, Facing::Up).is_some_and(|up| {
-                Facing::ALL.into_iter().filter(|&d| d != Facing::Down).any(|d| self.input_from(up, d, true) > 0)
+                Facing::ALL
+                    .into_iter()
+                    .filter(|&d| d != Facing::Down)
+                    .any(|d| self.input_from(up, d, true) > 0)
             })
     }
 
@@ -1475,23 +1748,39 @@ impl RedstoneVM {
     }
 
     fn extend(&mut self, i: u32, facing: Facing, sticky: bool) {
-        let Some(front) = self.at(i, facing) else { return };
-        let Some((moved, broken)) = self.plan_move(front, facing, i) else { return };
+        let Some(front) = self.at(i, facing) else {
+            return;
+        };
+        let Some((moved, broken)) = self.plan_move(front, facing, i) else {
+            return;
+        };
         self.do_move(&moved, &broken, facing);
         self.put(front, Cell::new(BlockType::PistonHead { facing, sticky }));
-        self.get_mut(i).block = BlockType::Piston { facing, sticky, extended: true };
+        self.get_mut(i).block = BlockType::Piston {
+            facing,
+            sticky,
+            extended: true,
+        };
     }
 
     fn retract(&mut self, i: u32, facing: Facing, sticky: bool) {
-        self.get_mut(i).block = BlockType::Piston { facing, sticky, extended: false };
-        let Some(head) = self.at(i, facing) else { return };
+        self.get_mut(i).block = BlockType::Piston {
+            facing,
+            sticky,
+            extended: false,
+        };
+        let Some(head) = self.at(i, facing) else {
+            return;
+        };
         if matches!(self.get(head).block, BlockType::PistonHead { .. }) {
             self.put(head, AIR);
         }
         if !sticky {
             return;
         }
-        let Some(pulled) = self.at(head, facing) else { return };
+        let Some(pulled) = self.at(head, facing) else {
+            return;
+        };
         if matches!(self.get(pulled).push(), Push::Move)
             && let Some((moved, broken)) = self.plan_move(pulled, facing.opposite(), i)
         {
@@ -1505,7 +1794,9 @@ impl RedstoneVM {
     /// is two).
     fn container(&self, i: u32) -> Vec<u32> {
         let mut cells = vec![i];
-        if let BlockType::Container { partner: Some(d), .. } = self.get(i).block
+        if let BlockType::Container {
+            partner: Some(d), ..
+        } = self.get(i).block
             && let Some(p) = self.at(i, d)
             && matches!(self.get(p).block, BlockType::Container { partner: Some(back), .. } if back == d.opposite())
         {
@@ -1526,14 +1817,20 @@ impl RedstoneVM {
                 }
             }
         }
-        if !any || slots == 0 { 0 } else { (1.0 + sum / slots as f32 * 14.0).floor() as u8 }
+        if !any || slots == 0 {
+            0
+        } else {
+            (1.0 + sum / slots as f32 * 14.0).floor() as u8
+        }
     }
 
     /// A comparator's back: a container's fill, through one solid block
     /// too; else the power coming in.
     fn comparator_back(&self, i: u32, facing: Facing) -> u8 {
         let power = self.input_from(i, facing, true);
-        let Some(b) = self.at(i, facing) else { return power };
+        let Some(b) = self.at(i, facing) else {
+            return power;
+        };
         let back = self.get(b);
         if back.holds_items() {
             return self.fill(b);
@@ -1551,10 +1848,20 @@ impl RedstoneVM {
     /// Takes one item out of the first non-empty slot of `from` (or a
     /// random one) that `to` takes; `to = None` throws it away.
     fn transfer(&mut self, from: u32, to: Option<u32>, random: bool) -> bool {
-        let Some(inv) = self.inventories.get(&from) else { return false };
-        let mut full: Vec<usize> = inv.iter().enumerate().filter(|(_, s)| s.1 > 0).map(|(k, _)| k).collect();
+        let Some(inv) = self.inventories.get(&from) else {
+            return false;
+        };
+        let mut full: Vec<usize> = inv
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.1 > 0)
+            .map(|(k, _)| k)
+            .collect();
         if random && !full.is_empty() {
-            self.rng = self.rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.rng = self
+                .rng
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let pick = (self.rng >> 33) as usize % full.len();
             full = vec![full[pick]];
         }
@@ -1579,9 +1886,15 @@ impl RedstoneVM {
         let cells = self.container(to);
         for pass in 0..2 {
             for &c in &cells {
-                let Some(inv) = self.inventories.get_mut(&c) else { continue };
+                let Some(inv) = self.inventories.get_mut(&c) else {
+                    continue;
+                };
                 let found = inv.iter_mut().find(|s: &&mut Slot| {
-                    if pass == 0 { s.1 > 0 && s.0 == item && s.1 < max } else { s.1 == 0 }
+                    if pass == 0 {
+                        s.1 > 0 && s.0 == item && s.1 < max
+                    } else {
+                        s.1 == 0
+                    }
                 });
                 if let Some(s) = found {
                     *s = (item, s.1 + 1);
@@ -1611,7 +1924,10 @@ impl RedstoneVM {
                     }
                     let out = self.at(i, facing).filter(|&t| self.get(t).holds_items());
                     let mut moved = out.is_some_and(|t| self.transfer(i, Some(t), false));
-                    if let Some(up) = self.at(i, Facing::Up).filter(|&u| self.get(u).holds_items()) {
+                    if let Some(up) = self
+                        .at(i, Facing::Up)
+                        .filter(|&u| self.get(u).holds_items())
+                    {
                         moved |= self.transfer(up, Some(i), false);
                     }
                     if moved {
@@ -1636,7 +1952,10 @@ impl RedstoneVM {
     fn next_repeater(&self, i: u32, mut cell: Cell, delay: u8, facing: Facing) -> Cell {
         let locked = facing.sides().into_iter().any(|d| {
             let c = self.next(i, d);
-            matches!(c.block, BlockType::Repeater { .. } | BlockType::Comparator { .. }) && c.emits(d.opposite()).0 > 0
+            matches!(
+                c.block,
+                BlockType::Repeater { .. } | BlockType::Comparator { .. }
+            ) && c.emits(d.opposite()).0 > 0
         });
         if locked {
             cell.timer = 0;
@@ -1711,10 +2030,25 @@ impl NestedChip {
     /// `key`: what its circuit is known by (its chip id): a circuit is
     /// analysed once, however many chips run it.
     pub fn new(slot: u8, ports: Vec<NestedPort>, budget: u32, vm: RedstoneVM, key: &str) -> Self {
-        let ins = ports.iter().filter(|p| p.mode.inputs()).map(|p| (p.x, p.y, p.z)).collect();
-        let outs = ports.iter().filter(|p| p.mode.outputs()).map(|p| (p.x, p.y, p.z)).collect();
+        let ins = ports
+            .iter()
+            .filter(|p| p.mode.inputs())
+            .map(|p| (p.x, p.y, p.z))
+            .collect();
+        let outs = ports
+            .iter()
+            .filter(|p| p.mode.outputs())
+            .map(|p| (p.x, p.y, p.z))
+            .collect();
         let sim = crate::compile::ChipSim::new(vm, ins, outs, Some(key));
-        NestedChip { slot, ports, budget, sim, left: budget, settled_on: None }
+        NestedChip {
+            slot,
+            ports,
+            budget,
+            sim,
+            left: budget,
+            settled_on: None,
+        }
     }
 }
 
@@ -1814,7 +2148,10 @@ impl NestedAlu {
         for (k, &(f, ch)) in reads.iter().enumerate() {
             at.insert(NestedPin::Bus(f, ch), 6 + k);
         }
-        let mut board = Board { size: 6 + reads.len(), ..Default::default() };
+        let mut board = Board {
+            size: 6 + reads.len(),
+            ..Default::default()
+        };
         for c in &chips {
             let outs = c
                 .ports
@@ -1828,10 +2165,17 @@ impl NestedAlu {
                 .collect();
             board.chip_outs.push(outs);
         }
-        let from: HashMap<&NestedPin, usize> = wires.iter().filter_map(|(f, t)| Some((t, *at.get(f)?))).collect();
+        let from: HashMap<&NestedPin, usize> = wires
+            .iter()
+            .filter_map(|(f, t)| Some((t, *at.get(f)?)))
+            .collect();
         for c in &chips {
             board.chip_ins.push(
-                c.ports.iter().filter(|p| p.mode.inputs()).map(|p| from.get(&NestedPin::Chip(c.slot, p.label.clone())).copied()).collect(),
+                c.ports
+                    .iter()
+                    .filter(|p| p.mode.inputs())
+                    .map(|p| from.get(&NestedPin::Chip(c.slot, p.label.clone())).copied())
+                    .collect(),
             );
         }
         board.faces_out = std::array::from_fn(|f| from.get(&NestedPin::Out(f as u8)).copied());
@@ -1969,8 +2313,14 @@ impl NestedAlu {
 mod tests {
     use super::*;
 
-    const LEVER_ON: BlockType = BlockType::Lever { on: true, attach: Facing::Down };
-    const TORCH: BlockType = BlockType::RedstoneTorch { lit: true, attach: Facing::Down };
+    const LEVER_ON: BlockType = BlockType::Lever {
+        on: true,
+        attach: Facing::Down,
+    };
+    const TORCH: BlockType = BlockType::RedstoneTorch {
+        lit: true,
+        attach: Facing::Down,
+    };
 
     fn line(vm: &mut RedstoneVM, z: u32, from: u32, to: u32) {
         for x in from..to {
@@ -1980,7 +2330,10 @@ mod tests {
 
     /// A repeater on row z = 0 sending east (it faces its input, west).
     fn repeater(delay: u8) -> BlockType {
-        BlockType::Repeater { delay_ticks: delay, facing: Facing::West }
+        BlockType::Repeater {
+            delay_ticks: delay,
+            facing: Facing::West,
+        }
     }
 
     #[test]
@@ -2078,10 +2431,21 @@ mod tests {
         assert_eq!(vm.cell(1, 1, 0).power, 15);
 
         // A lever on the block's side (a lever beside it on the floor wouldn't).
-        vm.set_block(0, 0, 0, BlockType::Lever { on: true, attach: Facing::East });
+        vm.set_block(
+            0,
+            0,
+            0,
+            BlockType::Lever {
+                on: true,
+                attach: Facing::East,
+            },
+        );
         vm.step();
         assert_eq!(vm.cell(1, 1, 0).power, 0);
-        assert!(matches!(vm.cell(1, 1, 0).block, BlockType::RedstoneTorch { lit: false, .. }));
+        assert!(matches!(
+            vm.cell(1, 1, 0).block,
+            BlockType::RedstoneTorch { lit: false, .. }
+        ));
     }
 
     #[test]
@@ -2092,16 +2456,36 @@ mod tests {
         vm.set_block(2, 2, 0, BlockType::RedstoneWire);
         vm.step();
         assert_eq!(vm.cell(1, 2, 0).strong, 15);
-        assert_eq!(vm.cell(2, 2, 0).power, 15, "a strongly powered block feeds wire");
+        assert_eq!(
+            vm.cell(2, 2, 0).power,
+            15,
+            "a strongly powered block feeds wire"
+        );
     }
 
     #[test]
     fn wall_torch_hangs_on_its_wall() {
         let mut vm = RedstoneVM::new(16);
-        vm.set_block(0, 0, 0, BlockType::Lever { on: true, attach: Facing::East });
+        vm.set_block(
+            0,
+            0,
+            0,
+            BlockType::Lever {
+                on: true,
+                attach: Facing::East,
+            },
+        );
         vm.set_block(1, 0, 0, BlockType::Solid);
         // facing=east: the wall is to its west.
-        vm.set_block(2, 0, 0, BlockType::RedstoneTorch { lit: true, attach: Facing::West });
+        vm.set_block(
+            2,
+            0,
+            0,
+            BlockType::RedstoneTorch {
+                lit: true,
+                attach: Facing::West,
+            },
+        );
         vm.step();
         assert_eq!(vm.cell(2, 0, 0).power, 0);
     }
@@ -2111,7 +2495,15 @@ mod tests {
         // facing=east: reads from the east, sends west.
         let mut vm = RedstoneVM::new(16);
         vm.set_block(3, 0, 0, LEVER_ON);
-        vm.set_block(2, 0, 0, BlockType::Repeater { delay_ticks: 1, facing: Facing::East });
+        vm.set_block(
+            2,
+            0,
+            0,
+            BlockType::Repeater {
+                delay_ticks: 1,
+                facing: Facing::East,
+            },
+        );
         vm.set_block(1, 0, 0, BlockType::RedstoneWire);
         vm.set_block(4, 0, 0, BlockType::RedstoneWire);
         vm.step();
@@ -2119,7 +2511,15 @@ mod tests {
         assert_eq!(vm.cell(1, 0, 0).power, 15);
 
         // Turned the other way it sends nothing west.
-        vm.set_block(2, 0, 0, BlockType::Repeater { delay_ticks: 1, facing: Facing::West });
+        vm.set_block(
+            2,
+            0,
+            0,
+            BlockType::Repeater {
+                delay_ticks: 1,
+                facing: Facing::West,
+            },
+        );
         vm.step();
         vm.step();
         assert_eq!(vm.cell(1, 0, 0).power, 0);
@@ -2149,7 +2549,15 @@ mod tests {
         vm.set_block(0, 0, 0, LEVER_ON);
         vm.set_block(1, 0, 0, repeater(4));
         vm.step();
-        vm.set_block(0, 0, 0, BlockType::Lever { on: false, attach: Facing::Down });
+        vm.set_block(
+            0,
+            0,
+            0,
+            BlockType::Lever {
+                on: false,
+                attach: Facing::Down,
+            },
+        );
         let on: Vec<bool> = (0..10)
             .map(|_| {
                 vm.step();
@@ -2165,7 +2573,15 @@ mod tests {
         // The locking repeater at (1, 0, 1) sends south into the side of
         // the one at (1, 0, 2), which sends east.
         vm.set_block(1, 0, 0, LEVER_ON);
-        vm.set_block(1, 0, 1, BlockType::Repeater { delay_ticks: 1, facing: Facing::North });
+        vm.set_block(
+            1,
+            0,
+            1,
+            BlockType::Repeater {
+                delay_ticks: 1,
+                facing: Facing::North,
+            },
+        );
         vm.set_block(1, 0, 2, repeater(1));
         vm.step();
         vm.step();
@@ -2173,7 +2589,15 @@ mod tests {
         vm.step();
         vm.step();
         assert_eq!(vm.cell(1, 0, 2).power, 0, "locked off");
-        vm.set_block(1, 0, 0, BlockType::Lever { on: false, attach: Facing::Down });
+        vm.set_block(
+            1,
+            0,
+            0,
+            BlockType::Lever {
+                on: false,
+                attach: Facing::Down,
+            },
+        );
         vm.step();
         vm.step();
         vm.step();
@@ -2185,7 +2609,15 @@ mod tests {
         let run = |mode| {
             let mut vm = RedstoneVM::new(16);
             vm.set_block(0, 0, 1, BlockType::RedstoneBlock);
-            vm.set_block(1, 0, 1, BlockType::Comparator { mode, facing: Facing::West });
+            vm.set_block(
+                1,
+                0,
+                1,
+                BlockType::Comparator {
+                    mode,
+                    facing: Facing::West,
+                },
+            );
             vm.set_block(1, 0, 0, BlockType::RedstoneWire);
             vm.set_block(1, 0, 0, BlockType::RedstoneWire);
             vm.set_block(0, 0, 0, BlockType::Port(PortMode::Input));
@@ -2201,7 +2633,14 @@ mod tests {
     fn observer_pulses_once_per_change() {
         let mut vm = RedstoneVM::new(16);
         // Watches east, outputs west.
-        vm.set_block(1, 0, 0, BlockType::Observer { facing: Facing::East });
+        vm.set_block(
+            1,
+            0,
+            0,
+            BlockType::Observer {
+                facing: Facing::East,
+            },
+        );
         vm.set_block(0, 0, 0, BlockType::RedstoneWire);
         vm.step();
         vm.step();
@@ -2216,7 +2655,11 @@ mod tests {
     }
 
     fn piston(facing: Facing, sticky: bool) -> BlockType {
-        BlockType::Piston { facing, sticky, extended: false }
+        BlockType::Piston {
+            facing,
+            sticky,
+            extended: false,
+        }
     }
 
     #[test]
@@ -2228,15 +2671,43 @@ mod tests {
         vm.set_block(4, 0, 0, BlockType::RedstoneWire);
         vm.set_block(0, 0, 0, LEVER_ON);
         vm.step();
-        assert!(matches!(vm.cell(1, 0, 0).block, BlockType::Piston { extended: true, .. }));
-        assert!(matches!(vm.cell(2, 0, 0).block, BlockType::PistonHead { .. }));
+        assert!(matches!(
+            vm.cell(1, 0, 0).block,
+            BlockType::Piston { extended: true, .. }
+        ));
+        assert!(matches!(
+            vm.cell(2, 0, 0).block,
+            BlockType::PistonHead { .. }
+        ));
         assert_eq!(vm.cell(3, 0, 0).block, BlockType::Solid);
-        assert_eq!(vm.cell(4, 0, 0).block, BlockType::RedstoneBlock, "the wire broke");
+        assert_eq!(
+            vm.cell(4, 0, 0).block,
+            BlockType::RedstoneBlock,
+            "the wire broke"
+        );
 
-        vm.set_block(0, 0, 0, BlockType::Lever { on: false, attach: Facing::Down });
+        vm.set_block(
+            0,
+            0,
+            0,
+            BlockType::Lever {
+                on: false,
+                attach: Facing::Down,
+            },
+        );
         vm.step();
-        assert!(matches!(vm.cell(1, 0, 0).block, BlockType::Piston { extended: false, .. }));
-        assert_eq!(vm.cell(2, 0, 0).block, BlockType::Air, "a plain piston leaves it");
+        assert!(matches!(
+            vm.cell(1, 0, 0).block,
+            BlockType::Piston {
+                extended: false,
+                ..
+            }
+        ));
+        assert_eq!(
+            vm.cell(2, 0, 0).block,
+            BlockType::Air,
+            "a plain piston leaves it"
+        );
     }
 
     #[test]
@@ -2247,7 +2718,13 @@ mod tests {
         vm.set_block(3, 0, 0, BlockType::Immovable);
         vm.set_block(0, 0, 0, LEVER_ON);
         vm.step();
-        assert!(matches!(vm.cell(1, 0, 0).block, BlockType::Piston { extended: false, .. }));
+        assert!(matches!(
+            vm.cell(1, 0, 0).block,
+            BlockType::Piston {
+                extended: false,
+                ..
+            }
+        ));
 
         let mut vm = RedstoneVM::new(32);
         vm.set_block(1, 0, 0, piston(Facing::East, false));
@@ -2256,7 +2733,16 @@ mod tests {
         }
         vm.set_block(0, 0, 0, LEVER_ON);
         vm.step();
-        assert!(matches!(vm.cell(1, 0, 0).block, BlockType::Piston { extended: false, .. }), "13 is too many");
+        assert!(
+            matches!(
+                vm.cell(1, 0, 0).block,
+                BlockType::Piston {
+                    extended: false,
+                    ..
+                }
+            ),
+            "13 is too many"
+        );
     }
 
     #[test]
@@ -2268,8 +2754,20 @@ mod tests {
         vm.set_block(0, 0, 1, LEVER_ON);
         vm.step();
         assert_eq!(vm.cell(3, 0, 1).block, BlockType::Slime);
-        assert_eq!(vm.cell(3, 0, 2).block, BlockType::Solid, "dragged by the slime");
-        vm.set_block(0, 0, 1, BlockType::Lever { on: false, attach: Facing::Down });
+        assert_eq!(
+            vm.cell(3, 0, 2).block,
+            BlockType::Solid,
+            "dragged by the slime"
+        );
+        vm.set_block(
+            0,
+            0,
+            1,
+            BlockType::Lever {
+                on: false,
+                attach: Facing::Down,
+            },
+        );
         vm.step();
         assert_eq!(vm.cell(2, 0, 1).block, BlockType::Slime, "pulled back");
         assert_eq!(vm.cell(2, 0, 2).block, BlockType::Solid);
@@ -2282,25 +2780,59 @@ mod tests {
         // Powering the space above it.
         vm.set_block(0, 1, 0, LEVER_ON);
         vm.step();
-        assert!(matches!(vm.cell(1, 0, 0).block, BlockType::Piston { extended: true, .. }));
+        assert!(matches!(
+            vm.cell(1, 0, 0).block,
+            BlockType::Piston { extended: true, .. }
+        ));
     }
 
     #[test]
     fn hopper_moves_items_and_comparator_reads_them() {
         let mut vm = RedstoneVM::new(16);
-        let chest = BlockType::Container { slots: 27, solid: false, partner: None };
+        let chest = BlockType::Container {
+            slots: 27,
+            solid: false,
+            partner: None,
+        };
         vm.set_block(1, 1, 0, chest);
         vm.set_items(1, 1, 0, &[(0, "minecraft:stone".into(), 64)]);
-        vm.set_block(1, 0, 0, BlockType::Hopper { facing: Facing::East });
-        vm.set_block(2, 0, 0, BlockType::Hopper { facing: Facing::Down });
+        vm.set_block(
+            1,
+            0,
+            0,
+            BlockType::Hopper {
+                facing: Facing::East,
+            },
+        );
+        vm.set_block(
+            2,
+            0,
+            0,
+            BlockType::Hopper {
+                facing: Facing::Down,
+            },
+        );
         // A comparator reading the second hopper, facing it (west).
-        vm.set_block(3, 0, 0, BlockType::Comparator { mode: ComparatorMode::Compare, facing: Facing::West });
+        vm.set_block(
+            3,
+            0,
+            0,
+            BlockType::Comparator {
+                mode: ComparatorMode::Compare,
+                facing: Facing::West,
+            },
+        );
         // Pulled in step 1, passed on 4 steps later.
         for _ in 0..5 {
             vm.step();
         }
         assert_eq!(vm.items_at(1, 1, 0), [(0, "minecraft:stone".into(), 62)]);
-        assert_eq!(vm.items_at(2, 0, 0), [(0, "minecraft:stone".into(), 1)], "{:?}", vm.items_at(1, 0, 0));
+        assert_eq!(
+            vm.items_at(2, 0, 0),
+            [(0, "minecraft:stone".into(), 1)],
+            "{:?}",
+            vm.items_at(1, 0, 0)
+        );
         vm.step();
         assert_eq!(vm.cell(3, 0, 0).power, 1);
 
@@ -2316,14 +2848,35 @@ mod tests {
     #[test]
     fn dropper_drops_on_a_rising_edge() {
         let mut vm = RedstoneVM::new(16);
-        vm.set_block(1, 0, 0, BlockType::Dropper { facing: Facing::East, triggered: false });
+        vm.set_block(
+            1,
+            0,
+            0,
+            BlockType::Dropper {
+                facing: Facing::East,
+                triggered: false,
+            },
+        );
         vm.set_items(1, 0, 0, &[(0, "minecraft:stone".into(), 2)]);
-        vm.set_block(2, 0, 0, BlockType::Container { slots: 27, solid: false, partner: None });
+        vm.set_block(
+            2,
+            0,
+            0,
+            BlockType::Container {
+                slots: 27,
+                solid: false,
+                partner: None,
+            },
+        );
         vm.set_block(0, 0, 0, LEVER_ON);
         for _ in 0..6 {
             vm.step();
         }
-        assert_eq!(vm.items_at(2, 0, 0), [(0, "minecraft:stone".into(), 1)], "once while held on");
+        assert_eq!(
+            vm.items_at(2, 0, 0),
+            [(0, "minecraft:stone".into(), 1)],
+            "once while held on"
+        );
     }
 
     #[test]
@@ -2356,7 +2909,15 @@ mod tests {
         vm.set_block(0, 0, 0, BlockType::Port(PortMode::Input));
         vm.set_block(1, 0, 0, BlockType::RedstoneWire);
         vm.set_block(2, 0, 0, BlockType::Solid);
-        vm.set_block(3, 0, 0, BlockType::RedstoneTorch { lit: true, attach: Facing::West });
+        vm.set_block(
+            3,
+            0,
+            0,
+            BlockType::RedstoneTorch {
+                lit: true,
+                attach: Facing::West,
+            },
+        );
         vm.set_block(4, 0, 0, BlockType::Port(PortMode::Output));
         vm.settle(8);
         assert_eq!(vm.get_port_output(4, 0, 0), 15);
@@ -2378,11 +2939,34 @@ mod tests {
         vm.set_block(0, 0, 0, BlockType::Port(PortMode::Input));
         vm.set_block(1, 0, 0, BlockType::RedstoneWire);
         vm.set_block(2, 0, 0, BlockType::Solid);
-        vm.set_block(3, 0, 0, BlockType::RedstoneTorch { lit: true, attach: Facing::West });
+        vm.set_block(
+            3,
+            0,
+            0,
+            BlockType::RedstoneTorch {
+                lit: true,
+                attach: Facing::West,
+            },
+        );
         vm.set_block(4, 0, 0, BlockType::Port(PortMode::Output));
         vm.settle(8);
-        let port = |label: &str, x, mode| NestedPort { label: label.into(), x, y: 0, z: 0, mode };
-        NestedChip::new(0, vec![port("IN", 0, PortMode::Input), port("OUT", 4, PortMode::Output)], budget, vm, "test:not")
+        let port = |label: &str, x, mode| NestedPort {
+            label: label.into(),
+            x,
+            y: 0,
+            z: 0,
+            mode,
+        };
+        NestedChip::new(
+            0,
+            vec![
+                port("IN", 0, PortMode::Input),
+                port("OUT", 4, PortMode::Output),
+            ],
+            budget,
+            vm,
+            "test:not",
+        )
     }
 
     /// An outer circuit: input port, the ALU (its west face in, its east face out), output port.
@@ -2392,8 +2976,14 @@ mod tests {
         vm.set_block(1, 0, 0, BlockType::Alu);
         vm.set_block(2, 0, 0, BlockType::Port(PortMode::Output));
         let wires = vec![
-            (NestedPin::In(Facing::West.index() as u8), NestedPin::Chip(0, "IN".into())),
-            (NestedPin::Chip(0, "OUT".into()), NestedPin::Out(Facing::East.index() as u8)),
+            (
+                NestedPin::In(Facing::West.index() as u8),
+                NestedPin::Chip(0, "IN".into()),
+            ),
+            (
+                NestedPin::Chip(0, "OUT".into()),
+                NestedPin::Out(Facing::East.index() as u8),
+            ),
         ];
         vm.set_nested(1, 0, 0, NestedAlu::new(vec![not_chip(budget)], wires));
         vm.new_tick();
@@ -2416,13 +3006,23 @@ mod tests {
         vm.set_block(8, 0, 0, BlockType::RedstoneWire);
         vm.set_block(9, 0, 0, BlockType::Port(PortMode::Output));
         let wires = vec![
-            (NestedPin::In(Facing::West.index() as u8), NestedPin::Chip(0, "IN".into())),
-            (NestedPin::Chip(0, "OUT".into()), NestedPin::Out(Facing::East.index() as u8)),
+            (
+                NestedPin::In(Facing::West.index() as u8),
+                NestedPin::Chip(0, "IN".into()),
+            ),
+            (
+                NestedPin::Chip(0, "OUT".into()),
+                NestedPin::Out(Facing::East.index() as u8),
+            ),
         ];
         vm.set_nested(4, 0, 0, NestedAlu::new(vec![not_chip(8)], wires));
         vm.new_tick();
         vm.settle(128);
-        assert_eq!(vm.get_port_output(9, 0, 0), 15, "NOT of nothing, out through the cable");
+        assert_eq!(
+            vm.get_port_output(9, 0, 0),
+            15,
+            "NOT of nothing, out through the cable"
+        );
         vm.set_port_input(0, 0, 0, 15);
         for _ in 0..3 {
             vm.new_tick();
@@ -2434,7 +3034,11 @@ mod tests {
             vm.new_tick();
             vm.settle(128);
         }
-        assert_eq!(vm.get_port_output(9, 0, 0), 15, "and back: a cable holds no level of its own");
+        assert_eq!(
+            vm.get_port_output(9, 0, 0),
+            15,
+            "and back: a cable holds no level of its own"
+        );
     }
 
     #[test]
@@ -2450,7 +3054,12 @@ mod tests {
         vm.set_block(5, 0, 0, BlockType::Alu);
         vm.set_block(6, 0, 0, BlockType::Port(PortMode::Output));
         let (w, e) = (Facing::West.index() as u8, Facing::East.index() as u8);
-        vm.set_nested(2, 0, 0, NestedAlu::new(Vec::new(), vec![(NestedPin::In(w), NestedPin::Bus(e, 3))]));
+        vm.set_nested(
+            2,
+            0,
+            0,
+            NestedAlu::new(Vec::new(), vec![(NestedPin::In(w), NestedPin::Bus(e, 3))]),
+        );
         let wires = vec![
             (NestedPin::Bus(w, 3), NestedPin::Chip(0, "IN".into())),
             (NestedPin::Chip(0, "OUT".into()), NestedPin::Out(e)),
@@ -2494,11 +3103,19 @@ mod tests {
         vm.set_port_input(0, 0, 0, if before == 15 { 15 } else { 0 });
         vm.new_tick();
         vm.settle(128);
-        assert_eq!(vm.get_port_output(2, 0, 0), before, "128 steps around it, still one of its own: not yet");
+        assert_eq!(
+            vm.get_port_output(2, 0, 0),
+            before,
+            "128 steps around it, still one of its own: not yet"
+        );
         vm.new_tick();
         vm.settle(128);
         vm.new_tick();
         vm.settle(128);
-        assert_ne!(vm.get_port_output(2, 0, 0), before, "its own steps, a tick at a time");
+        assert_ne!(
+            vm.get_port_output(2, 0, 0),
+            before,
+            "its own steps, a tick at a time"
+        );
     }
 }

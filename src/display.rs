@@ -76,7 +76,15 @@ pub struct Display {
 
 impl Display {
     pub fn new(facing: Facing) -> Self {
-        Display { facing, size: DEFAULT_SIZE, channel: 1, toggle: false, gpu: Gpu::default(), shown_at: 0, shown_version: 0 }
+        Display {
+            facing,
+            size: DEFAULT_SIZE,
+            channel: 1,
+            toggle: false,
+            gpu: Gpu::default(),
+            shown_at: 0,
+            shown_version: 0,
+        }
     }
 
     /// The bus channel (0-based) `offset` past its first.
@@ -104,14 +112,26 @@ pub struct Frame {
 }
 
 pub fn get(dim: &str, pos: BlockPos) -> Option<Display> {
-    DISPLAYS.lock().unwrap().get(&(dim.to_string(), pos.x, pos.y, pos.z)).cloned()
+    DISPLAYS
+        .lock()
+        .unwrap()
+        .get(&(dim.to_string(), pos.x, pos.y, pos.z))
+        .cloned()
 }
 
 /// Sets a Display's size and first channel; a size that doesn't fit is
 /// refused (`Err`), the channel set all the same.
-pub fn configure(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos, size: u16, channel: u16) -> Result<(), ()> {
+pub fn configure(
+    srv: &dyn yog_api::Server,
+    dim: &str,
+    pos: BlockPos,
+    size: u16,
+    channel: u16,
+) -> Result<(), ()> {
     let mut displays = DISPLAYS.lock().unwrap();
-    let Some(d) = displays.get_mut(&(dim.to_string(), pos.x, pos.y, pos.z)) else { return Ok(()) };
+    let Some(d) = displays.get_mut(&(dim.to_string(), pos.x, pos.y, pos.z)) else {
+        return Ok(());
+    };
     d.channel = channel.clamp(1, cables::BUS_CHANNELS - CHANNELS + 1);
     let size = size.clamp(1, MAX_SIZE);
     if size == d.size {
@@ -157,13 +177,23 @@ fn area(pos: BlockPos, facing: Facing, size: u16) -> (BlockPos, BlockPos) {
     let (dx, dz) = facing.right();
     let far = (pos.x + dx * n, pos.y + n, pos.z + dz * n);
     (
-        BlockPos { x: pos.x.min(far.0), y: pos.y, z: pos.z.min(far.2) },
-        BlockPos { x: pos.x.max(far.0), y: far.1, z: pos.z.max(far.2) },
+        BlockPos {
+            x: pos.x.min(far.0),
+            y: pos.y,
+            z: pos.z.min(far.2),
+        },
+        BlockPos {
+            x: pos.x.max(far.0),
+            y: far.1,
+            z: pos.z.max(far.2),
+        },
     )
 }
 
 fn inside(b: (BlockPos, BlockPos), p: BlockPos) -> bool {
-    (b.0.x..=b.1.x).contains(&p.x) && (b.0.y..=b.1.y).contains(&p.y) && (b.0.z..=b.1.z).contains(&p.z)
+    (b.0.x..=b.1.x).contains(&p.x)
+        && (b.0.y..=b.1.y).contains(&p.y)
+        && (b.0.z..=b.1.z).contains(&p.z)
 }
 
 /// The world's top, a Display may not reach past.
@@ -171,7 +201,14 @@ const WORLD_TOP: i32 = 319;
 
 /// Whether a picture `size` blocks a side fits at `pos`: nothing in its box
 /// but the Display itself and, resizing, the blocks it stands in now (`own`).
-fn fits(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos, facing: Facing, size: u16, own: Option<(BlockPos, BlockPos)>) -> bool {
+fn fits(
+    srv: &dyn yog_api::Server,
+    dim: &str,
+    pos: BlockPos,
+    facing: Facing,
+    size: u16,
+    own: Option<(BlockPos, BlockPos)>,
+) -> bool {
     let b = area(pos, facing, size);
     b.1.y <= WORLD_TOP
         && srv
@@ -183,16 +220,33 @@ fn fits(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos, facing: Facing, siz
 /// Stands a Display's parts in its box and the Display at its corner.
 fn stand(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos, d: &Display) {
     let b = area(pos, d.facing, d.size);
-    srv.fill_region(dim, b.0, b.1, &format!("{}[facing={}]", Blocks::DISPLAY_PART, d.facing.word()));
-    srv.set_block_state(dim, pos, &format!("{}[facing={}]", Blocks::DISPLAY, d.facing.word()));
+    srv.fill_region(
+        dim,
+        b.0,
+        b.1,
+        &format!("{}[facing={}]", Blocks::DISPLAY_PART, d.facing.word()),
+    );
+    srv.set_block_state(
+        dim,
+        pos,
+        &format!("{}[facing={}]", Blocks::DISPLAY, d.facing.word()),
+    );
 }
 
 /// The Display whose box holds `pos`.
 pub fn owner(dim: &str, pos: BlockPos) -> Option<BlockPos> {
-    DISPLAYS.lock().unwrap().iter().find_map(|((d, x, y, z), disp)| {
-        let at = BlockPos { x: *x, y: *y, z: *z };
-        (d == dim && inside(area(at, disp.facing, disp.size), pos)).then_some(at)
-    })
+    DISPLAYS
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|((d, x, y, z), disp)| {
+            let at = BlockPos {
+                x: *x,
+                y: *y,
+                z: *z,
+            };
+            (d == dim && inside(area(at, disp.facing, disp.size), pos)).then_some(at)
+        })
 }
 
 /// The bus's writes into the GPUs, after the ALUs stepped; then what they
@@ -206,7 +260,11 @@ pub fn tick(srv: &dyn yog_api::Server) {
     {
         let mut displays = DISPLAYS.lock().unwrap();
         for ((dim, x, y, z), d) in displays.iter_mut() {
-            let pos = BlockPos { x: *x, y: *y, z: *z };
+            let pos = BlockPos {
+                x: *x,
+                y: *y,
+                z: *z,
+            };
             if n == 1 {
                 // Joined to cables written into the world while the server was down.
                 cables::refresh_around(srv, dim, pos);
@@ -238,12 +296,21 @@ fn send(srv: &dyn yog_api::Server, n: u64) {
     }
     let mut sent = SENT.lock().unwrap();
     for player in srv.online_players() {
-        let Some(info) = srv.player_info(&player).and_then(|p| srv.entity_info(&p.uuid)) else { continue };
+        let Some(info) = srv
+            .player_info(&player)
+            .and_then(|p| srv.entity_info(&p.uuid))
+        else {
+            continue;
+        };
         for (key, d) in displays.iter() {
             let (dim, x, y, z) = key;
             // From the picture's middle (roughly: it spreads up and to one side).
             let half = d.size as f64 / 2.0;
-            let (dx, dy, dz) = (info.pos.0 - *x as f64, info.pos.1 - (*y as f64 + half), info.pos.2 - *z as f64);
+            let (dx, dy, dz) = (
+                info.pos.0 - *x as f64,
+                info.pos.1 - (*y as f64 + half),
+                info.pos.2 - *z as f64,
+            );
             let reach = VIEW_DISTANCE + d.size as f64;
             if *dim != info.dimension || dx * dx + dy * dy + dz * dz > reach * reach {
                 continue;
@@ -271,7 +338,11 @@ fn send(srv: &dyn yog_api::Server, n: u64) {
 /// The way a Display's front faces: its block's `facing`.
 fn facing_of(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) -> Facing {
     let state = srv.get_block_state(dim, pos).unwrap_or_default();
-    match state.split("facing=").nth(1).and_then(|r| r.split([',', ']']).next()) {
+    match state
+        .split("facing=")
+        .nth(1)
+        .and_then(|r| r.split([',', ']']).next())
+    {
         Some("north") => Facing::N,
         Some("east") => Facing::E,
         Some("west") => Facing::W,
@@ -294,7 +365,12 @@ pub fn load(srv: &dyn yog_api::Server) {
 }
 
 pub fn save(srv: &dyn yog_api::Server) {
-    let saved: Vec<(Key, Display)> = DISPLAYS.lock().unwrap().iter().map(|(k, d)| (k.clone(), d.clone())).collect();
+    let saved: Vec<(Key, Display)> = DISPLAYS
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(k, d)| (k.clone(), d.clone()))
+        .collect();
     if let Ok(json) = serde_json::to_string(&saved) {
         let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
         store.set(STORE_KEY, &*json);
@@ -316,14 +392,23 @@ pub fn register(registry: &mut Registry) {
         let d = Display::new(facing_of(srv, &e.dimension, e.pos));
         if !fits(srv, &e.dimension, e.pos, d.facing, d.size, None) {
             srv.set_block_state(&e.dimension, e.pos, "minecraft:air");
-            if srv.player_info(&e.player_name).is_none_or(|p| p.gamemode != "creative") {
+            if srv
+                .player_info(&e.player_name)
+                .is_none_or(|p| p.gamemode != "creative")
+            {
                 srv.give_item(&e.player_name, Blocks::DISPLAY, 1);
             }
-            srv.send_actionbar(&e.player_name, &crate::res::Strings::display_no_room(DEFAULT_SIZE));
+            srv.send_actionbar(
+                &e.player_name,
+                &crate::res::Strings::display_no_room(DEFAULT_SIZE),
+            );
             return true;
         }
         stand(srv, &e.dimension, e.pos, &d);
-        DISPLAYS.lock().unwrap().insert((e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z), d);
+        DISPLAYS
+            .lock()
+            .unwrap()
+            .insert((e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z), d);
         true
     });
     // Breaking any block of it takes the whole Display down; a part drops
@@ -331,17 +416,30 @@ pub fn register(registry: &mut Registry) {
     registry.on_block_break(|e, phase, srv| {
         let part = e.block_id == Blocks::DISPLAY_PART;
         if phase == EventPhase::Post && (part || e.block_id == Blocks::DISPLAY) {
-            let at = if part { owner(&e.dimension, e.pos) } else { Some(e.pos) };
+            let at = if part {
+                owner(&e.dimension, e.pos)
+            } else {
+                Some(e.pos)
+            };
             let Some(at) = at else { return true };
             let key = (e.dimension.clone(), at.x, at.y, at.z);
             if let Some(d) = DISPLAYS.lock().unwrap().remove(&key) {
                 let b = area(at, d.facing, d.size);
                 srv.fill_region(&e.dimension, b.0, b.1, "minecraft:air");
-                let creative = srv.player_info(&e.player_name).is_some_and(|p| p.gamemode == "creative");
+                let creative = srv
+                    .player_info(&e.player_name)
+                    .is_some_and(|p| p.gamemode == "creative");
                 if part && !creative {
                     srv.give_item(&e.player_name, Blocks::DISPLAY, 1);
                 }
-                let gone = Frame { pos: (key.1, key.2, key.3), facing: d.facing, size: 0, version: 0, age: 0, ops: Vec::new() };
+                let gone = Frame {
+                    pos: (key.1, key.2, key.3),
+                    facing: d.facing,
+                    size: 0,
+                    version: 0,
+                    age: 0,
+                    ops: Vec::new(),
+                };
                 if let Ok(json) = serde_json::to_string(&gone) {
                     for player in srv.online_players() {
                         srv.send_to_player(&player, FRAME_CHANNEL, json.as_bytes());
@@ -396,7 +494,8 @@ mod client {
         vbo: Buffer,
     }
 
-    static SHOWN: LazyLock<Mutex<HashMap<(i32, i32, i32), Shown>>> = LazyLock::new(Default::default);
+    static SHOWN: LazyLock<Mutex<HashMap<(i32, i32, i32), Shown>>> =
+        LazyLock::new(Default::default);
     static GL: Mutex<Option<Gl>> = Mutex::new(None);
 
     const VERT: &str = "#version 330 core
@@ -425,12 +524,32 @@ void main() {
         }
         let now = Instant::now();
         match shown.get_mut(&key) {
-            Some(s) if s.frame.version == frame.version && s.frame.size == frame.size && s.frame.facing == frame.facing => s.heard = now,
+            Some(s)
+                if s.frame.version == frame.version
+                    && s.frame.size == frame.size
+                    && s.frame.facing == frame.facing =>
+            {
+                s.heard = now
+            }
             _ => {
                 let since = now - Duration::from_millis(frame.age * 50);
-                let spins = frame.ops.iter().any(|op| matches!(op, gpu::Op::Draw(d) if d.spin != [0; 3]));
+                let spins = frame
+                    .ops
+                    .iter()
+                    .any(|op| matches!(op, gpu::Op::Draw(d) if d.spin != [0; 3]));
                 let texture = shown.remove(&key).and_then(|s| s.texture);
-                shown.insert(key, Shown { frame, heard: now, since, spins, texture, aspect: 1.0, drawn: None });
+                shown.insert(
+                    key,
+                    Shown {
+                        frame,
+                        heard: now,
+                        since,
+                        spins,
+                        texture,
+                        aspect: 1.0,
+                        drawn: None,
+                    },
+                );
             }
         }
     }
@@ -438,7 +557,12 @@ void main() {
     /// The picture's corner (bottom left) and its sides (right, `width`
     /// long, and up, `height`), in world coordinates: on the face it faces,
     /// a hair out.
-    fn quad(pos: (i32, i32, i32), facing: Facing, size: f32, height: f32) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    fn quad(
+        pos: (i32, i32, i32),
+        facing: Facing,
+        size: f32,
+        height: f32,
+    ) -> ([f32; 3], [f32; 3], [f32; 3]) {
         let (x, y, z) = (pos.0 as f32, pos.1 as f32, pos.2 as f32);
         const OUT: f32 = 0.01;
         let up = [0.0, height, 0.0];
@@ -465,7 +589,9 @@ void main() {
         }
         let mut gl = GL.lock().unwrap();
         if gl.is_none() {
-            let Ok(program) = gfx.create_shader(VERT, FRAG) else { return };
+            let Ok(program) = gfx.create_shader(VERT, FRAG) else {
+                return;
+            };
             let vao = gfx.create_vao();
             let vbo = gfx.create_buffer();
             vbo.upload_bytes(gfx, &[0u8; 6 * 5 * 4], true);
@@ -499,7 +625,14 @@ void main() {
             let (o, r, u) = quad(s.frame.pos, s.frame.facing, size, size / s.aspect);
             let at = |a: f32, b: f32| [0, 1, 2].map(|i| o[i] + r[i] * a + u[i] * b - cam[i]);
             // Two triangles; the texture's top row at the top.
-            let corners = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+            let corners = [
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (1.0, 1.0),
+                (0.0, 0.0),
+                (1.0, 1.0),
+                (0.0, 1.0),
+            ];
             let mut data = Vec::with_capacity(6 * 5 * 4);
             for (a, b) in corners {
                 let p = at(a, b);
@@ -529,14 +662,69 @@ mod tests {
 
     #[test]
     fn the_picture_goes_right_and_up_from_the_display() {
-        let at = BlockPos { x: 10, y: 64, z: -5 };
+        let at = BlockPos {
+            x: 10,
+            y: 64,
+            z: -5,
+        };
         let b = |f| area(at, f, 3);
         // Seen from the south (it faces south), right is east.
-        assert_eq!(b(Facing::S), (at, BlockPos { x: 12, y: 66, z: -5 }));
-        assert_eq!(b(Facing::N), (BlockPos { x: 8, y: 64, z: -5 }, BlockPos { x: 10, y: 66, z: -5 }));
-        assert_eq!(b(Facing::E), (BlockPos { x: 10, y: 64, z: -7 }, BlockPos { x: 10, y: 66, z: -5 }));
-        assert_eq!(b(Facing::W), (at, BlockPos { x: 10, y: 66, z: -3 }));
-        assert!(inside(b(Facing::S), BlockPos { x: 11, y: 65, z: -5 }));
+        assert_eq!(
+            b(Facing::S),
+            (
+                at,
+                BlockPos {
+                    x: 12,
+                    y: 66,
+                    z: -5
+                }
+            )
+        );
+        assert_eq!(
+            b(Facing::N),
+            (
+                BlockPos { x: 8, y: 64, z: -5 },
+                BlockPos {
+                    x: 10,
+                    y: 66,
+                    z: -5
+                }
+            )
+        );
+        assert_eq!(
+            b(Facing::E),
+            (
+                BlockPos {
+                    x: 10,
+                    y: 64,
+                    z: -7
+                },
+                BlockPos {
+                    x: 10,
+                    y: 66,
+                    z: -5
+                }
+            )
+        );
+        assert_eq!(
+            b(Facing::W),
+            (
+                at,
+                BlockPos {
+                    x: 10,
+                    y: 66,
+                    z: -3
+                }
+            )
+        );
+        assert!(inside(
+            b(Facing::S),
+            BlockPos {
+                x: 11,
+                y: 65,
+                z: -5
+            }
+        ));
         assert!(!inside(b(Facing::S), BlockPos { x: 9, y: 65, z: -5 }));
     }
 }

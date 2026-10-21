@@ -114,9 +114,21 @@ pub struct Draw {
 /// One thing drawn into a frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Op {
-    Clear { color: u8, width: u16, height: u16 },
-    Pixel { x: u16, y: u16, color: u8 },
-    Line { from: (u16, u16), to: (u16, u16), color: u8 },
+    Clear {
+        color: u8,
+        width: u16,
+        height: u16,
+    },
+    Pixel {
+        x: u16,
+        y: u16,
+        color: u8,
+    },
+    Line {
+        from: (u16, u16),
+        to: (u16, u16),
+        color: u8,
+    },
     Draw(Draw),
 }
 
@@ -140,7 +152,11 @@ pub struct Gpu {
 }
 
 fn blank() -> Vec<Op> {
-    vec![Op::Clear { color: 0, width: DEFAULT_SIZE, height: DEFAULT_SIZE }]
+    vec![Op::Clear {
+        color: 0,
+        width: DEFAULT_SIZE,
+        height: DEFAULT_SIZE,
+    }]
 }
 
 impl Default for Gpu {
@@ -217,12 +233,18 @@ impl Gpu {
             cmd::CLEAR => {
                 self.back.clear();
                 let size = |r| self.r(r).clamp(1, MAX_SIZE);
-                Op::Clear { color: self.r(reg::BG) as u8, width: size(reg::WIDTH), height: size(reg::HEIGHT) }
+                Op::Clear {
+                    color: self.r(reg::BG) as u8,
+                    width: size(reg::WIDTH),
+                    height: size(reg::HEIGHT),
+                }
             }
             cmd::DRAW => {
                 let first = self.r(reg::FIRST) as usize;
                 let count = (self.r(reg::COUNT) as usize).min(BUFFER);
-                let indices: Vec<u16> = (first..first + count).map(|i| self.indices[i % BUFFER]).collect();
+                let indices: Vec<u16> = (first..first + count)
+                    .map(|i| self.indices[i % BUFFER])
+                    .collect();
                 // Only the vertices it uses, renumbered.
                 let mut used = indices.clone();
                 used.sort_unstable();
@@ -231,10 +253,17 @@ impl Gpu {
                     mode: self.r(reg::MODE),
                     color: self.r(reg::COLOR) as u8,
                     turn: [self.r(reg::YAW), self.r(reg::PITCH), self.r(reg::ROLL)],
-                    spin: [self.r(reg::SPIN_YAW) as i16, self.r(reg::SPIN_PITCH) as i16, self.r(reg::SPIN_ROLL) as i16],
+                    spin: [
+                        self.r(reg::SPIN_YAW) as i16,
+                        self.r(reg::SPIN_PITCH) as i16,
+                        self.r(reg::SPIN_ROLL) as i16,
+                    ],
                     scale: self.r(reg::SCALE),
                     vertices: used.iter().map(|&v| self.vertices[v as usize]).collect(),
-                    indices: indices.iter().map(|i| used.binary_search(i).unwrap() as u16).collect(),
+                    indices: indices
+                        .iter()
+                        .map(|i| used.binary_search(i).unwrap() as u16)
+                        .collect(),
                 })
             }
             cmd::SWAP => {
@@ -242,7 +271,11 @@ impl Gpu {
                 self.version += 1;
                 return;
             }
-            cmd::PIXEL => Op::Pixel { x: self.r(reg::X), y: self.r(reg::Y), color: self.r(reg::COLOR) as u8 },
+            cmd::PIXEL => Op::Pixel {
+                x: self.r(reg::X),
+                y: self.r(reg::Y),
+                color: self.r(reg::COLOR) as u8,
+            },
             cmd::LINE => Op::Line {
                 from: (self.r(reg::X), self.r(reg::Y)),
                 to: (self.r(reg::X2), self.r(reg::Y2)),
@@ -258,7 +291,11 @@ impl Gpu {
     /// A tick: the turns gain their spin, so the next draw goes on from
     /// where the shown one has turned to.
     pub fn tick(&mut self) {
-        for (turn, spin) in [(reg::YAW, reg::SPIN_YAW), (reg::PITCH, reg::SPIN_PITCH), (reg::ROLL, reg::SPIN_ROLL)] {
+        for (turn, spin) in [
+            (reg::YAW, reg::SPIN_YAW),
+            (reg::PITCH, reg::SPIN_PITCH),
+            (reg::ROLL, reg::SPIN_ROLL),
+        ] {
             self.regs[turn as usize] = self.r(turn).wrapping_add(self.r(spin));
         }
     }
@@ -283,7 +320,12 @@ struct Raster {
 impl Raster {
     fn new(w: u16, h: u16, c: u8) -> Self {
         let n = w as usize * h as usize;
-        Raster { w: w as i32, h: h as i32, px: vec![rgba(c, 1.0); n], depth: vec![f32::MIN; n] }
+        Raster {
+            w: w as i32,
+            h: h as i32,
+            px: vec![rgba(c, 1.0); n],
+            depth: vec![f32::MIN; n],
+        }
     }
 
     fn put(&mut self, x: i32, y: i32, c: [u8; 4]) {
@@ -317,17 +359,35 @@ impl Raster {
 
     /// A filled triangle of screen points with depths (bigger is nearer).
     fn triangle(&mut self, p: [[f32; 3]; 3], c: [u8; 4]) {
-        let edge = |a: [f32; 3], b: [f32; 3], x: f32, y: f32| (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
+        let edge = |a: [f32; 3], b: [f32; 3], x: f32, y: f32| {
+            (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0])
+        };
         let area = edge(p[0], p[1], p[2][0], p[2][1]);
         if area.abs() < 1e-6 {
             return;
         }
-        let lo = |i: usize| p.iter().map(|q| q[i]).fold(f32::MAX, f32::min).floor().max(0.0) as i32;
-        let hi = |i: usize, max: i32| p.iter().map(|q| q[i]).fold(f32::MIN, f32::max).ceil().min(max as f32 - 1.0) as i32;
+        let lo = |i: usize| {
+            p.iter()
+                .map(|q| q[i])
+                .fold(f32::MAX, f32::min)
+                .floor()
+                .max(0.0) as i32
+        };
+        let hi = |i: usize, max: i32| {
+            p.iter()
+                .map(|q| q[i])
+                .fold(f32::MIN, f32::max)
+                .ceil()
+                .min(max as f32 - 1.0) as i32
+        };
         for y in lo(1)..=hi(1, self.h) {
             for x in lo(0)..=hi(0, self.w) {
                 let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-                let w = [edge(p[1], p[2], fx, fy) / area, edge(p[2], p[0], fx, fy) / area, edge(p[0], p[1], fx, fy) / area];
+                let w = [
+                    edge(p[1], p[2], fx, fy) / area,
+                    edge(p[2], p[0], fx, fy) / area,
+                    edge(p[0], p[1], fx, fy) / area,
+                ];
                 if w.iter().all(|&w| w >= 0.0) {
                     let z = w[0] * p[0][2] + w[1] * p[1][2] + w[2] * p[2][2];
                     let i = (y * self.w + x) as usize;
@@ -388,7 +448,11 @@ pub fn render(ops: &[Op], ticks: f32) -> (u16, u16, Vec<u8>) {
                 r.depth.fill(f32::MIN);
             }
             Op::Pixel { x, y, color } => r.put(*x as i32, *y as i32, rgba(*color, 1.0)),
-            Op::Line { from, to, color } => r.line((from.0 as i32, from.1 as i32), (to.0 as i32, to.1 as i32), rgba(*color, 1.0)),
+            Op::Line { from, to, color } => r.line(
+                (from.0 as i32, from.1 as i32),
+                (to.0 as i32, to.1 as i32),
+                rgba(*color, 1.0),
+            ),
             Op::Draw(d) => {
                 let turn = [0, 1, 2].map(|i| d.turn[i] as f32 + d.spin[i] as f32 * ticks);
                 let view = transform(d, turn);
@@ -420,15 +484,29 @@ pub fn render(ops: &[Op], ticks: f32) -> (u16, u16, Vec<u8>) {
                             l.map(|v| v / n)
                         };
                         for t in d.indices.chunks_exact(3) {
-                            let (Some(a), Some(b), Some(c)) = (at(t[0]), at(t[1]), at(t[2])) else { continue };
+                            let (Some(a), Some(b), Some(c)) = (at(t[0]), at(t[1]), at(t[2])) else {
+                                continue;
+                            };
                             // On screen y grows down: counter-clockwise faces us when this is negative.
-                            let facing = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+                            let facing =
+                                (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
                             if facing >= 0.0 {
                                 continue;
                             }
-                            let (va, vb, vc) = (view[t[0] as usize], view[t[1] as usize], view[t[2] as usize]);
-                            let (u, v) = ([0, 1, 2].map(|i| vb[i] - va[i]), [0, 1, 2].map(|i| vc[i] - va[i]));
-                            let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+                            let (va, vb, vc) = (
+                                view[t[0] as usize],
+                                view[t[1] as usize],
+                                view[t[2] as usize],
+                            );
+                            let (u, v) = (
+                                [0, 1, 2].map(|i| vb[i] - va[i]),
+                                [0, 1, 2].map(|i| vc[i] - va[i]),
+                            );
+                            let n = [
+                                u[1] * v[2] - u[2] * v[1],
+                                u[2] * v[0] - u[0] * v[2],
+                                u[0] * v[1] - u[1] * v[0],
+                            ];
                             let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
                             let lit = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) / len;
                             r.triangle([a, b, c], rgba(d.color, 0.3 + 0.7 * lit.max(0.0)));
@@ -453,14 +531,36 @@ mod tests {
 
     fn cube(g: &mut Gpu, half: i8) {
         g.write(reg::VPTR, 0);
-        for v in [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]] {
+        for v in [
+            [-1, -1, -1],
+            [1, -1, -1],
+            [1, 1, -1],
+            [-1, 1, -1],
+            [-1, -1, 1],
+            [1, -1, 1],
+            [1, 1, 1],
+            [-1, 1, 1],
+        ] {
             for c in v {
                 g.write(reg::VDATA, (c * half) as u8);
             }
         }
         g.write(reg::IPTR, 0);
         // Counter-clockwise seen from outside.
-        let faces = [[4, 5, 6], [4, 6, 7], [1, 0, 3], [1, 3, 2], [5, 1, 2], [5, 2, 6], [0, 4, 7], [0, 7, 3], [7, 6, 2], [7, 2, 3], [0, 1, 5], [0, 5, 4]];
+        let faces = [
+            [4, 5, 6],
+            [4, 6, 7],
+            [1, 0, 3],
+            [1, 3, 2],
+            [5, 1, 2],
+            [5, 2, 6],
+            [0, 4, 7],
+            [0, 7, 3],
+            [7, 6, 2],
+            [7, 2, 3],
+            [0, 1, 5],
+            [0, 5, 4],
+        ];
         for f in faces {
             for i in f {
                 g.write(reg::IDATA, i);
@@ -499,7 +599,12 @@ mod tests {
     #[test]
     fn sixteen_bits_reach_a_big_screen() {
         let mut g = Gpu::default();
-        for (r, v) in [(reg::WIDTH, 1024u16), (reg::HEIGHT, 600), (reg::X, 1000), (reg::Y, 590)] {
+        for (r, v) in [
+            (reg::WIDTH, 1024u16),
+            (reg::HEIGHT, 600),
+            (reg::X, 1000),
+            (reg::Y, 590),
+        ] {
             g.write(reg::HIGH, (v >> 8) as u8);
             g.write(r, v as u8);
         }
@@ -572,22 +677,31 @@ mod tests {
         for i in [7, 8, 9] {
             g.write(reg::IDATA, i);
         }
-        assert_eq!((g.indices[BUFFER - 2], g.indices[BUFFER - 1], g.indices[0]), (7, 8, 9));
+        assert_eq!(
+            (g.indices[BUFFER - 2], g.indices[BUFFER - 1], g.indices[0]),
+            (7, 8, 9)
+        );
     }
 
     /// `WRITES=file OUT=dir`: (register, byte) writes replayed, every shown
     /// frame a PPM picture.
     #[test]
     fn replay_writes() {
-        let (Ok(file), Ok(dir)) = (std::env::var("WRITES"), std::env::var("OUT")) else { return };
-        let writes: Vec<(u8, u8)> = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+        let (Ok(file), Ok(dir)) = (std::env::var("WRITES"), std::env::var("OUT")) else {
+            return;
+        };
+        let writes: Vec<(u8, u8)> =
+            serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
         let mut g = Gpu::default();
         for (r, d) in writes {
             let shown = g.version;
             g.write(r, d);
             if g.version != shown {
                 let (w, h, img) = render(&g.front, 10.0);
-                let rgb: Vec<u8> = img.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+                let rgb: Vec<u8> = img
+                    .chunks_exact(4)
+                    .flat_map(|p| [p[0], p[1], p[2]])
+                    .collect();
                 let mut ppm = format!("P6 {w} {h} 255\n").into_bytes();
                 ppm.extend(rgb);
                 std::fs::write(format!("{dir}/frame-{}.ppm", g.version), ppm).unwrap();
@@ -598,8 +712,13 @@ mod tests {
     /// `OUT=dir`: the cube in each mode, as PPM pictures (for the docs).
     #[test]
     fn render_cubes() {
-        let Ok(dir) = std::env::var("OUT") else { return };
-        for (name, m, color) in [("lines", mode::WIRE, 0b000_111_00), ("faces", mode::FACES, 0b111_101_00)] {
+        let Ok(dir) = std::env::var("OUT") else {
+            return;
+        };
+        for (name, m, color) in [
+            ("lines", mode::WIRE, 0b000_111_00),
+            ("faces", mode::FACES, 0b111_101_00),
+        ] {
             let mut g = Gpu::default();
             cube(&mut g, 30);
             g.write(reg::MODE, m as u8);
@@ -608,7 +727,10 @@ mod tests {
             g.write(reg::PITCH, 18);
             frame(&mut g);
             let (w, h, img) = render(&g.front, 0.0);
-            let rgb: Vec<u8> = img.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+            let rgb: Vec<u8> = img
+                .chunks_exact(4)
+                .flat_map(|p| [p[0], p[1], p[2]])
+                .collect();
             let mut ppm = format!("P6 {w} {h} 255\n").into_bytes();
             ppm.extend(rgb);
             std::fs::write(format!("{dir}/cube-{name}.ppm"), ppm).unwrap();

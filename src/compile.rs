@@ -77,18 +77,35 @@ fn mask_of(levels: &[u8]) -> Option<u32> {
 }
 
 fn read(vm: &RedstoneVM, at: &[(u32, u32, u32)]) -> Vec<u8> {
-    at.iter().map(|&(x, y, z)| vm.get_port_output(x, y, z)).collect()
+    at.iter()
+        .map(|&(x, y, z)| vm.get_port_output(x, y, z))
+        .collect()
 }
 
 /// Works out the table of the circuit in `vm` (as built), or why not.
-pub fn analyse(vm: &RedstoneVM, ins: &[(u32, u32, u32)], outs: &[(u32, u32, u32)]) -> Result<Table, String> {
-    vm.tabulable().map_err(|why| format!("not a table: {why}"))?;
+pub fn analyse(
+    vm: &RedstoneVM,
+    ins: &[(u32, u32, u32)],
+    outs: &[(u32, u32, u32)],
+) -> Result<Table, String> {
+    vm.tabulable()
+        .map_err(|why| format!("not a table: {why}"))?;
     if ins.len() > 12 {
-        return Err(format!("{} inputs: 2^{} combinations a state", ins.len(), ins.len()));
+        return Err(format!(
+            "{} inputs: 2^{} combinations a state",
+            ins.len(),
+            ins.len()
+        ));
     }
     let combos = 1usize << ins.len();
     let started = Instant::now();
-    let mut t = Table { snapshots: vec![vm.clone()], outputs: vec![read(vm, outs)], inputs: vec![0], moves: Vec::new(), fingerprints: HashMap::new() };
+    let mut t = Table {
+        snapshots: vec![vm.clone()],
+        outputs: vec![read(vm, outs)],
+        inputs: vec![0],
+        moves: Vec::new(),
+        fingerprints: HashMap::new(),
+    };
     t.fingerprints.insert(vm.fingerprint(ins), 0);
     let mut s = 0;
     while s < t.snapshots.len() {
@@ -115,7 +132,11 @@ pub fn analyse(vm: &RedstoneVM, ins: &[(u32, u32, u32)], outs: &[(u32, u32, u32)
                     n
                 }
             };
-            row.push(Move { next, steps, outputs: trail });
+            row.push(Move {
+                next,
+                steps,
+                outputs: trail,
+            });
         }
         t.moves.push(row);
         s += 1;
@@ -123,7 +144,10 @@ pub fn analyse(vm: &RedstoneVM, ins: &[(u32, u32, u32)], outs: &[(u32, u32, u32)
         let done = t.moves.len() * combos;
         let total = t.snapshots.len() * combos;
         if total > MAX_TRANSITIONS {
-            return Err(format!("over {MAX_TRANSITIONS} transitions ({} states so far × {combos})", t.snapshots.len()));
+            return Err(format!(
+                "over {MAX_TRANSITIONS} transitions ({} states so far × {combos})",
+                t.snapshots.len()
+            ));
         }
         let forecast = started.elapsed().mul_f64(total as f64 / done as f64);
         if forecast > MAX_TIME {
@@ -135,7 +159,12 @@ pub fn analyse(vm: &RedstoneVM, ins: &[(u32, u32, u32)], outs: &[(u32, u32, u32)
 
 /// The table of circuit `key` if it's ready; starts working it out (on a
 /// worker thread) the first time it's asked for.
-fn table_for(key: &str, vm: &RedstoneVM, ins: &[(u32, u32, u32)], outs: &[(u32, u32, u32)]) -> Option<Arc<Table>> {
+fn table_for(
+    key: &str,
+    vm: &RedstoneVM,
+    ins: &[(u32, u32, u32)],
+    outs: &[(u32, u32, u32)],
+) -> Option<Arc<Table>> {
     let mut tables = TABLES.lock().unwrap();
     match tables.get(key) {
         Some(Slot::Ready(t)) => return Some(t.clone()),
@@ -149,7 +178,11 @@ fn table_for(key: &str, vm: &RedstoneVM, ins: &[(u32, u32, u32)], outs: &[(u32, 
         let started = Instant::now();
         let slot = match analyse(&vm, &ins, &outs) {
             Ok(t) => {
-                yog_api::info!("[yog-vlsi] chip {key}: a table of {} states in {:?}", t.snapshots.len(), started.elapsed());
+                yog_api::info!(
+                    "[yog-vlsi] chip {key}: a table of {} states in {:?}",
+                    t.snapshots.len(),
+                    started.elapsed()
+                );
                 Slot::Ready(Arc::new(t))
             }
             Err(why) => {
@@ -198,9 +231,22 @@ pub struct ChipSim {
 impl ChipSim {
     /// `key`: what the circuit is known by, to share its table — `None`:
     /// stepped always.
-    pub fn new(vm: RedstoneVM, ins: Vec<(u32, u32, u32)>, outs: Vec<(u32, u32, u32)>, key: Option<&str>) -> Self {
+    pub fn new(
+        vm: RedstoneVM,
+        ins: Vec<(u32, u32, u32)>,
+        outs: Vec<(u32, u32, u32)>,
+        key: Option<&str>,
+    ) -> Self {
         let given = vec![0; ins.len()];
-        ChipSim { vm, ins, outs, key: key.map(str::to_string), place: None, given, touched: false }
+        ChipSim {
+            vm,
+            ins,
+            outs,
+            key: key.map(str::to_string),
+            place: None,
+            given,
+            touched: false,
+        }
     }
 
     /// The VM, stepped from now on (its table's place made real).
@@ -259,7 +305,9 @@ impl ChipSim {
     }
 
     pub fn output(&self, x: u32, y: u32, z: u32) -> u8 {
-        let Some(p) = &self.place else { return self.vm.get_port_output(x, y, z) };
+        let Some(p) = &self.place else {
+            return self.vm.get_port_output(x, y, z);
+        };
         let Some(o) = self.outs.iter().position(|&q| q == (x, y, z)) else {
             return p.table.snapshots[p.state].get_port_output(x, y, z);
         };
@@ -289,7 +337,9 @@ impl ChipSim {
     /// [`RedstoneVM::settle`].
     pub fn settle(&mut self, budget: u32) -> u32 {
         let touched = std::mem::take(&mut self.touched);
-        let Some(p) = &mut self.place else { return self.vm.settle(budget) };
+        let Some(p) = &mut self.place else {
+            return self.vm.settle(budget);
+        };
         let Some(m) = mask_of(&self.given) else {
             self.unpack();
             return self.vm.settle(budget);
@@ -326,12 +376,18 @@ impl ChipSim {
     /// Takes the table up if it's ready and the VM is at rest in one of its states.
     fn adopt_table(&mut self) {
         let Some(key) = &self.key else { return };
-        let Some(t) = table_for(key, &self.vm, &self.ins, &self.outs) else { return };
+        let Some(t) = table_for(key, &self.vm, &self.ins, &self.outs) else {
+            return;
+        };
         if self.touched {
             return;
         }
         if let Some(&state) = t.fingerprints.get(&self.vm.fingerprint(&self.ins)) {
-            self.place = Some(Place { table: t, state, moving: None });
+            self.place = Some(Place {
+                table: t,
+                state,
+                moving: None,
+            });
         }
     }
 }
@@ -360,10 +416,25 @@ mod tests {
             if !c.alus.is_empty() {
                 continue;
             }
-            let ins: Vec<_> = c.ports.iter().filter(|p| p.dir.inputs()).map(|p| (p.x, p.y, p.z)).collect();
-            let outs: Vec<_> = c.ports.iter().filter(|p| p.dir.outputs()).map(|p| (p.x, p.y, p.z)).collect();
+            let ins: Vec<_> = c
+                .ports
+                .iter()
+                .filter(|p| p.dir.inputs())
+                .map(|p| (p.x, p.y, p.z))
+                .collect();
+            let outs: Vec<_> = c
+                .ports
+                .iter()
+                .filter(|p| p.dir.outputs())
+                .map(|p| (p.x, p.y, p.z))
+                .collect();
             let mut real = ChipSim::new(c.vm(), ins.clone(), outs.clone(), None);
-            let mut fast = ChipSim::new(c.vm(), ins.clone(), outs.clone(), Some(&format!("test:{}", d.name)));
+            let mut fast = ChipSim::new(
+                c.vm(),
+                ins.clone(),
+                outs.clone(),
+                Some(&format!("test:{}", d.name)),
+            );
             for t in 0..3000 {
                 real.new_tick();
                 fast.new_tick();
@@ -379,9 +450,19 @@ mod tests {
                     }
                 }
                 let budget = [0, 1, 2, 3, 8, 8, 8, 64][rnd(8) as usize] as u32;
-                assert_eq!(real.settle(budget), fast.settle(budget), "{} at {t}: steps", d.name);
+                assert_eq!(
+                    real.settle(budget),
+                    fast.settle(budget),
+                    "{} at {t}: steps",
+                    d.name
+                );
                 for &(x, y, z) in &outs {
-                    assert_eq!(real.output(x, y, z), fast.output(x, y, z), "{} at {t}: output", d.name);
+                    assert_eq!(
+                        real.output(x, y, z),
+                        fast.output(x, y, z),
+                        "{} at {t}: output",
+                        d.name
+                    );
                 }
             }
             tabled += fast.place.is_some() as u32 + 1;
@@ -392,13 +473,38 @@ mod tests {
     #[test]
     fn every_gate_gets_a_table() {
         // (Not the RS latch: S and R let go at once, it oscillates — as redstone.)
-        for name in ["NOT", "AND", "OR", "XOR", "NAND", "NOR", "XNOR", "D latch", "D flip-flop", "T flip-flop"] {
+        for name in [
+            "NOT",
+            "AND",
+            "OR",
+            "XOR",
+            "NAND",
+            "NOR",
+            "XNOR",
+            "D latch",
+            "D flip-flop",
+            "T flip-flop",
+        ] {
             let d = designs::named(name).unwrap();
             let c = d.circuit(Tier::Wood);
-            let ins: Vec<_> = c.ports.iter().filter(|p| p.dir.inputs()).map(|p| (p.x, p.y, p.z)).collect();
-            let outs: Vec<_> = c.ports.iter().filter(|p| p.dir.outputs()).map(|p| (p.x, p.y, p.z)).collect();
+            let ins: Vec<_> = c
+                .ports
+                .iter()
+                .filter(|p| p.dir.inputs())
+                .map(|p| (p.x, p.y, p.z))
+                .collect();
+            let outs: Vec<_> = c
+                .ports
+                .iter()
+                .filter(|p| p.dir.outputs())
+                .map(|p| (p.x, p.y, p.z))
+                .collect();
             let t = analyse(&c.vm(), &ins, &outs).unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert!(t.snapshots.len() < 64, "{name}: {} states", t.snapshots.len());
+            assert!(
+                t.snapshots.len() < 64,
+                "{name}: {} states",
+                t.snapshots.len()
+            );
         }
     }
 }

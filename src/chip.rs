@@ -4,13 +4,16 @@
 use serde::{Deserialize, Serialize};
 use yog_api::Storage;
 
-use crate::nbt;
-use crate::res::Strings;
-use crate::content::Tier;
-use crate::port;
-use crate::vm::{BlockType, ComparatorMode, Facing, NestedAlu, NestedChip, NestedPin, NestedPort, PortMode, RedstoneVM};
 use crate::MOD_ID;
 use crate::content::Blocks;
+use crate::content::Tier;
+use crate::nbt;
+use crate::port;
+use crate::res::Strings;
+use crate::vm::{
+    BlockType, ComparatorMode, Facing, NestedAlu, NestedChip, NestedPin, NestedPort, PortMode,
+    RedstoneVM,
+};
 
 /// NBT tag of a fabricated chip's [`ChipMeta`].
 const CHIP_TAG: &str = "YogVlsiChip";
@@ -150,7 +153,9 @@ impl CircuitBlock {
     }
 
     fn facing(&self) -> Facing {
-        self.prop("facing").map(Facing::from_minecraft).unwrap_or(Facing::North)
+        self.prop("facing")
+            .map(Facing::from_minecraft)
+            .unwrap_or(Facing::North)
     }
 
     fn power_prop(&self) -> u8 {
@@ -167,41 +172,78 @@ impl CircuitBlock {
         match path {
             _ if id == Blocks::ANALOG_CABLE => BlockType::Cable,
             _ if id == Blocks::DIGITAL_CABLE => BlockType::Bus,
-            _ if id == Blocks::REDSTONE_PORT => BlockType::RedstonePort { output: self.redstone_port.as_ref().is_some_and(|p| p.output) },
+            _ if id == Blocks::REDSTONE_PORT => BlockType::RedstonePort {
+                output: self.redstone_port.as_ref().is_some_and(|p| p.output),
+            },
             "air" | "cave_air" | "void_air" => BlockType::Air,
             "redstone_wire" => BlockType::RedstoneWire,
-            "redstone_torch" => BlockType::RedstoneTorch { lit: !self.is("lit", "false"), attach: Facing::Down },
-            "redstone_wall_torch" => {
-                BlockType::RedstoneTorch { lit: !self.is("lit", "false"), attach: self.facing().opposite() }
-            }
+            "redstone_torch" => BlockType::RedstoneTorch {
+                lit: !self.is("lit", "false"),
+                attach: Facing::Down,
+            },
+            "redstone_wall_torch" => BlockType::RedstoneTorch {
+                lit: !self.is("lit", "false"),
+                attach: self.facing().opposite(),
+            },
             "repeater" => BlockType::Repeater {
                 delay_ticks: self.prop("delay").and_then(|d| d.parse().ok()).unwrap_or(1),
                 facing: self.facing(),
             },
             "comparator" => BlockType::Comparator {
-                mode: if self.is("mode", "subtract") { ComparatorMode::Subtract } else { ComparatorMode::Compare },
+                mode: if self.is("mode", "subtract") {
+                    ComparatorMode::Subtract
+                } else {
+                    ComparatorMode::Compare
+                },
                 facing: self.facing(),
             },
             "redstone_lamp" => BlockType::RedstoneLamp,
             "redstone_block" => BlockType::RedstoneBlock,
-            "lever" => BlockType::Lever { on: powered, attach: self.mount() },
-            p if p.ends_with("_button") => BlockType::Button { pressed: powered, attach: self.mount() },
-            p if p.ends_with("weighted_pressure_plate") => BlockType::PressurePlate { power: self.power_prop() },
-            p if p.ends_with("_pressure_plate") => BlockType::PressurePlate { power: if powered { 15 } else { 0 } },
-            "observer" => BlockType::Observer { facing: self.facing() },
+            "lever" => BlockType::Lever {
+                on: powered,
+                attach: self.mount(),
+            },
+            p if p.ends_with("_button") => BlockType::Button {
+                pressed: powered,
+                attach: self.mount(),
+            },
+            p if p.ends_with("weighted_pressure_plate") => BlockType::PressurePlate {
+                power: self.power_prop(),
+            },
+            p if p.ends_with("_pressure_plate") => BlockType::PressurePlate {
+                power: if powered { 15 } else { 0 },
+            },
+            "observer" => BlockType::Observer {
+                facing: self.facing(),
+            },
             "piston" | "sticky_piston" => BlockType::Piston {
                 facing: self.facing(),
                 sticky: path == "sticky_piston",
                 extended: self.is("extended", "true"),
             },
-            "piston_head" => BlockType::PistonHead { facing: self.facing(), sticky: self.is("type", "sticky") },
+            "piston_head" => BlockType::PistonHead {
+                facing: self.facing(),
+                sticky: self.is("type", "sticky"),
+            },
             "moving_piston" => BlockType::Air,
             "slime_block" => BlockType::Slime,
             "honey_block" => BlockType::Honey,
-            "obsidian" | "crying_obsidian" | "bedrock" | "barrier" | "reinforced_deepslate" | "respawn_anchor"
-            | "enchanting_table" | "ender_chest" | "end_portal_frame" => BlockType::Immovable,
-            "hopper" => BlockType::Hopper { facing: self.facing() },
-            "dropper" | "dispenser" => BlockType::Dropper { facing: self.facing(), triggered: self.is("triggered", "true") },
+            "obsidian"
+            | "crying_obsidian"
+            | "bedrock"
+            | "barrier"
+            | "reinforced_deepslate"
+            | "respawn_anchor"
+            | "enchanting_table"
+            | "ender_chest"
+            | "end_portal_frame" => BlockType::Immovable,
+            "hopper" => BlockType::Hopper {
+                facing: self.facing(),
+            },
+            "dropper" | "dispenser" => BlockType::Dropper {
+                facing: self.facing(),
+                triggered: self.is("triggered", "true"),
+            },
             "chest" | "trapped_chest" => BlockType::Container {
                 slots: 27,
                 solid: false,
@@ -216,9 +258,15 @@ impl CircuitBlock {
                 solid: !p.ends_with("shulker_box") && p != "brewing_stand",
                 partner: None,
             },
-            "target" => BlockType::TargetBlock { power: self.power_prop() },
-            "detector_rail" => BlockType::Source { power: if powered { 15 } else { 0 } },
-            "daylight_detector" => BlockType::Source { power: self.power_prop() },
+            "target" => BlockType::TargetBlock {
+                power: self.power_prop(),
+            },
+            "detector_rail" => BlockType::Source {
+                power: if powered { 15 } else { 0 },
+            },
+            "daylight_detector" => BlockType::Source {
+                power: self.power_prop(),
+            },
             p if p.contains("glass")
                 || p.contains("slab")
                 || p.contains("stairs")
@@ -228,7 +276,10 @@ impl CircuitBlock {
                 || p.contains("door")
                 || p.contains("rail")
                 || p.contains("carpet")
-                || p == "barrier" => BlockType::Transparent,
+                || p == "barrier" =>
+            {
+                BlockType::Transparent
+            }
             _ if Tier::from_alu(id).is_some() => BlockType::Alu,
             _ => port::dir_for_block(id).map_or(BlockType::Solid, BlockType::Port),
         }
@@ -264,7 +315,10 @@ pub struct SavedAlu {
 
 impl CircuitData {
     pub fn empty(tier: Tier) -> Self {
-        CircuitData { size: tier.world_size(), ..Default::default() }
+        CircuitData {
+            size: tier.world_size(),
+            ..Default::default()
+        }
     }
 
     /// Places the circuit — its blocks, their items and its ports — into
@@ -309,9 +363,21 @@ impl CircuitData {
                     let ports = circuit
                         .ports
                         .iter()
-                        .map(|p| NestedPort { label: p.label.clone(), x: p.x, y: p.y, z: p.z, mode: p.dir })
+                        .map(|p| NestedPort {
+                            label: p.label.clone(),
+                            x: p.x,
+                            y: p.y,
+                            z: p.z,
+                            mode: p.dir,
+                        })
                         .collect();
-                    Some(NestedChip::new(*slot, ports, meta.tier.steps_per_tick(), circuit.vm_with(load, depth + 1), &meta.id))
+                    Some(NestedChip::new(
+                        *slot,
+                        ports,
+                        meta.tier.steps_per_tick(),
+                        circuit.vm_with(load, depth + 1),
+                        &meta.id,
+                    ))
                 })
                 .collect();
             vm.set_nested(a.x, a.y, a.z, NestedAlu::new(chips, a.wires.clone()));
@@ -323,7 +389,10 @@ impl CircuitData {
     /// so these live in the global store).
     pub fn save_for_chip(&self, game_dir: &str, chip: &str) {
         let mut store = Storage::open(game_dir, MOD_ID);
-        store.set(format!("{CIRCUIT_KEY}{chip}"), serde_json::to_string(self).unwrap_or_default());
+        store.set(
+            format!("{CIRCUIT_KEY}{chip}"),
+            serde_json::to_string(self).unwrap_or_default(),
+        );
         if let Err(e) = store.flush() {
             yog_api::warn!("[yog-vlsi] saving chip circuit {chip}: {e}");
         }
@@ -351,7 +420,11 @@ pub struct Blueprint {
 impl Blueprint {
     /// A new, empty design.
     pub fn new(name: impl Into<String>, tier: Tier) -> Self {
-        Blueprint { name: name.into(), tier, circuit: CircuitData::empty(tier) }
+        Blueprint {
+            name: name.into(),
+            tier,
+            circuit: CircuitData::empty(tier),
+        }
     }
 
     /// Its NBT: the design as JSON — packed (`z:` and deflated, base64)
@@ -360,7 +433,11 @@ impl Blueprint {
         let json = serde_json::to_string(self).unwrap_or_default();
         let text = if json.len() > PACK_OVER {
             use base64::Engine as _;
-            format!("{PACKED}{}", base64::engine::general_purpose::STANDARD.encode(miniz_oxide::deflate::compress_to_vec(json.as_bytes(), 9)))
+            format!(
+                "{PACKED}{}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(miniz_oxide::deflate::compress_to_vec(json.as_bytes(), 9))
+            )
         } else {
             json
         };
@@ -373,7 +450,9 @@ impl Blueprint {
         match text.strip_prefix(PACKED) {
             Some(packed) => {
                 use base64::Engine as _;
-                let bytes = base64::engine::general_purpose::STANDARD.decode(packed).ok()?;
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(packed)
+                    .ok()?;
                 let json = miniz_oxide::inflate::decompress_to_vec(&bytes).ok()?;
                 serde_json::from_slice(&json).ok()
             }
@@ -391,7 +470,13 @@ mod tests {
             id: "abc".into(),
             tier: Tier::Gold,
             name: "Adder \"v2\"".into(),
-            ports: vec![Port { label: "A0".into(), x: 1, y: 0, z: 2, dir: PortMode::Input }],
+            ports: vec![Port {
+                label: "A0".into(),
+                x: 1,
+                y: 0,
+                z: 2,
+                dir: PortMode::Input,
+            }],
         }
     }
 
@@ -406,37 +491,103 @@ mod tests {
     fn blueprint_nbt_round_trip() {
         let c = CircuitData {
             size: 16,
-            blocks: vec![CircuitBlock { x: 0, y: 0, z: 0, state: "minecraft:repeater[delay=2]".into(), items: Vec::new(), redstone_port: None }],
+            blocks: vec![CircuitBlock {
+                x: 0,
+                y: 0,
+                z: 0,
+                state: "minecraft:repeater[delay=2]".into(),
+                items: Vec::new(),
+                redstone_port: None,
+            }],
             ports: meta().ports,
             alus: Vec::new(),
         };
-        let bp = Blueprint { name: "Adder".into(), tier: Tier::Iron, circuit: c };
+        let bp = Blueprint {
+            name: "Adder".into(),
+            tier: Tier::Iron,
+            circuit: c,
+        };
         assert_eq!(Blueprint::from_nbt(&bp.to_nbt()), Some(bp));
     }
 
     #[test]
     fn block_states_parse() {
-        let b = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new(), redstone_port: None };
-        assert_eq!(b("minecraft:repeater[delay=3,facing=east,locked=false]").block_type(),
-            BlockType::Repeater { delay_ticks: 3, facing: Facing::East });
-        assert_eq!(b("minecraft:lever[face=wall,facing=east,powered=true]").block_type(),
-            BlockType::Lever { on: true, attach: Facing::West });
-        assert_eq!(b("minecraft:lever[face=floor,facing=east,powered=false]").block_type(),
-            BlockType::Lever { on: false, attach: Facing::Down });
-        assert_eq!(b("minecraft:redstone_wall_torch[facing=north,lit=true]").block_type(),
-            BlockType::RedstoneTorch { lit: true, attach: Facing::South });
-        assert_eq!(b("minecraft:polished_blackstone_button[face=ceiling,facing=north,powered=false]").block_type(),
-            BlockType::Button { pressed: false, attach: Facing::Up });
+        let b = |state: &str| CircuitBlock {
+            x: 0,
+            y: 0,
+            z: 0,
+            state: state.into(),
+            items: Vec::new(),
+            redstone_port: None,
+        };
+        assert_eq!(
+            b("minecraft:repeater[delay=3,facing=east,locked=false]").block_type(),
+            BlockType::Repeater {
+                delay_ticks: 3,
+                facing: Facing::East
+            }
+        );
+        assert_eq!(
+            b("minecraft:lever[face=wall,facing=east,powered=true]").block_type(),
+            BlockType::Lever {
+                on: true,
+                attach: Facing::West
+            }
+        );
+        assert_eq!(
+            b("minecraft:lever[face=floor,facing=east,powered=false]").block_type(),
+            BlockType::Lever {
+                on: false,
+                attach: Facing::Down
+            }
+        );
+        assert_eq!(
+            b("minecraft:redstone_wall_torch[facing=north,lit=true]").block_type(),
+            BlockType::RedstoneTorch {
+                lit: true,
+                attach: Facing::South
+            }
+        );
+        assert_eq!(
+            b("minecraft:polished_blackstone_button[face=ceiling,facing=north,powered=false]")
+                .block_type(),
+            BlockType::Button {
+                pressed: false,
+                attach: Facing::Up
+            }
+        );
         assert_eq!(b("minecraft:glass").block_type(), BlockType::Transparent);
-        assert_eq!(b("minecraft:lime_shulker_box").block_type(), BlockType::Container { slots: 27, solid: false, partner: None });
-        assert_eq!(b("minecraft:chest[facing=north,type=left,waterlogged=false]").block_type(),
-            BlockType::Container { slots: 27, solid: false, partner: Some(Facing::East) });
-        assert_eq!(b("minecraft:sticky_piston[extended=false,facing=up]").block_type(),
-            BlockType::Piston { facing: Facing::Up, sticky: true, extended: false });
+        assert_eq!(
+            b("minecraft:lime_shulker_box").block_type(),
+            BlockType::Container {
+                slots: 27,
+                solid: false,
+                partner: None
+            }
+        );
+        assert_eq!(
+            b("minecraft:chest[facing=north,type=left,waterlogged=false]").block_type(),
+            BlockType::Container {
+                slots: 27,
+                solid: false,
+                partner: Some(Facing::East)
+            }
+        );
+        assert_eq!(
+            b("minecraft:sticky_piston[extended=false,facing=up]").block_type(),
+            BlockType::Piston {
+                facing: Facing::Up,
+                sticky: true,
+                extended: false
+            }
+        );
         assert_eq!(b("minecraft:obsidian").block_type(), BlockType::Immovable);
         assert_eq!(b("minecraft:stone").block_type(), BlockType::Solid);
         assert_eq!(b("minecraft:stone").block_type(), BlockType::Solid);
-        assert_eq!(b(port::PORT_OUTPUT).block_type(), BlockType::Port(PortMode::Output));
+        assert_eq!(
+            b(port::PORT_OUTPUT).block_type(),
+            BlockType::Port(PortMode::Output)
+        );
     }
 
     #[test]
@@ -450,23 +601,42 @@ mod tests {
     #[test]
     #[ignore]
     fn run_a_chip_file() {
-        let Ok(path) = std::env::var("CHIP") else { return };
+        let Ok(path) = std::env::var("CHIP") else {
+            return;
+        };
         let c: CircuitData = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        let ticks: u32 = std::env::var("TICKS").ok().and_then(|t| t.parse().ok()).unwrap_or(100);
+        let ticks: u32 = std::env::var("TICKS")
+            .ok()
+            .and_then(|t| t.parse().ok())
+            .unwrap_or(100);
         let press: Vec<(String, u32, u32)> = std::env::var("PRESS")
             .unwrap_or_default()
             .split(',')
             .filter_map(|p| {
                 let mut f = p.split(':');
-                Some((f.next()?.to_string(), f.next()?.parse().ok()?, f.next()?.parse().ok()?))
+                Some((
+                    f.next()?.to_string(),
+                    f.next()?.parse().ok()?,
+                    f.next()?.parse().ok()?,
+                ))
             })
             .collect();
         let started = std::time::Instant::now();
         let mut vm = c.vm_with(&|id| CircuitData::load_for_chip("", id), 1);
         println!("built in {:?}", started.elapsed());
-        let port = |l: &str| c.ports.iter().find(|p| p.label == l).map(|p| (p.x, p.y, p.z));
+        let port = |l: &str| {
+            c.ports
+                .iter()
+                .find(|p| p.label == l)
+                .map(|p| (p.x, p.y, p.z))
+        };
         let word = |vm: &RedstoneVM, prefix: &str| {
-            (0..8).filter_map(|i| port(&format!("{prefix}{i}")).map(|(x, y, z)| ((vm.get_port_output(x, y, z) > 0) as u32) << i)).sum::<u32>()
+            (0..8)
+                .filter_map(|i| {
+                    port(&format!("{prefix}{i}"))
+                        .map(|(x, y, z)| ((vm.get_port_output(x, y, z) > 0) as u32) << i)
+                })
+                .sum::<u32>()
         };
         let started = std::time::Instant::now();
         // With a Display port: a Display's side of it, one write a tick.
@@ -481,7 +651,12 @@ mod tests {
                 }
             }
             vm.new_tick();
-            vm.settle(std::env::var("STEPS").ok().and_then(|s| s.parse().ok()).unwrap_or(Tier::Netherite.steps_per_tick()));
+            vm.settle(
+                std::env::var("STEPS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(Tier::Netherite.steps_per_tick()),
+            );
             if let Some((x, y, z)) = port("T")
                 && (vm.get_port_output(x, y, z) > 0) != toggle
             {
@@ -491,7 +666,12 @@ mod tests {
             if std::env::var("TRACE").is_ok() {
                 println!("T {} {}", word(&vm, "PC"), word(&vm, "A"));
             } else if t % 10 == 9 || t + 1 == ticks {
-                println!("tick {t}: PC {} A {} ({:?}/tick)", word(&vm, "PC"), word(&vm, "A"), started.elapsed() / (t + 1));
+                println!(
+                    "tick {t}: PC {} A {} ({:?}/tick)",
+                    word(&vm, "PC"),
+                    word(&vm, "A"),
+                    started.elapsed() / (t + 1)
+                );
             }
         }
         if port("T").is_some() {
@@ -514,8 +694,23 @@ mod tests {
 
     #[test]
     fn a_big_design_is_packed_and_read_back() {
-        let block = |x| CircuitBlock { x, y: 0, z: 0, state: "minecraft:redstone_wire".into(), items: Vec::new(), redstone_port: None };
-        let bp = Blueprint { name: "Big".into(), tier: Tier::Netherite, circuit: CircuitData { size: 256, blocks: (0..4000).map(block).collect(), ..Default::default() } };
+        let block = |x| CircuitBlock {
+            x,
+            y: 0,
+            z: 0,
+            state: "minecraft:redstone_wire".into(),
+            items: Vec::new(),
+            redstone_port: None,
+        };
+        let bp = Blueprint {
+            name: "Big".into(),
+            tier: Tier::Netherite,
+            circuit: CircuitData {
+                size: 256,
+                blocks: (0..4000).map(block).collect(),
+                ..Default::default()
+            },
+        };
         let nbt = bp.to_nbt();
         assert!(nbt.len() < 60_000, "{}", nbt.len());
         assert!(nbt.contains(PACKED));

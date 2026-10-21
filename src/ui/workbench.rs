@@ -24,11 +24,11 @@ use yog_kit::prelude::*;
 
 use crate::chip::{Blueprint, ChipMeta};
 use crate::content::Items;
+use crate::content::Tier;
+use crate::designs;
 use crate::editor;
 use crate::res::Strings;
 use crate::resources::{Amounts, Resource};
-use crate::designs;
-use crate::content::Tier;
 
 pub const WORKBENCH_ID: &str = crate::content::Blocks::VLSI_WORKBENCH;
 pub const BLUEPRINT_ID: &str = Items::BLUEPRINT;
@@ -58,7 +58,11 @@ pub struct BenchId {
 
 impl BenchId {
     fn pos(&self) -> BlockPos {
-        BlockPos { x: self.x, y: self.y, z: self.z }
+        BlockPos {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+        }
     }
 }
 
@@ -67,7 +71,13 @@ impl BenchId {
 pub enum BlueprintView {
     None,
     Blank,
-    Design { name: String, tier: Tier, ports: usize, blocks: usize, cost: Amounts },
+    Design {
+        name: String,
+        tier: Tier,
+        ports: usize,
+        blocks: usize,
+        cost: Amounts,
+    },
 }
 
 /// What a workbench screen shows — sent to the player who has it open.
@@ -83,9 +93,18 @@ pub struct BenchState {
 #[derive(Debug, Serialize, Deserialize)]
 enum Request {
     /// `design`: a ready-made one to start from ([`designs`]).
-    Create { bench: BenchId, name: String, tier: Tier, design: Option<String> },
-    Edit { bench: BenchId },
-    Fabricate { bench: BenchId },
+    Create {
+        bench: BenchId,
+        name: String,
+        tier: Tier,
+        design: Option<String>,
+    },
+    Edit {
+        bench: BenchId,
+    },
+    Fabricate {
+        bench: BenchId,
+    },
 }
 
 // ── The screen's view model ──────────────────────────────────────────────────
@@ -120,7 +139,13 @@ impl WorkbenchVm {
     }
     fn design(&self) -> Option<(&str, Tier, usize, usize, &Amounts)> {
         match &self.state.as_ref()?.blueprint {
-            BlueprintView::Design { name, tier, ports, blocks, cost } => Some((name, *tier, *ports, *blocks, cost)),
+            BlueprintView::Design {
+                name,
+                tier,
+                ports,
+                blocks,
+                cost,
+            } => Some((name, *tier, *ports, *blocks, cost)),
             _ => None,
         }
     }
@@ -153,10 +178,14 @@ impl WorkbenchVm {
     }
 
     pub fn no_blueprint(&self) -> bool {
-        self.state.as_ref().is_none_or(|s| s.blueprint == BlueprintView::None)
+        self.state
+            .as_ref()
+            .is_none_or(|s| s.blueprint == BlueprintView::None)
     }
     pub fn blank(&self) -> bool {
-        self.state.as_ref().is_some_and(|s| s.blueprint == BlueprintView::Blank)
+        self.state
+            .as_ref()
+            .is_some_and(|s| s.blueprint == BlueprintView::Blank)
     }
     pub fn has_design(&self) -> bool {
         self.design().is_some()
@@ -166,7 +195,9 @@ impl WorkbenchVm {
     }
     pub fn design_tier(&self) -> String {
         self.design()
-            .map(|(_, tier, ports, blocks, _)| Strings::screen_workbench_design_tier(tier.name(), ports, blocks))
+            .map(|(_, tier, ports, blocks, _)| {
+                Strings::screen_workbench_design_tier(tier.name(), ports, blocks)
+            })
             .unwrap_or_default()
     }
     pub fn cost_rows(&self) -> Vec<CostRow> {
@@ -179,13 +210,24 @@ impl WorkbenchVm {
             .map(|r| {
                 let (need, have) = (cost[r.index()], self.stored(r));
                 CostRow {
-                    text: Strings::screen_workbench_cost_row(r.name(), r.shown(need), r.shown(have)),
-                    color: if have >= need { 0xFF_404040 } else { 0xFF_B02020 },
+                    text: Strings::screen_workbench_cost_row(
+                        r.name(),
+                        r.shown(need),
+                        r.shown(have),
+                    ),
+                    color: if have >= need {
+                        0xFF_404040
+                    } else {
+                        0xFF_B02020
+                    },
                 }
             })
             .collect();
         if rows.is_empty() {
-            return vec![CostRow { text: Strings::screen_workbench_free(), color: 0xFF_404040 }];
+            return vec![CostRow {
+                text: Strings::screen_workbench_free(),
+                color: 0xFF_404040,
+            }];
         }
         rows
     }
@@ -197,15 +239,23 @@ impl WorkbenchVm {
         Strings::screen_workbench_tier(self.tier().name())
     }
     pub fn next_tier(&mut self) {
-        let i = Tier::ALL.iter().position(|t| *t == self.tier()).unwrap_or(0);
+        let i = Tier::ALL
+            .iter()
+            .position(|t| *t == self.tier())
+            .unwrap_or(0);
         self.tier = Some(Tier::ALL[(i + 1) % Tier::ALL.len()]);
     }
     /// The ready-made design picked, if any.
     fn template(&self) -> Option<String> {
-        self.template.checked_sub(1).and_then(|i| designs::all().get(i).map(|d| d.name.clone()))
+        self.template
+            .checked_sub(1)
+            .and_then(|i| designs::all().get(i).map(|d| d.name.clone()))
     }
     pub fn template_text(&self) -> String {
-        Strings::screen_workbench_template(self.template().unwrap_or_else(Strings::screen_workbench_template_empty))
+        Strings::screen_workbench_template(
+            self.template()
+                .unwrap_or_else(Strings::screen_workbench_template_empty),
+        )
     }
     pub fn next_template(&mut self) {
         self.template = (self.template + 1) % (designs::all().len() + 1);
@@ -214,28 +264,47 @@ impl WorkbenchVm {
         self.blank() && (!self.name.trim().is_empty() || self.template > 0)
     }
     pub fn can_fabricate(&self) -> bool {
-        let Some(state) = &self.state else { return false };
-        let Some((.., cost)) = self.design() else { return false };
-        state.chip_free && Resource::ALL.iter().all(|r| state.stored[r.index()] >= cost[r.index()])
+        let Some(state) = &self.state else {
+            return false;
+        };
+        let Some((.., cost)) = self.design() else {
+            return false;
+        };
+        state.chip_free
+            && Resource::ALL
+                .iter()
+                .all(|r| state.stored[r.index()] >= cost[r.index()])
     }
 
     pub fn create(&mut self) {
         if let Some(s) = &self.state {
             let design = self.template();
             // Unnamed, it's called what it starts as.
-            let name = Some(self.name.trim().to_string()).filter(|n| !n.is_empty()).or(design.clone()).unwrap_or_default();
-            send(&Request::Create { bench: s.bench.clone(), name, tier: self.tier(), design });
+            let name = Some(self.name.trim().to_string())
+                .filter(|n| !n.is_empty())
+                .or(design.clone())
+                .unwrap_or_default();
+            send(&Request::Create {
+                bench: s.bench.clone(),
+                name,
+                tier: self.tier(),
+                design,
+            });
             self.name.clear();
         }
     }
     pub fn edit(&mut self) {
         if let Some(s) = &self.state {
-            send(&Request::Edit { bench: s.bench.clone() });
+            send(&Request::Edit {
+                bench: s.bench.clone(),
+            });
         }
     }
     pub fn fabricate(&mut self) {
         if let Some(s) = &self.state {
-            send(&Request::Fabricate { bench: s.bench.clone() });
+            send(&Request::Fabricate {
+                bench: s.bench.clone(),
+            });
         }
     }
 }
@@ -250,7 +319,8 @@ fn send(request: &Request) {
 // ── The server side ──────────────────────────────────────────────────────────
 
 /// Each workbench's store.
-static STORES: LazyLock<Mutex<HashMap<BenchId, Amounts>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static STORES: LazyLock<Mutex<HashMap<BenchId, Amounts>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 /// Who has which workbench open, and what they were last sent.
 type Watching = (BenchId, Option<BenchState>);
 static WATCHERS: LazyLock<Mutex<HashMap<String, Watching>>> =
@@ -261,7 +331,9 @@ static TICKS: Mutex<u64> = Mutex::new(0);
 fn absorb(srv: &dyn yog_api::Server, bench: &BenchId) {
     let mut gained = [0u64; 6];
     for r in Resource::ALL {
-        let Some((item, count, _)) = srv.get_inventory_slot(&bench.dimension, bench.pos(), r.slot()) else {
+        let Some((item, count, _)) =
+            srv.get_inventory_slot(&bench.dimension, bench.pos(), r.slot())
+        else {
             continue;
         };
         if let Some(units) = r.units_of(srv, &item)
@@ -288,7 +360,9 @@ fn blueprint_in(srv: &dyn yog_api::Server, bench: &BenchId) -> (BlueprintView, O
                     tier: bp.tier,
                     ports: bp.circuit.ports.len(),
                     blocks: bp.circuit.blocks.len(),
-                    cost: crate::resources::circuit_cost(&bp.circuit, &|id| crate::chip::CircuitData::load_for_chip(&srv.world_dir(), id)),
+                    cost: crate::resources::circuit_cost(&bp.circuit, &|id| {
+                        crate::chip::CircuitData::load_for_chip(&srv.world_dir(), id)
+                    }),
                 };
                 (view, Some(bp))
             }
@@ -301,9 +375,16 @@ fn blueprint_in(srv: &dyn yog_api::Server, bench: &BenchId) -> (BlueprintView, O
 fn state_of(srv: &dyn yog_api::Server, bench: &BenchId) -> BenchState {
     BenchState {
         bench: bench.clone(),
-        stored: STORES.lock().unwrap().get(bench).copied().unwrap_or_default(),
+        stored: STORES
+            .lock()
+            .unwrap()
+            .get(bench)
+            .copied()
+            .unwrap_or_default(),
         blueprint: blueprint_in(srv, bench).0,
-        chip_free: srv.get_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT).is_none(),
+        chip_free: srv
+            .get_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT)
+            .is_none(),
     }
 }
 
@@ -317,13 +398,19 @@ pub fn tick(srv: &dyn yog_api::Server) {
     if n % TICK_EVERY != 0 {
         return;
     }
-    let watchers: Vec<(String, BenchId)> =
-        WATCHERS.lock().unwrap().iter().map(|(p, (b, _))| (p.clone(), b.clone())).collect();
+    let watchers: Vec<(String, BenchId)> = WATCHERS
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(p, (b, _))| (p.clone(), b.clone()))
+        .collect();
     for (player, bench) in watchers {
         absorb(srv, &bench);
         let state = state_of(srv, &bench);
         let mut w = WATCHERS.lock().unwrap();
-        let Some((_, last)) = w.get_mut(&player) else { continue };
+        let Some((_, last)) = w.get_mut(&player) else {
+            continue;
+        };
         if last.as_ref() != Some(&state) {
             if let Ok(json) = serde_json::to_string(&state) {
                 srv.send_to_player(&player, STATE_CHANNEL, json.as_bytes());
@@ -336,16 +423,30 @@ pub fn tick(srv: &dyn yog_api::Server) {
 /// Runs a client's request; the reply goes to its action bar.
 fn run_request(srv: &dyn yog_api::Server, player: &str, request: Request) -> String {
     match request {
-        Request::Create { bench, name, tier, design } => {
+        Request::Create {
+            bench,
+            name,
+            tier,
+            design,
+        } => {
             if !matches!(blueprint_in(srv, &bench).0, BlueprintView::Blank) {
                 return "§cPut a blank Blueprint in the workbench.".into();
             }
             let mut bp = Blueprint::new(name.clone(), tier);
             if let Some(design) = design {
-                let Some(d) = designs::named(&design) else { return format!("§cNo design '{design}'.") };
+                let Some(d) = designs::named(&design) else {
+                    return format!("§cNo design '{design}'.");
+                };
                 bp.circuit = d.circuit(tier);
             }
-            if !srv.set_inventory_slot(&bench.dimension, bench.pos(), BLUEPRINT_SLOT, BLUEPRINT_ID, 1, &bp.to_nbt()) {
+            if !srv.set_inventory_slot(
+                &bench.dimension,
+                bench.pos(),
+                BLUEPRINT_SLOT,
+                BLUEPRINT_ID,
+                1,
+                &bp.to_nbt(),
+            ) {
                 return "§cCouldn't write the Blueprint.".into();
             }
             format!("§aCreated '{name}' ({} tier).", tier.name())
@@ -354,8 +455,16 @@ fn run_request(srv: &dyn yog_api::Server, player: &str, request: Request) -> Str
             let Some(bp) = blueprint_in(srv, &bench).1 else {
                 return "§cPut a written Blueprint in the workbench.".into();
             };
-            let back = Player::new(srv, player).position().unwrap_or((bench.x as f64 + 0.5, bench.y as f64 + 1.0, bench.z as f64 + 0.5));
-            let source = editor::Source { dimension: bench.dimension.clone(), pos: bench.pos(), slot: BLUEPRINT_SLOT };
+            let back = Player::new(srv, player).position().unwrap_or((
+                bench.x as f64 + 0.5,
+                bench.y as f64 + 1.0,
+                bench.z as f64 + 0.5,
+            ));
+            let source = editor::Source {
+                dimension: bench.dimension.clone(),
+                pos: bench.pos(),
+                slot: BLUEPRINT_SLOT,
+            };
             match editor::enter(srv, player, &bp, source, &bench.dimension, back) {
                 Ok(()) => String::new(),
                 Err(e) => e,
@@ -369,25 +478,48 @@ fn fabricate(srv: &dyn yog_api::Server, bench: &BenchId) -> String {
     let Some(bp) = blueprint_in(srv, bench).1 else {
         return "§cPut a written Blueprint in the workbench.".into();
     };
-    if srv.get_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT).is_some() {
+    if srv
+        .get_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT)
+        .is_some()
+    {
         return "§cTake the chip out of the chip slot first.".into();
     }
-    let cost = crate::resources::circuit_cost(&bp.circuit, &|id| crate::chip::CircuitData::load_for_chip(&srv.world_dir(), id));
+    let cost = crate::resources::circuit_cost(&bp.circuit, &|id| {
+        crate::chip::CircuitData::load_for_chip(&srv.world_dir(), id)
+    });
     {
         let stores = STORES.lock().unwrap();
         let stored = stores.get(bench).copied().unwrap_or_default();
         let missing: Vec<String> = Resource::ALL
             .iter()
             .filter(|r| stored[r.index()] < cost[r.index()])
-            .map(|r| format!("{} {}", r.shown(cost[r.index()] - stored[r.index()]), r.name()))
+            .map(|r| {
+                format!(
+                    "{} {}",
+                    r.shown(cost[r.index()] - stored[r.index()]),
+                    r.name()
+                )
+            })
             .collect();
         if !missing.is_empty() {
             return format!("§cNot enough: {}.", missing.join(", "));
         }
     }
-    let meta = ChipMeta { id: crate::chip::new_id(), tier: bp.tier, name: bp.name.clone(), ports: bp.circuit.ports.clone() };
+    let meta = ChipMeta {
+        id: crate::chip::new_id(),
+        tier: bp.tier,
+        name: bp.name.clone(),
+        ports: bp.circuit.ports.clone(),
+    };
     bp.circuit.save_for_chip(&srv.world_dir(), &meta.id);
-    if !srv.set_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT, bp.tier.chip(), 1, &meta.to_nbt()) {
+    if !srv.set_inventory_slot(
+        &bench.dimension,
+        bench.pos(),
+        CHIP_SLOT,
+        bp.tier.chip(),
+        1,
+        &meta.to_nbt(),
+    ) {
         return "§cCouldn't put the chip in the chip slot.".into();
     }
     let mut stores = STORES.lock().unwrap();
@@ -395,7 +527,12 @@ fn fabricate(srv: &dyn yog_api::Server, bench: &BenchId) -> String {
     for (s, c) in store.iter_mut().zip(cost) {
         *s -= c;
     }
-    format!("§aFabricated '{}' ({} tier, {} ports).", meta.name, bp.tier.name(), meta.ports.len())
+    format!(
+        "§aFabricated '{}' ({} tier, {} ports).",
+        meta.name,
+        bp.tier.name(),
+        meta.ports.len()
+    )
 }
 
 /// The block, its screen, and the server side.
@@ -411,7 +548,9 @@ pub fn setup(registry: &mut Registry) {
     });
 
     registry.on_packet(REQUEST_CHANNEL, |ev, srv| {
-        let Ok(request) = serde_json::from_slice::<Request>(&ev.payload) else { return };
+        let Ok(request) = serde_json::from_slice::<Request>(&ev.payload) else {
+            return;
+        };
         let reply = run_request(srv, &ev.player, request);
         if !reply.is_empty() {
             srv.send_actionbar(&ev.player, &reply);
@@ -425,8 +564,16 @@ pub fn setup(registry: &mut Registry) {
     // Opening a workbench: watch it from now on.
     registry.on_use_block(|e, phase, _srv| -> bool {
         if phase == EventPhase::Pre && e.block_id == WORKBENCH_ID {
-            let bench = BenchId { dimension: e.dimension.clone(), x: e.pos.x, y: e.pos.y, z: e.pos.z };
-            WATCHERS.lock().unwrap().insert(e.player_name.clone(), (bench, None));
+            let bench = BenchId {
+                dimension: e.dimension.clone(),
+                x: e.pos.x,
+                y: e.pos.y,
+                z: e.pos.z,
+            };
+            WATCHERS
+                .lock()
+                .unwrap()
+                .insert(e.player_name.clone(), (bench, None));
         }
         true // the inventory opens
     });
@@ -446,7 +593,12 @@ pub fn load_resources(srv: &dyn yog_api::Server) {
 }
 
 pub fn save_resources(srv: &dyn yog_api::Server) {
-    let stores: Vec<(BenchId, Amounts)> = STORES.lock().unwrap().iter().map(|(k, v)| (k.clone(), *v)).collect();
+    let stores: Vec<(BenchId, Amounts)> = STORES
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (k.clone(), *v))
+        .collect();
     if let Ok(json) = serde_json::to_string(&stores) {
         let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
         store.set(STORE_KEY, &*json);
@@ -460,7 +612,12 @@ mod tests {
 
     fn state(stored: Amounts, blueprint: BlueprintView) -> BenchState {
         BenchState {
-            bench: BenchId { dimension: "minecraft:overworld".into(), x: 0, y: 0, z: 0 },
+            bench: BenchId {
+                dimension: "minecraft:overworld".into(),
+                x: 0,
+                y: 0,
+                z: 0,
+            },
             stored,
             blueprint,
             chip_free: true,
@@ -476,9 +633,15 @@ mod tests {
         // The player's inventory (9×18 by 3×18 + 4 + 18) stays on screen.
         assert!(px + 9.0 * 18.0 <= WIDTH && py + 76.0 <= HEIGHT, "{px},{py}");
         for (i, a) in def.layout.iter().enumerate() {
-            assert!(a.x >= 0.0 && a.y >= 0.0 && a.x + 16.0 <= WIDTH && a.y + 16.0 < py, "slot {i} at {a:?}");
+            assert!(
+                a.x >= 0.0 && a.y >= 0.0 && a.x + 16.0 <= WIDTH && a.y + 16.0 < py,
+                "slot {i} at {a:?}"
+            );
             for b in &def.layout[i + 1..] {
-                assert!((a.x - b.x).abs() >= 18.0 || (a.y - b.y).abs() >= 18.0, "{a:?} overlaps {b:?}");
+                assert!(
+                    (a.x - b.x).abs() >= 18.0 || (a.y - b.y).abs() >= 18.0,
+                    "{a:?} overlaps {b:?}"
+                );
             }
         }
     }
@@ -496,9 +659,27 @@ mod tests {
         assert!(h.vm().can_create());
 
         let cost = [3, 0, 0, 0, 0, 1];
-        h.vm_mut().apply(state([5, 0, 0, 0, 0, 0], BlueprintView::Design { name: "Adder".into(), tier: Tier::ALL[0], ports: 2, blocks: 4, cost }));
+        h.vm_mut().apply(state(
+            [5, 0, 0, 0, 0, 0],
+            BlueprintView::Design {
+                name: "Adder".into(),
+                tier: Tier::ALL[0],
+                ports: 2,
+                blocks: 4,
+                cost,
+            },
+        ));
         assert!(!h.vm().can_fabricate(), "no stone stored");
-        h.vm_mut().apply(state([5, 0, 0, 0, 0, 1], BlueprintView::Design { name: "Adder".into(), tier: Tier::ALL[0], ports: 2, blocks: 4, cost }));
+        h.vm_mut().apply(state(
+            [5, 0, 0, 0, 0, 1],
+            BlueprintView::Design {
+                name: "Adder".into(),
+                tier: Tier::ALL[0],
+                ports: 2,
+                blocks: 4,
+                cost,
+            },
+        ));
         assert!(h.vm().can_fabricate());
         assert_eq!(h.vm().cost_rows().len(), 2);
     }
@@ -520,13 +701,24 @@ mod tests {
     fn vials_fill_on_a_log_scale() {
         let mut vm = WorkbenchVm::default();
         // Iron and gold count nuggets: 9 ingots, 999 999 ingots.
-        vm.apply(state([0, 81, 8_999_991, 0, 0, 5_000_000], BlueprintView::None));
+        vm.apply(state(
+            [0, 81, 8_999_991, 0, 0, 5_000_000],
+            BlueprintView::None,
+        ));
         assert_eq!(vm.vial(Resource::Redstone), 0.0);
         assert!(vm.vial(Resource::Iron) > 0.0 && vm.vial(Resource::Iron) < VIAL_HEIGHT / 2.0);
         assert!((vm.vial(Resource::Gold) - VIAL_HEIGHT).abs() < 0.01);
         assert_eq!(vm.vial(Resource::Stone), VIAL_HEIGHT);
         assert_eq!(vm.amount(Resource::Stone), "5m");
         assert_eq!(vm.amount(Resource::Iron), "9");
-        assert_eq!((Resource::Iron.shown(21), Resource::Iron.shown(5), Resource::Redstone.shown(21)), ("2.3".into(), "0.5".into(), "21".into()), "an ingot is 9 nuggets");
+        assert_eq!(
+            (
+                Resource::Iron.shown(21),
+                Resource::Iron.shown(5),
+                Resource::Redstone.shown(21)
+            ),
+            ("2.3".into(), "0.5".into(), "21".into()),
+            "an ingot is 9 nuggets"
+        );
     }
 }

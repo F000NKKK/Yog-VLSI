@@ -43,7 +43,9 @@ impl AluVm {
         self.view = Some(view);
     }
     pub fn title(&self) -> String {
-        let Some(v) = &self.view else { return String::new() };
+        let Some(v) = &self.view else {
+            return String::new();
+        };
         let working = v.chips.iter().filter(|c| c.active).count();
         Strings::screen_alu_title(v.tier.name(), working, v.tier.max_chips())
     }
@@ -114,7 +116,10 @@ struct Camera {
 
 impl Default for Camera {
     fn default() -> Self {
-        Camera { zoom: 1.0, pan: (0.0, 0.0) }
+        Camera {
+            zoom: 1.0,
+            pan: (0.0, 0.0),
+        }
     }
 }
 
@@ -134,7 +139,10 @@ impl Camera {
     fn zoomed(self, factor: f32, at: (f32, f32)) -> Camera {
         let zoom = (self.zoom * factor).clamp(Self::MIN, Self::MAX);
         let world = self.to_world(at);
-        Camera { zoom, pan: (at.0 - world.0 * zoom, at.1 - world.1 * zoom) }
+        Camera {
+            zoom,
+            pan: (at.0 - world.0 * zoom, at.1 - world.1 * zoom),
+        }
     }
 }
 
@@ -174,7 +182,9 @@ struct Layout {
 
 impl Layout {
     fn pin(&self, pin: &Pin, source: bool) -> Option<&PinAt> {
-        self.pins.iter().find(|p| &p.pin == pin && p.source == source)
+        self.pins
+            .iter()
+            .find(|p| &p.pin == pin && p.source == source)
     }
 
     /// The pin nearest `(x, y)` within reach.
@@ -187,9 +197,10 @@ impl Layout {
 
     /// The node whose title bar is at `(x, y)` (the topmost).
     fn header(&self, x: f32, y: f32) -> Option<&NodeAt> {
-        self.nodes.iter().rev().find(|n| {
-            x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.head
-        })
+        self.nodes
+            .iter()
+            .rev()
+            .find(|n| x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.head)
     }
 }
 
@@ -197,16 +208,31 @@ enum Drag {
     None,
     /// A wire from a source, following the pointer; `lifted` is the sink
     /// it was taken off.
-    FromSource { from: Pin, lifted: Option<Pin> },
+    FromSource {
+        from: Pin,
+        lifted: Option<Pin>,
+    },
     /// A wire from a sink, looking for its source.
-    FromSink { to: Pin },
+    FromSink {
+        to: Pin,
+    },
     /// A node (a chip, the In or Out panel) being moved; the pointer's
     /// offset in its title bar.
-    Node { node: Node, dx: f32, dy: f32 },
+    Node {
+        node: Node,
+        dx: f32,
+        dy: f32,
+    },
     /// The view being moved: where the pointer and the view were at the start.
-    Pan { from: (f32, f32), pan: (f32, f32) },
+    Pan {
+        from: (f32, f32),
+        pan: (f32, f32),
+    },
     /// A bus node being pulled open or closed: its side, its top (local).
-    Rows { side: u8, top: f32 },
+    Rows {
+        side: u8,
+        top: f32,
+    },
 }
 
 struct Graph {
@@ -224,7 +250,16 @@ struct Graph {
 }
 
 static GRAPH: LazyLock<Mutex<Graph>> = LazyLock::new(|| {
-    Mutex::new(Graph { view: None, layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default(), fitted: false })
+    Mutex::new(Graph {
+        view: None,
+        layout: Layout::default(),
+        drag: Drag::None,
+        pointer: (0.0, 0.0),
+        moved: HashMap::new(),
+        rows: HashMap::new(),
+        camera: Camera::default(),
+        fitted: false,
+    })
 });
 
 fn level_color(level: u8) -> u32 {
@@ -266,7 +301,14 @@ fn layout(
     };
     let z = cam.zoom;
     let at = |wx: f32, wy: f32| cam.to_local((wx, wy));
-    let placed = |node: Node| moved.get(&node).copied().or_else(|| view.layout.iter().find(|(n, _)| *n == node).map(|(_, p)| *p));
+    let placed = |node: Node| {
+        moved.get(&node).copied().or_else(|| {
+            view.layout
+                .iter()
+                .find(|(n, _)| *n == node)
+                .map(|(_, p)| *p)
+        })
+    };
 
     // The ALU's sides: In (its sources) and Out (its sinks), each as wide as its names.
     let side_text = |side: &crate::board::SideView| match &side.name {
@@ -274,19 +316,38 @@ fn layout(
         None => side.side.clone(),
     };
     let panel_w = |node: Node| {
-        let title = if node == Node::In { Strings::screen_alu_inputs() } else { Strings::screen_alu_outputs() };
-        view.sides.iter().map(|s| width_of(&side_text(s))).chain([width_of(&title)]).fold(SIDE_MIN_W, |a, b| a.max(b + 8.0))
+        let title = if node == Node::In {
+            Strings::screen_alu_inputs()
+        } else {
+            Strings::screen_alu_outputs()
+        };
+        view.sides
+            .iter()
+            .map(|s| width_of(&side_text(s)))
+            .chain([width_of(&title)])
+            .fold(SIDE_MIN_W, |a, b| a.max(b + 8.0))
     };
     let (in_w, out_w) = (panel_w(Node::In), panel_w(Node::Out));
     // The width laid out in: the box's (at zoom 1 — the default places
     // don't move as the view zooms), and at least room for a column of
     // chips between the panels.
     // The chips' columns: spread across the box, closer when it's narrow.
-    let columns = flow_depths(view).values().copied().max().map_or(1, |d| d + 1) as f32;
+    let columns = flow_depths(view)
+        .values()
+        .copied()
+        .max()
+        .map_or(1, |d| d + 1) as f32;
     let free = w - in_w - out_w - 4.0 - 2.0 * SIDE_GAP;
-    let pitch = if columns > 1.0 { ((free - CHIP_W) / (columns - 1.0)).clamp(CHIP_W + GAP, CHIP_W + 4.0 * GAP) } else { CHIP_W };
+    let pitch = if columns > 1.0 {
+        ((free - CHIP_W) / (columns - 1.0)).clamp(CHIP_W + GAP, CHIP_W + 4.0 * GAP)
+    } else {
+        CHIP_W
+    };
     let room = w.max(in_w + out_w + 4.0 + 2.0 * SIDE_GAP + CHIP_W + (columns - 1.0) * pitch);
-    for (node, default_x, pw) in [(Node::In, 2.0, in_w), (Node::Out, room - out_w - 2.0, out_w)] {
+    for (node, default_x, pw) in [
+        (Node::In, 2.0, in_w),
+        (Node::Out, room - out_w - 2.0, out_w),
+    ] {
         let (x, y) = placed(node).unwrap_or((default_x, 2.0));
         let mut labels = Vec::new();
         for (row, side) in view.sides.iter().enumerate() {
@@ -294,12 +355,30 @@ fn layout(
             let source = node == Node::In;
             let usable = !source || !side.output;
             let text = side_text(side);
-            let (tx, ty) = at(if source { x + 3.0 } else { x + pw - 3.0 - width_of(&text) }, ry + 1.0);
+            let (tx, ty) = at(
+                if source {
+                    x + 3.0
+                } else {
+                    x + pw - 3.0 - width_of(&text)
+                },
+                ry + 1.0,
+            );
             labels.push((text, tx, ty, if usable { TEXT } else { TEXT_DIM }));
             let (px, py) = at(if source { x + pw } else { x }, ry + ROW / 2.0);
-            out.pins.push(PinAt { pin: Pin::new(node, &side.side), x: px, y: py, reach_y: ROW * z / 2.0, source, usable });
+            out.pins.push(PinAt {
+                pin: Pin::new(node, &side.side),
+                x: px,
+                y: py,
+                reach_y: ROW * z / 2.0,
+                source,
+                usable,
+            });
         }
-        let title = if node == Node::In { Strings::screen_alu_inputs() } else { Strings::screen_alu_outputs() };
+        let title = if node == Node::In {
+            Strings::screen_alu_inputs()
+        } else {
+            Strings::screen_alu_outputs()
+        };
         let (nx, ny) = at(x, y);
         out.nodes.push(NodeAt {
             node,
@@ -320,7 +399,11 @@ fn layout(
     let mut bus_at: HashMap<u8, (f32, f32)> = HashMap::new();
     for bus in &view.buses {
         let node = Node::Bus(bus.index);
-        let n_rows = rows.get(&bus.index).copied().unwrap_or(bus.rows).clamp(1, bus.channels.max(1));
+        let n_rows = rows
+            .get(&bus.index)
+            .copied()
+            .unwrap_or(bus.rows)
+            .clamp(1, bus.channels.max(1));
         let nh = HEAD + n_rows as f32 * ROW + 2.0 + GRIP;
         let (x, y) = placed(node).unwrap_or((2.0, bus_y));
         bus_at.insert(bus.index, (x, y));
@@ -333,7 +416,14 @@ fn layout(
             labels.push((name.clone(), tx, ty, TEXT));
             for source in [false, true] {
                 let (px, py) = at(if source { x + BUS_W } else { x }, ry + ROW / 2.0);
-                out.pins.push(PinAt { pin: Pin::new(node, name.as_str()), x: px, y: py, reach_y: ROW * z / 2.0, source, usable: true });
+                out.pins.push(PinAt {
+                    pin: Pin::new(node, name.as_str()),
+                    x: px,
+                    y: py,
+                    reach_y: ROW * z / 2.0,
+                    source,
+                    usable: true,
+                });
             }
         }
         let (nx, ny) = at(x, y);
@@ -355,8 +445,12 @@ fn layout(
     // down the flow each is (what feeds a chip stands left of it), each
     // column in the order of where what feeds its chips is — wires run
     // left to right and cross little.
-    let auto = flow_layout(view, &placed, in_w + 2.0 + SIDE_GAP, pitch, &|pin| {
-        match pin.node {
+    let auto = flow_layout(
+        view,
+        &placed,
+        in_w + 2.0 + SIDE_GAP,
+        pitch,
+        &|pin| match pin.node {
             Node::In => view.sides.iter().position(|s| s.side == pin.name).map(|r| {
                 let (_, y) = placed(Node::In).unwrap_or((2.0, 2.0));
                 y + HEAD + r as f32 * ROW + ROW / 2.0
@@ -367,13 +461,15 @@ fn layout(
                 Some(y + HEAD + (n - 1.0) * ROW + ROW / 2.0)
             }
             _ => None,
-        }
-    });
+        },
+    );
     for chip in &view.chips {
         let ins: Vec<_> = chip.pins.iter().filter(|(_, m)| m.inputs()).collect();
         let outs: Vec<_> = chip.pins.iter().filter(|(_, m)| m.outputs()).collect();
         let nh = HEAD + ins.len().max(outs.len()).max(1) as f32 * ROW + 2.0;
-        let (x, y) = placed(Node::Chip(chip.slot)).or_else(|| auto.get(&chip.slot).copied()).unwrap_or((in_w + 2.0 + SIDE_GAP, 2.0));
+        let (x, y) = placed(Node::Chip(chip.slot))
+            .or_else(|| auto.get(&chip.slot).copied())
+            .unwrap_or((in_w + 2.0 + SIDE_GAP, 2.0));
         // Laid out in the world, drawn where the camera shows it.
         let mut labels = Vec::new();
         for (row, (name, _)) in ins.iter().enumerate() {
@@ -382,7 +478,14 @@ fn layout(
             let (tx, ty) = at(x + 4.0, ry + 1.0);
             labels.push((text, tx, ty, if chip.active { TEXT } else { TEXT_DIM }));
             let (px, py) = at(x, ry + ROW / 2.0);
-            out.pins.push(PinAt { pin: Pin::new(Node::Chip(chip.slot), name.as_str()), x: px, y: py, reach_y: ROW * z / 2.0, source: false, usable: chip.active });
+            out.pins.push(PinAt {
+                pin: Pin::new(Node::Chip(chip.slot), name.as_str()),
+                x: px,
+                y: py,
+                reach_y: ROW * z / 2.0,
+                source: false,
+                usable: chip.active,
+            });
         }
         for (row, (name, _)) in outs.iter().enumerate() {
             let ry = y + HEAD + row as f32 * ROW;
@@ -402,7 +505,12 @@ fn layout(
         let title = if chip.active {
             format!("{} {}", chip.slot + 1, chip.name)
         } else {
-            format!("{} {} ({})", chip.slot + 1, chip.name, Strings::screen_alu_sleeping())
+            format!(
+                "{} {} ({})",
+                chip.slot + 1,
+                chip.name,
+                Strings::screen_alu_sleeping()
+            )
         };
         let (nx, ny) = at(x, y);
         out.nodes.push(NodeAt {
@@ -468,22 +576,37 @@ fn flow_layout(
     };
     let mut at: HashMap<u8, (f32, f32)> = HashMap::new();
     let chip_out_y = |at: &HashMap<u8, (f32, f32)>, pin: &Pin| -> Option<f32> {
-        let Node::Chip(slot) = pin.node else { return None };
+        let Node::Chip(slot) = pin.node else {
+            return None;
+        };
         let chip = view.chips.iter().find(|c| c.slot == slot)?;
-        let row = chip.pins.iter().filter(|(_, m)| m.outputs()).position(|(n, _)| *n == pin.name)?;
+        let row = chip
+            .pins
+            .iter()
+            .filter(|(_, m)| m.outputs())
+            .position(|(n, _)| *n == pin.name)?;
         let (_, y) = placed(pin.node).or_else(|| at.get(&slot).copied())?;
         Some(y + HEAD + row as f32 * ROW + ROW / 2.0)
     };
     let max_depth = depth.values().copied().max().unwrap_or(0);
     let mut columns: Vec<Vec<&crate::board::ChipView>> = (0..=max_depth)
-        .map(|d| view.chips.iter().filter(|c| depth.get(&c.slot) == Some(&d) && placed(Node::Chip(c.slot)).is_none()).collect())
+        .map(|d| {
+            view.chips
+                .iter()
+                .filter(|c| depth.get(&c.slot) == Some(&d) && placed(Node::Chip(c.slot)).is_none())
+                .collect()
+        })
         .collect();
     // Where a chip's pins are, at `at`: its input row `name`'s height.
     let input_y = |at: &HashMap<u8, (f32, f32)>, pin: &Pin| -> Option<f32> {
         match pin.node {
             Node::Chip(slot) => {
                 let chip = view.chips.iter().find(|c| c.slot == slot)?;
-                let row = chip.pins.iter().filter(|(_, m)| m.inputs()).position(|(n, _)| *n == pin.name)?;
+                let row = chip
+                    .pins
+                    .iter()
+                    .filter(|(_, m)| m.inputs())
+                    .position(|(n, _)| *n == pin.name)?;
                 let (_, y) = placed(pin.node).or_else(|| at.get(&slot).copied())?;
                 Some(y + HEAD + row as f32 * ROW + ROW / 2.0)
             }
@@ -495,12 +618,32 @@ fn flow_layout(
             _ => None,
         }
     };
-    let mean = |ys: Vec<f32>| if ys.is_empty() { None } else { Some(ys.iter().sum::<f32>() / ys.len() as f32) };
+    let mean = |ys: Vec<f32>| {
+        if ys.is_empty() {
+            None
+        } else {
+            Some(ys.iter().sum::<f32>() / ys.len() as f32)
+        }
+    };
     // What feeds a chip, and what it feeds: their mean heights.
     let fed_from = |at: &HashMap<u8, (f32, f32)>, slot: u8| {
-        mean(view.wires.iter().filter(|w| w.to.node == Node::Chip(slot)).filter_map(|w| source_y(&w.from).or_else(|| chip_out_y(at, &w.from))).collect())
+        mean(
+            view.wires
+                .iter()
+                .filter(|w| w.to.node == Node::Chip(slot))
+                .filter_map(|w| source_y(&w.from).or_else(|| chip_out_y(at, &w.from)))
+                .collect(),
+        )
     };
-    let feeds = |at: &HashMap<u8, (f32, f32)>, slot: u8| mean(view.wires.iter().filter(|w| w.from.node == Node::Chip(slot)).filter_map(|w| input_y(at, &w.to)).collect());
+    let feeds = |at: &HashMap<u8, (f32, f32)>, slot: u8| {
+        mean(
+            view.wires
+                .iter()
+                .filter(|w| w.from.node == Node::Chip(slot))
+                .filter_map(|w| input_y(at, &w.to))
+                .collect(),
+        )
+    };
     // Stacks a column at `x`, each chip level with what feeds it where there's room.
     let stack = |at: &mut HashMap<u8, (f32, f32)>, column: &[&crate::board::ChipView], x: f32| {
         let mut y = 2.0f32;
@@ -513,9 +656,17 @@ fn flow_layout(
     let x_of = |d: usize| x0 + d as f32 * pitch;
     let sort_by = |column: &mut Vec<&crate::board::ChipView>, key: &dyn Fn(u8) -> Option<f32>| {
         // Those with nothing to go by keep their place among the rest.
-        let keys: Vec<f32> = column.iter().enumerate().map(|(i, c)| key(c.slot).unwrap_or(i as f32 * 1e-3 + f32::MAX / 2.0)).collect();
+        let keys: Vec<f32> = column
+            .iter()
+            .enumerate()
+            .map(|(i, c)| key(c.slot).unwrap_or(i as f32 * 1e-3 + f32::MAX / 2.0))
+            .collect();
         let mut idx: Vec<usize> = (0..column.len()).collect();
-        idx.sort_by(|&a, &b| keys[a].total_cmp(&keys[b]).then(column[a].slot.cmp(&column[b].slot)));
+        idx.sort_by(|&a, &b| {
+            keys[a]
+                .total_cmp(&keys[b])
+                .then(column[a].slot.cmp(&column[b].slot))
+        });
         *column = idx.into_iter().map(|i| column[i]).collect();
     };
     // Down the flow by what feeds each chip, back up by what it feeds,
@@ -600,7 +751,12 @@ struct Clip<'a> {
 
 impl Clip<'_> {
     fn rect(&self, x0: f32, y0: f32, x1: f32, y1: f32, color: u32) {
-        let (x0, y0, x1, y1) = (x0.max(self.x0), y0.max(self.y0), x1.min(self.x1), y1.min(self.y1));
+        let (x0, y0, x1, y1) = (
+            x0.max(self.x0),
+            y0.max(self.y0),
+            x1.min(self.x1),
+            y1.min(self.y1),
+        );
         if x1 > x0 && y1 > y0 {
             self.d2.rect(x0, y0, x1, y1, color);
         }
@@ -625,7 +781,10 @@ impl Clip<'_> {
         let mut end = chars.len();
         let from = chars.get(start).map_or(text.len(), |(i, _)| *i);
         // And what's right of it.
-        while end > start && x + width(&text[from..chars.get(end).map_or(text.len(), |(i, _)| *i)]) > self.x1 + 0.5 {
+        while end > start
+            && x + width(&text[from..chars.get(end).map_or(text.len(), |(i, _)| *i)])
+                > self.x1 + 0.5
+        {
             end -= 1;
         }
         if end > start {
@@ -658,12 +817,19 @@ impl Clip<'_> {
 /// run of small squares `width` across.
 fn trace(c: &Clip<'_>, (x1, y1): (f32, f32), (x2, y2): (f32, f32), color: u32, width: f32) {
     // Forward, a gentle S as long as the gap; backward, a loop out and round.
-    let pull = if x2 >= x1 { ((x2 - x1) * 0.5).clamp(6.0, 60.0) } else { ((x1 - x2) * 0.5).clamp(30.0, 80.0) };
+    let pull = if x2 >= x1 {
+        ((x2 - x1) * 0.5).clamp(6.0, 60.0)
+    } else {
+        ((x1 - x2) * 0.5).clamp(30.0, 80.0)
+    };
     let (cx1, cx2) = (x1 + pull, x2 - pull);
     let at = |t: f32| {
         let u = 1.0 - t;
         let (a, b, cc, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
-        (a * x1 + b * cx1 + cc * cx2 + d * x2, a * y1 + b * y1 + cc * y2 + d * y2)
+        (
+            a * x1 + b * cx1 + cc * cx2 + d * x2,
+            a * y1 + b * y1 + cc * y2 + d * y2,
+        )
     };
     // Roughly its length, a square every pixel.
     let len = (pull * 2.0 + (x2 - x1).abs() + (y2 - y1).abs()).max(1.0);
@@ -682,14 +848,35 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
     let width_of = |t: &str| d2.text_width(t);
     // First shown, the whole board in the box: zoomed out as far as needed.
     if !g.fitted {
-        let whole = layout(&view, &g.moved, &g.rows, rect.w, rect.h, Camera::default(), &width_of);
+        let whole = layout(
+            &view,
+            &g.moved,
+            &g.rows,
+            rect.w,
+            rect.h,
+            Camera::default(),
+            &width_of,
+        );
         let right = whole.nodes.iter().map(|n| n.x + n.w).fold(rect.w, f32::max) + 4.0;
         let bottom = whole.nodes.iter().map(|n| n.y + n.h).fold(rect.h, f32::max) + 4.0;
-        let zoom = (rect.w / right).min(rect.h / bottom).clamp(Camera::MIN, 1.0);
-        g.camera = Camera { zoom, pan: (0.0, 0.0) };
+        let zoom = (rect.w / right)
+            .min(rect.h / bottom)
+            .clamp(Camera::MIN, 1.0);
+        g.camera = Camera {
+            zoom,
+            pan: (0.0, 0.0),
+        };
         g.fitted = true;
     }
-    g.layout = layout(&view, &g.moved, &g.rows, rect.w / g.camera.zoom, rect.h, g.camera, &width_of);
+    g.layout = layout(
+        &view,
+        &g.moved,
+        &g.rows,
+        rect.w / g.camera.zoom,
+        rect.h,
+        g.camera,
+        &width_of,
+    );
     let (ox, oy) = (rect.x, rect.y);
     let at = |x: f32, y: f32| (ox + x, oy + y);
     let levels: HashMap<&Pin, u8> = view.levels.iter().map(|(p, l)| (p, *l)).collect();
@@ -698,12 +885,21 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
         _ => None,
     };
     // Nothing drawn past the graph's box, however the view is moved.
-    let c = Clip { d2, x0: rect.x, y0: rect.y, x1: rect.x + rect.w, y1: rect.y + rect.h };
+    let c = Clip {
+        d2,
+        x0: rect.x,
+        y0: rect.y,
+        x1: rect.x + rect.w,
+        y1: rect.y + rect.h,
+    };
 
     // A grid under it all, moving with the view.
     let step = GRID_STEP * g.camera.zoom;
     if step >= 6.0 {
-        let (sx, sy) = (g.camera.pan.0.rem_euclid(step), g.camera.pan.1.rem_euclid(step));
+        let (sx, sy) = (
+            g.camera.pan.0.rem_euclid(step),
+            g.camera.pan.1.rem_euclid(step),
+        );
         let mut x = rect.x + sx;
         while x < rect.x + rect.w {
             let mut y = rect.y + sy;
@@ -715,12 +911,21 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
         }
     }
 
-    let wired: std::collections::HashSet<(&Pin, bool)> =
-        view.wires.iter().flat_map(|w| [(&w.from, true), (&w.to, false)]).collect();
+    let wired: std::collections::HashSet<(&Pin, bool)> = view
+        .wires
+        .iter()
+        .flat_map(|w| [(&w.from, true), (&w.to, false)])
+        .collect();
     let node = |n: &NodeAt| {
         let (x, y) = at(n.x, n.y);
         let s = n.scale;
-        c.panel(x + 2.0 * s, y + 2.0 * s, x + n.w + 2.0 * s, y + n.h + 2.0 * s, SHADOW);
+        c.panel(
+            x + 2.0 * s,
+            y + 2.0 * s,
+            x + n.w + 2.0 * s,
+            y + n.h + 2.0 * s,
+            SHADOW,
+        );
         c.panel(x, y, x + n.w, y + n.h, BORDER);
         c.rect(x + 1.0, y + 1.0, x + n.w - 1.0, y + n.h - 1.0, NODE);
         let head = match n.node {
@@ -731,7 +936,13 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
             Node::Chip(_) => HEAD_SLEEPING,
         };
         c.rect(x + 1.0, y + 1.0, x + n.w - 1.0, y + n.head - s, head);
-        c.rect(x + 1.0, y + n.head - s, x + n.w - 1.0, y + n.head, shade(head));
+        c.rect(
+            x + 1.0,
+            y + n.head - s,
+            x + n.w - 1.0,
+            y + n.head,
+            shade(head),
+        );
         let color = if n.awake { TEXT } else { TEXT_DIM };
         c.text(&n.title, x + 3.0 * s, y + 2.0 * s, s, color);
         for (text, tx, ty, color) in &n.labels {
@@ -739,7 +950,13 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
         }
         if matches!(n.node, Node::Bus(_)) {
             let gy = y + n.h - GRIP * s;
-            c.rect(x + n.w / 3.0, gy + s, x + 2.0 * n.w / 3.0, gy + 2.0 * s, HEAD_BUS);
+            c.rect(
+                x + n.w / 3.0,
+                gy + s,
+                x + 2.0 * n.w / 3.0,
+                gy + 2.0 * s,
+                HEAD_BUS,
+            );
         }
     };
     // Wires under the nodes (a wire behind a node doesn't cross its
@@ -748,7 +965,9 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
         if lifted.as_ref() == Some(to) {
             continue;
         }
-        let (Some(a), Some(b)) = (g.layout.pin(from, true), g.layout.pin(to, false)) else { continue };
+        let (Some(a), Some(b)) = (g.layout.pin(from, true), g.layout.pin(to, false)) else {
+            continue;
+        };
         let level = levels.get(from).copied().unwrap_or(0);
         if level > 0 {
             trace(&c, at(a.x, a.y), at(b.x, b.y), WIRE_GLOW, 3.0);
@@ -760,7 +979,12 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
     }
     for p in &g.layout.pins {
         let (x, y) = at(p.x, p.y);
-        c.dot(x, y, pin_color(&view, p), p.usable && !wired.contains(&(&p.pin, p.source)));
+        c.dot(
+            x,
+            y,
+            pin_color(&view, p),
+            p.usable && !wired.contains(&(&p.pin, p.source)),
+        );
     }
 
     // The wire being drawn.
@@ -781,7 +1005,13 @@ fn draw(d2: &dyn Canvas, g: &mut Graph, rect: Rect) {
     if view.chips.is_empty() {
         let hint = Strings::screen_alu_empty();
         let w = width_of(&hint);
-        d2.text(&hint, ox + (rect.w - w) / 2.0, oy + rect.h / 2.0 - 4.0, 1.0, TEXT_DIM);
+        d2.text(
+            &hint,
+            ox + (rect.w - w) / 2.0,
+            oy + rect.h / 2.0 - 4.0,
+            1.0,
+            TEXT_DIM,
+        );
     }
 }
 
@@ -809,13 +1039,20 @@ impl Surface for GraphSurface {
 
     fn pointer(&self, ev: Pointer, _size: (f32, f32)) -> bool {
         let mut g = GRAPH.lock().unwrap();
-        let Some(view) = g.view.clone() else { return false };
+        let Some(view) = g.view.clone() else {
+            return false;
+        };
         match ev {
             Pointer::Down { x, y } => {
                 g.pointer = (x, y);
                 // A bus's bar: pulls it open or closed.
                 let grip = g.layout.nodes.iter().rev().find_map(|n| match n.node {
-                    Node::Bus(side) if x >= n.x && x <= n.x + n.w && y >= n.y + n.h - GRIP * n.scale - 1.0 && y <= n.y + n.h + 1.0 => {
+                    Node::Bus(side)
+                        if x >= n.x
+                            && x <= n.x + n.w
+                            && y >= n.y + n.h - GRIP * n.scale - 1.0
+                            && y <= n.y + n.h + 1.0 =>
+                    {
                         Some((side, n.y, n.head, n.scale))
                     }
                     _ => None,
@@ -826,16 +1063,29 @@ impl Surface for GraphSurface {
                 }
                 let pin = g.layout.hit(x, y).cloned();
                 g.drag = match pin {
-                    Some(p) if p.usable && p.source => Drag::FromSource { from: p.pin, lifted: None },
+                    Some(p) if p.usable && p.source => Drag::FromSource {
+                        from: p.pin,
+                        lifted: None,
+                    },
                     Some(p) if p.usable => match view.wires.iter().find(|w| w.to == p.pin) {
-                        Some(w) => Drag::FromSource { from: w.from.clone(), lifted: Some(p.pin) },
+                        Some(w) => Drag::FromSource {
+                            from: w.from.clone(),
+                            lifted: Some(p.pin),
+                        },
                         None => Drag::FromSink { to: p.pin },
                     },
                     Some(_) => Drag::None,
                     None => match g.layout.header(x, y) {
-                        Some(n) => Drag::Node { node: n.node, dx: x - n.x, dy: y - n.y },
+                        Some(n) => Drag::Node {
+                            node: n.node,
+                            dx: x - n.x,
+                            dy: y - n.y,
+                        },
                         // Empty space: the view moves.
-                        None => Drag::Pan { from: (x, y), pan: g.camera.pan },
+                        None => Drag::Pan {
+                            from: (x, y),
+                            pan: g.camera.pan,
+                        },
                     },
                 };
                 true
@@ -847,11 +1097,19 @@ impl Surface for GraphSurface {
                         let world = g.camera.to_world((x - dx, y - dy));
                         g.moved.insert(node, world);
                     }
-                    Drag::Pan { from, pan } => g.camera.pan = (pan.0 + x - from.0, pan.1 + y - from.1),
+                    Drag::Pan { from, pan } => {
+                        g.camera.pan = (pan.0 + x - from.0, pan.1 + y - from.1)
+                    }
                     Drag::Rows { side, top } => {
                         let z = g.camera.zoom;
-                        let channels = view.buses.iter().find(|b| b.index == side).map_or(1, |b| b.channels);
-                        let rows = ((y - top - (HEAD + 2.0 + GRIP) * z) / (ROW * z)).round().clamp(1.0, channels as f32) as u16;
+                        let channels = view
+                            .buses
+                            .iter()
+                            .find(|b| b.index == side)
+                            .map_or(1, |b| b.channels);
+                        let rows = ((y - top - (HEAD + 2.0 + GRIP) * z) / (ROW * z))
+                            .round()
+                            .clamp(1.0, channels as f32) as u16;
                         g.rows.insert(side, rows);
                     }
                     _ => {}
@@ -865,16 +1123,31 @@ impl Surface for GraphSurface {
                 let drag = std::mem::replace(&mut g.drag, Drag::None);
                 let request = match drag {
                     Drag::FromSource { from, lifted } => match target.filter(|t| !t.source) {
-                        Some(t) => Some(Request::Connect { alu, from, to: t.pin }),
+                        Some(t) => Some(Request::Connect {
+                            alu,
+                            from,
+                            to: t.pin,
+                        }),
                         None => lifted.map(|to| Request::Disconnect { alu, to }),
                     },
                     Drag::FromSink { to } => {
-                        target.filter(|t| t.source).map(|t| Request::Connect { alu, from: t.pin, to })
+                        target.filter(|t| t.source).map(|t| Request::Connect {
+                            alu,
+                            from: t.pin,
+                            to,
+                        })
                     }
-                    Drag::Node { node, .. } => {
-                        g.moved.get(&node).map(|&(x, y)| Request::Move { alu, node, x: x.round(), y: y.round() })
+                    Drag::Node { node, .. } => g.moved.get(&node).map(|&(x, y)| Request::Move {
+                        alu,
+                        node,
+                        x: x.round(),
+                        y: y.round(),
+                    }),
+                    Drag::Rows { side, .. } => {
+                        g.rows
+                            .get(&side)
+                            .map(|&rows| Request::BusRows { alu, side, rows })
                     }
-                    Drag::Rows { side, .. } => g.rows.get(&side).map(|&rows| Request::BusRows { alu, side, rows }),
                     Drag::Pan { .. } | Drag::None => None,
                 };
                 if let Some(request) = request {
@@ -883,7 +1156,10 @@ impl Surface for GraphSurface {
                         match &request {
                             Request::Connect { from, to, .. } => {
                                 v.wires.retain(|w| &w.to != to);
-                                v.wires.push(Wire { from: from.clone(), to: to.clone() });
+                                v.wires.push(Wire {
+                                    from: from.clone(),
+                                    to: to.clone(),
+                                });
                             }
                             Request::Disconnect { to, .. } => v.wires.retain(|w| &w.to != to),
                             _ => {}
@@ -913,12 +1189,16 @@ pub fn setup(registry: &mut Registry) {
     SURFACE.call_once(|| yog_api::ui::surface::register(SURFACE_ID, Arc::new(GraphSurface)));
 
     registry.on_client_packet(board::VIEW_CHANNEL, move |ev, _srv| {
-        let Ok(view) = serde_json::from_slice::<BoardView>(&ev.payload) else { return };
+        let Ok(view) = serde_json::from_slice::<BoardView>(&ev.payload) else {
+            return;
+        };
         {
             let mut g = GRAPH.lock().unwrap();
             // The server has the moves it was sent.
-            g.moved.retain(|node, p| !view.layout.iter().any(|(n, q)| n == node && q == p));
-            g.rows.retain(|side, r| !view.buses.iter().any(|b| b.index == *side && b.rows == *r));
+            g.moved
+                .retain(|node, p| !view.layout.iter().any(|(n, q)| n == node && q == p));
+            g.rows
+                .retain(|side, r| !view.buses.iter().any(|b| b.index == *side && b.rows == *r));
             if g.view.as_ref().is_none_or(|v| v.alu != view.alu) {
                 g.moved.clear();
                 g.fitted = false;
@@ -932,23 +1212,44 @@ pub fn setup(registry: &mut Registry) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vm::PortMode;
     use crate::board::{ChipView, SideView};
     use crate::content::Tier;
+    use crate::vm::PortMode;
 
     fn view() -> BoardView {
         BoardView {
-            alu: board::AluId { dimension: String::new(), x: 0, y: 0, z: 0 },
+            alu: board::AluId {
+                dimension: String::new(),
+                x: 0,
+                y: 0,
+                z: 0,
+            },
             tier: Tier::ALL[0],
             chips: vec![ChipView {
                 slot: 0,
                 name: "Adder".into(),
                 tier: Tier::ALL[0],
-                pins: vec![("A".into(), PortMode::Input), ("B".into(), PortMode::Input), ("S".into(), PortMode::Output)],
+                pins: vec![
+                    ("A".into(), PortMode::Input),
+                    ("B".into(), PortMode::Input),
+                    ("S".into(), PortMode::Output),
+                ],
                 active: true,
             }],
-            sides: board::SIDES.iter().map(|s| SideView { side: s.to_string(), name: None, output: *s == "E" }).collect(),
-            buses: vec![board::BusView { index: 2, side: "E".into(), channels: 32, rows: 3 }],
+            sides: board::SIDES
+                .iter()
+                .map(|s| SideView {
+                    side: s.to_string(),
+                    name: None,
+                    output: *s == "E",
+                })
+                .collect(),
+            buses: vec![board::BusView {
+                index: 2,
+                side: "E".into(),
+                channels: 32,
+                rows: 3,
+            }],
             wires: Vec::new(),
             layout: Vec::new(),
             levels: Vec::new(),
@@ -957,18 +1258,32 @@ mod tests {
 
     #[test]
     fn pins_sit_on_their_edges() {
-        let l = layout(&view(), &HashMap::new(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
+        let l = layout(
+            &view(),
+            &HashMap::new(),
+            &HashMap::new(),
+            360.0,
+            140.0,
+            Camera::default(),
+            &|t| t.len() as f32 * 6.0,
+        );
         let chip = l.nodes.iter().find(|n| n.node == Node::Chip(0)).unwrap();
         let a = l.pin(&Pin::new(Node::Chip(0), "A"), false).unwrap();
         let s = l.pin(&Pin::new(Node::Chip(0), "S"), true).unwrap();
         assert_eq!(a.x, chip.x);
         assert_eq!(s.x, chip.x + CHIP_W);
-        assert!(l.pin(&Pin::new(Node::Chip(0), "A"), true).is_none(), "an input is no source");
+        assert!(
+            l.pin(&Pin::new(Node::Chip(0), "A"), true).is_none(),
+            "an input is no source"
+        );
         // In:E is an output side now: drawn, not usable.
         assert!(!l.pin(&Pin::new(Node::In, "E"), true).unwrap().usable);
         assert!(l.pin(&Pin::new(Node::Out, "E"), false).unwrap().usable);
         // Nothing overlaps the panels.
-        let (inp, outp) = (l.nodes.iter().find(|n| n.node == Node::In).unwrap(), l.nodes.iter().find(|n| n.node == Node::Out).unwrap());
+        let (inp, outp) = (
+            l.nodes.iter().find(|n| n.node == Node::In).unwrap(),
+            l.nodes.iter().find(|n| n.node == Node::Out).unwrap(),
+        );
         assert!(chip.x >= inp.x + inp.w && chip.x + CHIP_W <= outp.x);
     }
 
@@ -979,18 +1294,42 @@ mod tests {
         assert!(def.include_player_inventory);
         let (px, py) = def.player_inv_offset;
         assert!(px + 9.0 * 18.0 <= WIDTH && py + 76.0 <= HEIGHT, "{px},{py}");
-        assert!(def.layout.iter().all(|a| a.x + 16.0 <= px && a.y + 16.0 <= HEIGHT), "{:?}", def.layout);
+        assert!(
+            def.layout
+                .iter()
+                .all(|a| a.x + 16.0 <= px && a.y + 16.0 <= HEIGHT),
+            "{:?}",
+            def.layout
+        );
         assert_eq!(def.layout[0].accepts.len(), 6);
     }
 
     #[test]
     fn the_wheel_zooms_about_the_pointer_and_chips_follow_the_view() {
         let cam = Camera::default().zoomed(2.0, (100.0, 50.0));
-        assert_eq!(cam.to_local(cam.to_world((100.0, 50.0))), (100.0, 50.0), "the point under the pointer stays");
+        assert_eq!(
+            cam.to_local(cam.to_world((100.0, 50.0))),
+            (100.0, 50.0),
+            "the point under the pointer stays"
+        );
         assert_eq!(cam.zoom, 2.0);
-        assert_eq!(Camera::default().zoomed(100.0, (0.0, 0.0)).zoom, Camera::MAX);
-        let moved = Camera { zoom: 1.0, pan: (-500.0, 0.0) };
-        let l = layout(&view(), &HashMap::new(), &HashMap::new(), 360.0, 140.0, moved, &|t| t.len() as f32 * 6.0);
+        assert_eq!(
+            Camera::default().zoomed(100.0, (0.0, 0.0)).zoom,
+            Camera::MAX
+        );
+        let moved = Camera {
+            zoom: 1.0,
+            pan: (-500.0, 0.0),
+        };
+        let l = layout(
+            &view(),
+            &HashMap::new(),
+            &HashMap::new(),
+            360.0,
+            140.0,
+            moved,
+            &|t| t.len() as f32 * 6.0,
+        );
         let chip = l.nodes.iter().find(|n| n.node == Node::Chip(0)).unwrap();
         assert!(chip.x < 0.0, "panned out of the box, not held in it");
         let side = l.nodes.iter().find(|n| n.node == Node::In).unwrap();
@@ -998,29 +1337,70 @@ mod tests {
         // A panel is as wide as its longest name.
         let mut named = view();
         named.sides[0].name = Some("A very long port name, longer than the title".into());
-        let l = layout(&named, &HashMap::new(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
+        let l = layout(
+            &named,
+            &HashMap::new(),
+            &HashMap::new(),
+            360.0,
+            140.0,
+            Camera::default(),
+            &|t| t.len() as f32 * 6.0,
+        );
         let inp = l.nodes.iter().find(|n| n.node == Node::In).unwrap();
-        assert_eq!(inp.w, "N A very long port name, longer than the title".len() as f32 * 6.0 + 8.0);
+        assert_eq!(
+            inp.w,
+            "N A very long port name, longer than the title".len() as f32 * 6.0 + 8.0
+        );
     }
 
     #[test]
     fn a_bus_shows_its_rows_each_a_pin_to_drive_and_one_to_read() {
-        let l = layout(&view(), &HashMap::new(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
+        let l = layout(
+            &view(),
+            &HashMap::new(),
+            &HashMap::new(),
+            360.0,
+            140.0,
+            Camera::default(),
+            &|t| t.len() as f32 * 6.0,
+        );
         let bus = l.nodes.iter().find(|n| n.node == Node::Bus(2)).unwrap();
         assert_eq!(bus.labels.len(), 3);
         let drive = l.pin(&Pin::new(Node::Bus(2), "3"), false).unwrap();
         let read = l.pin(&Pin::new(Node::Bus(2), "3"), true).unwrap();
         assert_eq!((drive.x, read.x), (bus.x, bus.x + BUS_W));
         // Pulled open: more rows.
-        let l = layout(&view(), &HashMap::new(), &HashMap::from([(2, 10)]), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
+        let l = layout(
+            &view(),
+            &HashMap::new(),
+            &HashMap::from([(2, 10)]),
+            360.0,
+            140.0,
+            Camera::default(),
+            &|t| t.len() as f32 * 6.0,
+        );
         assert!(l.pin(&Pin::new(Node::Bus(2), "10"), true).is_some());
     }
 
     #[test]
     fn zooming_leaves_every_node_where_it_is_in_the_world() {
         let at = |zoom| {
-            let l = layout(&view(), &HashMap::new(), &HashMap::new(), 360.0, 140.0, Camera { zoom, pan: (0.0, 0.0) }, &|t| t.len() as f32 * 6.0);
-            l.nodes.iter().map(|n| (n.node, n.x / zoom, n.y / zoom)).collect::<Vec<_>>()
+            let l = layout(
+                &view(),
+                &HashMap::new(),
+                &HashMap::new(),
+                360.0,
+                140.0,
+                Camera {
+                    zoom,
+                    pan: (0.0, 0.0),
+                },
+                &|t| t.len() as f32 * 6.0,
+            );
+            l.nodes
+                .iter()
+                .map(|n| (n.node, n.x / zoom, n.y / zoom))
+                .collect::<Vec<_>>()
         };
         assert_eq!(at(1.0), at(2.0));
         assert_eq!(at(1.0), at(0.5));
@@ -1028,7 +1408,15 @@ mod tests {
 
     #[test]
     fn hits_the_nearest_pin() {
-        let l = layout(&view(), &HashMap::new(), &HashMap::new(), 360.0, 140.0, Camera::default(), &|t| t.len() as f32 * 6.0);
+        let l = layout(
+            &view(),
+            &HashMap::new(),
+            &HashMap::new(),
+            360.0,
+            140.0,
+            Camera::default(),
+            &|t| t.len() as f32 * 6.0,
+        );
         let s = l.pin(&Pin::new(Node::Chip(0), "S"), true).unwrap().clone();
         assert_eq!(l.hit(s.x + 3.0, s.y - 2.0).map(|p| &p.pin), Some(&s.pin));
         assert!(l.hit(180.0, 139.0).is_none());
@@ -1044,10 +1432,14 @@ mod tests {
             let mut lang = HashMap::new();
             if let Ok(path) = std::env::var("LANG_YRES")
                 && let Ok(text) = std::fs::read_to_string(path)
-                && let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&text)
+                && let Ok(serde_json::Value::Object(map)) =
+                    serde_json::from_str::<serde_json::Value>(&text)
             {
                 for (k, v) in map {
-                    let v = v.as_str().map(str::to_string).or_else(|| v.get("value").and_then(|v| v.as_str()).map(str::to_string));
+                    let v = v
+                        .as_str()
+                        .map(str::to_string)
+                        .or_else(|| v.get("value").and_then(|v| v.as_str()).map(str::to_string));
                     if let Some(v) = v {
                         lang.insert(format!("{}.{k}", crate::MOD_ID), v);
                     }
@@ -1056,16 +1448,24 @@ mod tests {
             Recorder(Default::default(), lang)
         }
         fn shown(&self, text: &str) -> String {
-            self.1.get(text).cloned().unwrap_or_else(|| text.to_string())
+            self.1
+                .get(text)
+                .cloned()
+                .unwrap_or_else(|| text.to_string())
         }
     }
 
     impl Canvas for Recorder {
         fn rect(&self, x0: f32, y0: f32, x1: f32, y1: f32, color: u32) {
-            self.0.borrow_mut().push(format!("{{\"r\":[{x0},{y0},{x1},{y1},{color}]}}"));
+            self.0
+                .borrow_mut()
+                .push(format!("{{\"r\":[{x0},{y0},{x1},{y1},{color}]}}"));
         }
         fn text(&self, text: &str, x: f32, y: f32, scale: f32, color: u32) {
-            self.0.borrow_mut().push(format!("{{\"t\":[{:?},{x},{y},{scale},{color}]}}", self.shown(text)));
+            self.0.borrow_mut().push(format!(
+                "{{\"t\":[{:?},{x},{y},{scale},{color}]}}",
+                self.shown(text)
+            ));
         }
         fn text_width(&self, text: &str) -> f32 {
             self.shown(text).chars().count() as f32 * 6.0
@@ -1083,10 +1483,14 @@ mod tests {
             crate::vm::NestedPin::Chip(slot, name) => Pin::new(Node::Chip(*slot), name.as_str()),
             crate::vm::NestedPin::Bus(i, ch) => Pin::new(Node::Bus(*i), (ch + 1).to_string()),
         };
-        let outs: Vec<&str> = alu.wires.iter().filter_map(|(_, t)| match t {
-            crate::vm::NestedPin::Out(i) => Some(board::SIDES[*i as usize]),
-            _ => None,
-        }).collect();
+        let outs: Vec<&str> = alu
+            .wires
+            .iter()
+            .filter_map(|(_, t)| match t {
+                crate::vm::NestedPin::Out(i) => Some(board::SIDES[*i as usize]),
+                _ => None,
+            })
+            .collect();
         BoardView {
             alu: board::AluId { dimension: String::new(), x: 0, y: 0, z: 0 },
             tier: alu.tier,
@@ -1112,13 +1516,42 @@ mod tests {
     #[test]
     #[ignore]
     fn render_boards() {
-        let Ok(dir) = std::env::var("OUT") else { return };
-        let boards = [("simple", view()), ("full_adder", design_board("Full adder")), ("decoder", design_board("Decoder 2:4"))];
+        let Ok(dir) = std::env::var("OUT") else {
+            return;
+        };
+        let boards = [
+            ("simple", view()),
+            ("full_adder", design_board("Full adder")),
+            ("decoder", design_board("Decoder 2:4")),
+        ];
         for (name, v) in boards {
-            let mut g = Graph { view: Some(v), layout: Layout::default(), drag: Drag::None, pointer: (0.0, 0.0), moved: HashMap::new(), rows: HashMap::new(), camera: Camera::default(), fitted: false };
+            let mut g = Graph {
+                view: Some(v),
+                layout: Layout::default(),
+                drag: Drag::None,
+                pointer: (0.0, 0.0),
+                moved: HashMap::new(),
+                rows: HashMap::new(),
+                camera: Camera::default(),
+                fitted: false,
+            };
             let rec = Recorder::new();
-            let size = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
-            draw(&rec, &mut g, Rect { x: 0.0, y: 0.0, w: size("BOARD_W", 460.0), h: size("BOARD_H", 170.0) });
+            let size = |k: &str, d: f32| {
+                std::env::var(k)
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(d)
+            };
+            draw(
+                &rec,
+                &mut g,
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: size("BOARD_W", 460.0),
+                    h: size("BOARD_H", 170.0),
+                },
+            );
             std::fs::write(format!("{dir}/{name}.jsonl"), rec.0.borrow().join("\n")).unwrap();
         }
     }

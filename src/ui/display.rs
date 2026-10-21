@@ -49,7 +49,11 @@ impl DisplayVm {
     pub fn done(&mut self) {
         if let Some(edit) = &self.edit {
             let size = self.size.trim().parse::<u16>().unwrap_or(edit.size);
-            let out = DisplayEdit { size, channel: self.first(), ..edit.clone() };
+            let out = DisplayEdit {
+                size,
+                channel: self.first(),
+                ..edit.clone()
+            };
             if let (Some(srv), Ok(json)) = (yog_api::server(), serde_json::to_string(&out)) {
                 srv.send_to_server(CHANNEL, json.as_bytes());
             }
@@ -69,10 +73,14 @@ pub fn setup(registry: &mut Registry) {
     });
 
     registry.on_packet(CHANNEL, |ev, srv| {
-        let Ok(edit) = serde_json::from_slice::<DisplayEdit>(&ev.payload) else { return };
+        let Ok(edit) = serde_json::from_slice::<DisplayEdit>(&ev.payload) else {
+            return;
+        };
         let (x, y, z) = edit.pos;
         let pos = BlockPos { x, y, z };
-        if srv.get_block_state(&edit.dimension, pos).is_some_and(|s| s.starts_with(Blocks::DISPLAY))
+        if srv
+            .get_block_state(&edit.dimension, pos)
+            .is_some_and(|s| s.starts_with(Blocks::DISPLAY))
             && display::configure(srv, &edit.dimension, pos, edit.size, edit.channel).is_err()
         {
             srv.send_actionbar(&ev.player, &Strings::display_no_room(edit.size));
@@ -81,12 +89,23 @@ pub fn setup(registry: &mut Registry) {
 
     registry.on_use_block(|e, phase, srv| -> bool {
         // The Display or any block of its picture.
-        if phase != EventPhase::Pre || (e.block_id != Blocks::DISPLAY && e.block_id != Blocks::DISPLAY_PART) {
+        if phase != EventPhase::Pre
+            || (e.block_id != Blocks::DISPLAY && e.block_id != Blocks::DISPLAY_PART)
+        {
             return true;
         }
-        let Some(at) = display::owner(&e.dimension, e.pos) else { return true };
-        let Some(d) = display::get(&e.dimension, at) else { return true };
-        let edit = DisplayEdit { dimension: e.dimension.clone(), pos: (at.x, at.y, at.z), size: d.size, channel: d.channel };
+        let Some(at) = display::owner(&e.dimension, e.pos) else {
+            return true;
+        };
+        let Some(d) = display::get(&e.dimension, at) else {
+            return true;
+        };
+        let edit = DisplayEdit {
+            dimension: e.dimension.clone(),
+            pos: (at.x, at.y, at.z),
+            size: d.size,
+            channel: d.channel,
+        };
         if let Ok(json) = serde_json::to_string(&edit) {
             srv.send_to_player(&e.player_name, CHANNEL, json.as_bytes());
         }

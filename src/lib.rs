@@ -11,8 +11,8 @@ mod editor;
 mod gpu;
 mod nbt;
 mod resources;
-pub mod vm;
 mod ui;
+pub mod vm;
 
 use ui::{alu, port, workbench};
 
@@ -21,7 +21,7 @@ yog_api::resources!();
 // `crate::content` — ids and definitions of content/ blocks and items.
 yog_api::content!();
 
-use yog_api::{info, Mod, Registry, YogDimensionDef, YogDimensionTypeDef};
+use yog_api::{Mod, Registry, YogDimensionDef, YogDimensionTypeDef, info};
 
 /// The mod id — its `Storage` namespace.
 pub const MOD_ID: &str = "yog-vlsi";
@@ -38,22 +38,23 @@ impl Mod for YogVlsi {
         // lays its own floor and barrier box per session, so the generator
         // itself has nothing to do.
         registry.register_dimension(
-            &YogDimensionDef::new(editor::DIMENSION_ID).dimension_type(
-                YogDimensionTypeDef::default()
-                    .ambient_light(1.0)
-                    .has_sky_light(false)
-                    .has_ceiling(false)
-                    .natural(false)
-                    .piglin_safe(false)
-                    .effects("minecraft:the_end")
-                    .min_y(0)
-                    .height(384)
-                    .logical_height(384),
-            )
-            .generator_type(editor::GENERATOR_ID)
-            .structures(false)
-            .features(false)
-            .mob_spawning(false),
+            &YogDimensionDef::new(editor::DIMENSION_ID)
+                .dimension_type(
+                    YogDimensionTypeDef::default()
+                        .ambient_light(1.0)
+                        .has_sky_light(false)
+                        .has_ceiling(false)
+                        .natural(false)
+                        .piglin_safe(false)
+                        .effects("minecraft:the_end")
+                        .min_y(0)
+                        .height(384)
+                        .logical_height(384),
+                )
+                .generator_type(editor::GENERATOR_ID)
+                .structures(false)
+                .features(false)
+                .mob_spawning(false),
         );
         registry.register_chunk_generator(editor::GENERATOR_ID, |_writer| {
             // Void — the editor builds its own floor/walls per session.
@@ -62,7 +63,11 @@ impl Mod for YogVlsi {
         // A written Blueprint shows its design: its name, then tier, ports and blocks.
         registry.on_item_text(content::Items::BLUEPRINT, |_, snbt| {
             let bp = chip::Blueprint::from_nbt(snbt)?;
-            let info = res::Strings::screen_workbench_design_tier(bp.tier.name(), bp.circuit.ports.len(), bp.circuit.blocks.len());
+            let info = res::Strings::screen_workbench_design_tier(
+                bp.tier.name(),
+                bp.circuit.ports.len(),
+                bp.circuit.blocks.len(),
+            );
             Some((Some(bp.name), vec![format!("§7{info}")]))
         });
         // A fabricated chip names its design and shows its tier, speed and ports.
@@ -78,8 +83,18 @@ impl Mod for YogVlsi {
                         _ => format!("{}→", p.label),
                     })
                     .collect();
-                let ports = if ports.is_empty() { res::Strings::chip_no_ports() } else { res::Strings::chip_ports(ports.join(", ")) };
-                Some((Some(meta.name), vec![res::Strings::chip_info(meta.tier.name(), meta.tier.steps_per_tick()), ports]))
+                let ports = if ports.is_empty() {
+                    res::Strings::chip_no_ports()
+                } else {
+                    res::Strings::chip_ports(ports.join(", "))
+                };
+                Some((
+                    Some(meta.name),
+                    vec![
+                        res::Strings::chip_info(meta.tier.name(), meta.tier.steps_per_tick()),
+                        ports,
+                    ],
+                ))
             });
         }
         workbench::setup(registry);

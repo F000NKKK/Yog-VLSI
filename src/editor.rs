@@ -29,11 +29,13 @@ use serde::{Deserialize, Serialize};
 use yog_api::{BlockPos, EventPhase, Registry, Storage};
 
 use crate::board;
-use crate::chip::{Blueprint, ChipMeta, CircuitBlock, CircuitData, Port, SavedAlu, container_slots};
 use crate::cables::{self, RedstonePort};
+use crate::chip::{
+    Blueprint, ChipMeta, CircuitBlock, CircuitData, Port, SavedAlu, container_slots,
+};
+use crate::content::Tier;
 use crate::content::{Blocks, Items};
 use crate::port;
-use crate::content::Tier;
 
 /// Id of the pocket dimension the editor runs in — declared via
 /// `Registry::register_dimension` in `lib.rs`.
@@ -110,8 +112,10 @@ static LANES: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::ne
 /// Where each player last was outside the editor dimension.
 /// A dimension and a position in it.
 type Place = (String, (f64, f64, f64));
-static LAST_OUTSIDE: LazyLock<Mutex<HashMap<String, Place>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-static SESSIONS: LazyLock<Mutex<HashMap<String, EditorSession>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static LAST_OUTSIDE: LazyLock<Mutex<HashMap<String, Place>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static SESSIONS: LazyLock<Mutex<HashMap<String, EditorSession>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn lane_for(player_name: &str) -> u32 {
     let mut lanes = LANES.lock().unwrap();
@@ -137,8 +141,12 @@ fn persist(srv: &dyn yog_api::Server) {
 pub fn load(srv: &dyn yog_api::Server) {
     let store = Storage::open(&srv.world_dir(), STORE_FILE);
     let read = |key: &str| store.get(key).and_then(|v| v.as_str().map(str::to_string));
-    *SESSIONS.lock().unwrap() = read(SESSIONS_KEY).and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
-    *LANES.lock().unwrap() = read(LANES_KEY).and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+    *SESSIONS.lock().unwrap() = read(SESSIONS_KEY)
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default();
+    *LANES.lock().unwrap() = read(LANES_KEY)
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default();
 }
 
 /// The player's whole inventory, as their entity data has it.
@@ -152,9 +160,16 @@ fn inventory_of(srv: &dyn yog_api::Server, player: &str) -> Option<String> {
 /// Gives the player back `inventory` (from [`inventory_of`]) — everything
 /// else about them as it is now.
 fn restore_inventory(srv: &dyn yog_api::Server, player: &str, inventory: &str) -> bool {
-    let Some(uuid) = srv.player_info(player).map(|i| i.uuid) else { return false };
-    let Some(now) = srv.entity_get_nbt(&uuid) else { return false };
-    srv.entity_set_nbt(&uuid, &crate::nbt::with_top_value(&now, INVENTORY_TAG, inventory))
+    let Some(uuid) = srv.player_info(player).map(|i| i.uuid) else {
+        return false;
+    };
+    let Some(now) = srv.entity_get_nbt(&uuid) else {
+        return false;
+    };
+    srv.entity_set_nbt(
+        &uuid,
+        &crate::nbt::with_top_value(&now, INVENTORY_TAG, inventory),
+    )
 }
 
 /// Removes whatever isn't a player from a field (dropped items, mobs, …).
@@ -163,7 +178,10 @@ fn clear_entities(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size:
     let min = ((lo.x - 2) as f64, (lo.y - 2) as f64, (lo.z - 2) as f64);
     let max = ((hi.x + 3) as f64, (hi.y + 3) as f64, (hi.z + 3) as f64);
     for uuid in srv.entities_in_box(DIMENSION_ID, min, max) {
-        if srv.entity_info(&uuid).is_some_and(|e| e.type_id != "minecraft:player") {
+        if srv
+            .entity_info(&uuid)
+            .is_some_and(|e| e.type_id != "minecraft:player")
+        {
             srv.entity_kill(&uuid);
         }
     }
@@ -172,8 +190,16 @@ fn clear_entities(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size:
 /// The cube's corners (inside the shell).
 fn interior(origin_x: i32, origin_z: i32, size: i32) -> (BlockPos, BlockPos) {
     (
-        BlockPos { x: origin_x, y: EDITOR_Y, z: origin_z },
-        BlockPos { x: origin_x + size - 1, y: EDITOR_Y + size - 1, z: origin_z + size - 1 },
+        BlockPos {
+            x: origin_x,
+            y: EDITOR_Y,
+            z: origin_z,
+        },
+        BlockPos {
+            x: origin_x + size - 1,
+            y: EDITOR_Y + size - 1,
+            z: origin_z + size - 1,
+        },
     )
 }
 
@@ -194,7 +220,11 @@ fn shell(lo: BlockPos, hi: BlockPos) -> [(BlockPos, BlockPos); 6] {
 
 /// The shell past the barriers: one block further out than [`shell`].
 fn skin(lo: BlockPos, hi: BlockPos) -> [(BlockPos, BlockPos); 6] {
-    let grow = |p: BlockPos, d: i32| BlockPos { x: p.x + d, y: p.y + d, z: p.z + d };
+    let grow = |p: BlockPos, d: i32| BlockPos {
+        x: p.x + d,
+        y: p.y + d,
+        z: p.z + d,
+    };
     shell(grow(lo, -1), grow(hi, 1))
 }
 
@@ -266,10 +296,18 @@ pub fn enter(
     let size = blueprint.tier.world_size();
     build_room(srv, origin_x, origin_z, size as i32);
 
-    let at = |x: u32, y: u32, z: u32| BlockPos { x: origin_x + x as i32, y: EDITOR_Y + y as i32, z: origin_z + z as i32 };
+    let at = |x: u32, y: u32, z: u32| BlockPos {
+        x: origin_x + x as i32,
+        y: EDITOR_Y + y as i32,
+        z: origin_z + z as i32,
+    };
     // What stands on or hangs from another block goes in after it: placed
     // first, the next block set beside it would knock it off.
-    let (hanging, standing): (Vec<_>, Vec<_>) = blueprint.circuit.blocks.iter().partition(|b| needs_support(b.id()));
+    let (hanging, standing): (Vec<_>, Vec<_>) = blueprint
+        .circuit
+        .blocks
+        .iter()
+        .partition(|b| needs_support(b.id()));
     for block in standing.into_iter().chain(hanging) {
         let pos = at(block.x, block.y, block.z);
         srv.set_block_state(DIMENSION_ID, pos, &block.state);
@@ -278,7 +316,10 @@ pub fn enter(
         }
         // A Redstone Port as it was set (an old design's: an unnamed input).
         if block.id() == Blocks::REDSTONE_PORT {
-            let port = block.redstone_port.clone().unwrap_or_else(RedstonePort::new);
+            let port = block
+                .redstone_port
+                .clone()
+                .unwrap_or_else(RedstonePort::new);
             cables::set_redstone_port(srv, DIMENSION_ID, pos, port);
         }
     }
@@ -294,15 +335,36 @@ pub fn enter(
     for a in &blueprint.circuit.alus {
         let pos = at(a.x, a.y, a.z);
         for (slot, meta) in &a.chips {
-            srv.set_inventory_slot(DIMENSION_ID, pos, *slot as u32, meta.tier.chip(), 1, &meta.to_nbt());
+            srv.set_inventory_slot(
+                DIMENSION_ID,
+                pos,
+                *slot as u32,
+                meta.tier.chip(),
+                1,
+                &meta.to_nbt(),
+            );
         }
-        board::restore(board::AluId { dimension: DIMENSION_ID.to_string(), x: pos.x, y: pos.y, z: pos.z }, a.tier, &a.wires);
+        board::restore(
+            board::AluId {
+                dimension: DIMENSION_ID.to_string(),
+                x: pos.x,
+                y: pos.y,
+                z: pos.z,
+            },
+            a.tier,
+            &a.wires,
+        );
     }
 
-    let (cx, cz) = ((origin_x + size as i32 / 2) as f64, (origin_z + size as i32 / 2) as f64);
+    let (cx, cz) = (
+        (origin_x + size as i32 / 2) as f64,
+        (origin_z + size as i32 / 2) as f64,
+    );
     // What they come in with, theirs again on the way out.
     let inventory = inventory_of(srv, player_name);
-    let gamemode = srv.player_info(player_name).map_or_else(|| "survival".to_string(), |i| i.gamemode);
+    let gamemode = srv
+        .player_info(player_name)
+        .map_or_else(|| "survival".to_string(), |i| i.gamemode);
     if !srv.teleport_to_dim(player_name, DIMENSION_ID, cx, (EDITOR_Y + 1) as f64, cz) {
         return Err("§cCouldn't enter the editor dimension — see the game log.".into());
     }
@@ -354,11 +416,22 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
     let mut alus = Vec::new();
     let (lo, hi) = interior(session.origin_x, session.origin_z, session.size as i32);
     for (p, state) in srv.scan_region(DIMENSION_ID, lo, hi) {
-        let (x, y, z) = ((p.x - lo.x) as u32, (p.y - lo.y) as u32, (p.z - lo.z) as u32);
+        let (x, y, z) = (
+            (p.x - lo.x) as u32,
+            (p.y - lo.y) as u32,
+            (p.z - lo.z) as u32,
+        );
         let id = state.split('[').next().unwrap_or(&state);
         if let Some(dir) = port::dir_for_block(id) {
-            let label = port::read_label(srv, DIMENSION_ID, p).unwrap_or_else(|| format!("Port {}", ports.len()));
-            ports.push(Port { label, x, y, z, dir });
+            let label = port::read_label(srv, DIMENSION_ID, p)
+                .unwrap_or_else(|| format!("Port {}", ports.len()));
+            ports.push(Port {
+                label,
+                x,
+                y,
+                z,
+                dir,
+            });
             continue;
         }
         // An ALU: its chips and its board go into the design with it.
@@ -369,8 +442,20 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
                     Some((slot, ChipMeta::from_nbt(&nbt)?))
                 })
                 .collect();
-            let wires = board::nested_wires(&board::AluId { dimension: DIMENSION_ID.to_string(), x: p.x, y: p.y, z: p.z });
-            alus.push(SavedAlu { x, y, z, tier, chips, wires });
+            let wires = board::nested_wires(&board::AluId {
+                dimension: DIMENSION_ID.to_string(),
+                x: p.x,
+                y: p.y,
+                z: p.z,
+            });
+            alus.push(SavedAlu {
+                x,
+                y,
+                z,
+                tier,
+                chips,
+                wires,
+            });
         }
         let items = (0..container_slots(id))
             .filter_map(|slot| {
@@ -378,13 +463,26 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
                 Some((slot, item, count.min(255) as u8))
             })
             .collect();
-        let redstone_port = (id == Blocks::REDSTONE_PORT).then(|| cables::redstone_port(DIMENSION_ID, p));
-        blocks.push(CircuitBlock { x, y, z, state, items, redstone_port });
+        let redstone_port =
+            (id == Blocks::REDSTONE_PORT).then(|| cables::redstone_port(DIMENSION_ID, p));
+        blocks.push(CircuitBlock {
+            x,
+            y,
+            z,
+            state,
+            items,
+            redstone_port,
+        });
     }
     Blueprint {
         name: session.name.clone(),
         tier: session.tier,
-        circuit: CircuitData { size: session.tier.world_size(), blocks, ports, alus },
+        circuit: CircuitData {
+            size: session.tier.world_size(),
+            blocks,
+            ports,
+            alus,
+        },
     }
 }
 
@@ -394,7 +492,11 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
 /// go back to. Then the field goes, and they go back.
 fn finish(srv: &dyn yog_api::Server, player_name: &str, session: EditorSession) -> String {
     let blueprint = scan(srv, &session);
-    let summary = format!("{} ports, {} blocks", blueprint.circuit.ports.len(), blueprint.circuit.blocks.len());
+    let summary = format!(
+        "{} ports, {} blocks",
+        blueprint.circuit.ports.len(),
+        blueprint.circuit.blocks.len()
+    );
     let nbt = blueprint.to_nbt();
     let src = &session.source;
     let (rx, ry, rz) = session.return_pos;
@@ -410,16 +512,36 @@ fn finish(srv: &dyn yog_api::Server, player_name: &str, session: EditorSession) 
     let still_there = srv
         .get_inventory_slot(&src.dimension, src.pos, src.slot)
         .is_some_and(|(id, _, _)| id == Items::BLUEPRINT);
-    let message = if still_there && srv.set_inventory_slot(&src.dimension, src.pos, src.slot, Items::BLUEPRINT, 1, &nbt) {
+    let message = if still_there
+        && srv.set_inventory_slot(&src.dimension, src.pos, src.slot, Items::BLUEPRINT, 1, &nbt)
+    {
         format!("§aSaved '{}' to its Blueprint — {summary}.", blueprint.name)
     } else {
-        let taken: Vec<u32> = srv.player_inventory(player_name).into_iter().map(|(slot, ..)| slot).collect();
+        let taken: Vec<u32> = srv
+            .player_inventory(player_name)
+            .into_iter()
+            .map(|(slot, ..)| slot)
+            .collect();
         let free = (0..PLAYER_SLOTS).find(|s| !taken.contains(s));
-        if free.is_some_and(|slot| srv.set_slot_item(player_name, slot, Items::BLUEPRINT, 1, &nbt)) {
-            format!("§aSaved '{}' to a new Blueprint in your inventory — {summary}.", blueprint.name)
+        if free.is_some_and(|slot| srv.set_slot_item(player_name, slot, Items::BLUEPRINT, 1, &nbt))
+        {
+            format!(
+                "§aSaved '{}' to a new Blueprint in your inventory — {summary}.",
+                blueprint.name
+            )
         } else {
-            srv.spawn_item(&session.return_dim, (rx, ry, rz), (0.0, 0.0, 0.0), Items::BLUEPRINT, 1, &nbt);
-            format!("§eSaved '{}' to a Blueprint dropped where you're back — {summary}.", blueprint.name)
+            srv.spawn_item(
+                &session.return_dim,
+                (rx, ry, rz),
+                (0.0, 0.0, 0.0),
+                Items::BLUEPRINT,
+                1,
+                &nbt,
+            );
+            format!(
+                "§eSaved '{}' to a Blueprint dropped where you're back — {summary}.",
+                blueprint.name
+            )
         }
     };
 
@@ -451,8 +573,22 @@ pub fn save_sessions(srv: &dyn yog_api::Server) {
 /// Blocks that break without the block they stand on or hang from.
 fn needs_support(id: &str) -> bool {
     const PARTS: [&str; 16] = [
-        "torch", "button", "lever", "repeater", "comparator", "redstone_wire", "rail", "pressure_plate", "door",
-        "carpet", "ladder", "sign", "banner", "tripwire", "lantern", "vine",
+        "torch",
+        "button",
+        "lever",
+        "repeater",
+        "comparator",
+        "redstone_wire",
+        "rail",
+        "pressure_plate",
+        "door",
+        "carpet",
+        "ladder",
+        "sign",
+        "banner",
+        "tripwire",
+        "lantern",
+        "vine",
     ];
     let path = id.strip_prefix("minecraft:").unwrap_or(id);
     PARTS.iter().any(|p| path.contains(p))
@@ -479,7 +615,10 @@ pub fn register(registry: &mut Registry) {
             return true;
         }
         if e.dimension != DIMENSION_ID {
-            LAST_OUTSIDE.lock().unwrap().insert(e.player_name.clone(), (e.dimension.clone(), (e.x, e.y, e.z)));
+            LAST_OUTSIDE.lock().unwrap().insert(
+                e.player_name.clone(),
+                (e.dimension.clone(), (e.x, e.y, e.z)),
+            );
             return true;
         }
         if SESSIONS.lock().unwrap().contains_key(&e.player_name) {
@@ -492,7 +631,10 @@ pub fn register(registry: &mut Registry) {
             .cloned()
             .unwrap_or_else(|| ("minecraft:overworld".into(), (0.5, 100.0, 0.5)));
         srv.teleport_to_dim(&e.player_name, &dim, x, y, z);
-        srv.send_actionbar(&e.player_name, "§cThe circuit editor is only open from a VLSI Workbench.");
+        srv.send_actionbar(
+            &e.player_name,
+            "§cThe circuit editor is only open from a VLSI Workbench.",
+        );
         false
     });
 

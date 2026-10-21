@@ -59,7 +59,11 @@ pub struct AluId {
 
 impl AluId {
     pub fn pos(&self) -> BlockPos {
-        BlockPos { x: self.x, y: self.y, z: self.z }
+        BlockPos {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+        }
     }
     fn xyz(&self) -> (i32, i32, i32) {
         (self.x, self.y, self.z)
@@ -85,7 +89,10 @@ pub struct Pin {
 
 impl Pin {
     pub fn new(node: Node, name: impl Into<String>) -> Self {
-        Pin { node, name: name.into() }
+        Pin {
+            node,
+            name: name.into(),
+        }
     }
 }
 
@@ -122,8 +129,18 @@ struct Installed {
 
 impl Installed {
     fn new(meta: ChipMeta, circuit: CircuitData, vm: RedstoneVM) -> Self {
-        let ins = circuit.ports.iter().filter(|p| p.dir.inputs()).map(|p| (p.x, p.y, p.z)).collect();
-        let outs = circuit.ports.iter().filter(|p| p.dir.outputs()).map(|p| (p.x, p.y, p.z)).collect();
+        let ins = circuit
+            .ports
+            .iter()
+            .filter(|p| p.dir.inputs())
+            .map(|p| (p.x, p.y, p.z))
+            .collect();
+        let outs = circuit
+            .ports
+            .iter()
+            .filter(|p| p.dir.outputs())
+            .map(|p| (p.x, p.y, p.z))
+            .collect();
         let sim = crate::compile::ChipSim::new(vm, ins, outs, Some(&meta.id));
         Installed { meta, circuit, sim }
     }
@@ -152,7 +169,13 @@ struct Board {
 impl Board {
     fn new(tier: Tier) -> Self {
         Board {
-            saved: Saved { tier, wires: Vec::new(), layout: Vec::new(), panels: Vec::new(), bus_rows: Vec::new() },
+            saved: Saved {
+                tier,
+                wires: Vec::new(),
+                layout: Vec::new(),
+                panels: Vec::new(),
+                bus_rows: Vec::new(),
+            },
             chips: (0..CHIP_SLOTS).map(|_| None).collect(),
             levels: HashMap::new(),
             side_names: HashMap::new(),
@@ -163,7 +186,10 @@ impl Board {
     }
 
     fn side_is_output(&self, side: &str) -> bool {
-        self.saved.wires.iter().any(|w| w.to.node == Node::Out && w.to.name == side)
+        self.saved
+            .wires
+            .iter()
+            .any(|w| w.to.node == Node::Out && w.to.name == side)
     }
 
     fn active(&self, slot: u8) -> Option<&Installed> {
@@ -175,7 +201,12 @@ impl Board {
 
     /// The mode of a chip pin (`None`: no such pin on an active chip).
     fn chip_pin(&self, slot: u8, name: &str) -> Option<PortMode> {
-        self.active(slot)?.meta.ports.iter().find(|p| p.label == name).map(|p| p.dir)
+        self.active(slot)?
+            .meta
+            .ports
+            .iter()
+            .find(|p| p.label == name)
+            .map(|p| p.dir)
     }
 
     /// How many channels of a bus this ALU's tier sees.
@@ -186,18 +217,26 @@ impl Board {
     /// The channel (0-based) a pin of bus `side` names, if the bus is there and the tier sees it.
     fn bus_channel(&self, side: u8, name: &str) -> Option<u8> {
         let n: u16 = name.parse().ok()?;
-        (self.is_bus(side as usize) && (1..=self.bus_channels()).contains(&n)).then(|| (n - 1) as u8)
+        (self.is_bus(side as usize) && (1..=self.bus_channels()).contains(&n))
+            .then(|| (n - 1) as u8)
     }
 
     fn bus_rows(&self, side: u8) -> u16 {
-        self.saved.bus_rows.iter().find(|(s, _)| *s == side).map_or(BUS_ROWS, |(_, r)| *r).clamp(1, self.bus_channels())
+        self.saved
+            .bus_rows
+            .iter()
+            .find(|(s, _)| *s == side)
+            .map_or(BUS_ROWS, |(_, r)| *r)
+            .clamp(1, self.bus_channels())
     }
 
     fn is_source(&self, pin: &Pin) -> bool {
         match pin.node {
             Node::In => SIDES.contains(&pin.name.as_str()) && !self.side_is_output(&pin.name),
             Node::Out => false,
-            Node::Chip(slot) => self.chip_pin(slot, &pin.name).is_some_and(PortMode::outputs),
+            Node::Chip(slot) => self
+                .chip_pin(slot, &pin.name)
+                .is_some_and(PortMode::outputs),
             Node::Bus(side) => self.bus_channel(side, &pin.name).is_some(),
         }
     }
@@ -221,13 +260,20 @@ impl Board {
                 // being an input.
                 self.saved.wires.retain(|w| w.to != to);
                 if to.node == Node::Out {
-                    self.saved.wires.retain(|w| !(w.from.node == Node::In && w.from.name == to.name));
+                    self.saved
+                        .wires
+                        .retain(|w| !(w.from.node == Node::In && w.from.name == to.name));
                 }
                 self.saved.wires.push(Wire { from, to });
             }
             Request::Disconnect { to, .. } => self.saved.wires.retain(|w| w.to != to),
             Request::Clear { .. } => self.saved.wires.clear(),
-            Request::Move { node: Node::Chip(slot), x, y, .. } => {
+            Request::Move {
+                node: Node::Chip(slot),
+                x,
+                y,
+                ..
+            } => {
                 self.saved.layout.retain(|(s, _)| *s != slot);
                 self.saved.layout.push((slot, (x, y)));
             }
@@ -291,22 +337,34 @@ impl Board {
         let mut levels = HashMap::new();
         for (i, &side) in SIDES.iter().enumerate() {
             if !self.side_is_output(side) {
-                let level = cables::side_input(&alu.dimension, alu.xyz(), side, self.cables[i]).unwrap_or(0);
+                let level = cables::side_input(&alu.dimension, alu.xyz(), side, self.cables[i])
+                    .unwrap_or(0);
                 levels.insert(Pin::new(Node::In, side), level);
             }
         }
         for (slot, chip) in self.chips.iter().enumerate().take(max) {
             let Some(chip) = chip else { continue };
             for port in chip.circuit.ports.iter().filter(|p| p.dir.outputs()) {
-                levels.insert(Pin::new(Node::Chip(slot as u8), &port.label), chip.sim.output(port.x, port.y, port.z));
+                levels.insert(
+                    Pin::new(Node::Chip(slot as u8), &port.label),
+                    chip.sim.output(port.x, port.y, port.z),
+                );
             }
         }
         for (i, side) in SIDES.iter().enumerate().filter(|(i, _)| self.is_bus(*i)) {
             let shown = (1..=self.bus_rows(i as u8)).map(|n| n.to_string());
-            let wired = self.saved.wires.iter().filter(|w| w.from.node == Node::Bus(i as u8)).map(|w| w.from.name.clone());
+            let wired = self
+                .saved
+                .wires
+                .iter()
+                .filter(|w| w.from.node == Node::Bus(i as u8))
+                .map(|w| w.from.name.clone());
             for name in shown.chain(wired) {
                 if let Some(ch) = self.bus_channel(i as u8, &name) {
-                    levels.insert(Pin::new(Node::Bus(i as u8), name), cables::bus_level(&alu.dimension, alu.xyz(), side, ch));
+                    levels.insert(
+                        Pin::new(Node::Bus(i as u8), name),
+                        cables::bus_level(&alu.dimension, alu.xyz(), side, ch),
+                    );
                 }
             }
         }
@@ -320,7 +378,12 @@ impl Board {
     fn tick(&mut self, alu: &AluId, deadline: std::time::Instant) {
         let max = self.saved.tier.max_chips();
         let incoming = |wires: &[Wire], levels: &HashMap<Pin, u8>, to: &Pin| {
-            wires.iter().find(|w| &w.to == to).and_then(|w| levels.get(&w.from)).copied().unwrap_or(0)
+            wires
+                .iter()
+                .find(|w| &w.to == to)
+                .and_then(|w| levels.get(&w.from))
+                .copied()
+                .unwrap_or(0)
         };
 
         // In: the sides' inputs and the other chips' outputs, into each chip.
@@ -329,7 +392,17 @@ impl Board {
         for (slot, chip) in self.chips.iter().enumerate().take(max) {
             let Some(chip) = chip else { continue };
             for port in chip.circuit.ports.iter().filter(|p| p.dir.inputs()) {
-                inputs.push((slot, port.x, port.y, port.z, incoming(&self.saved.wires, &before, &Pin::new(Node::Chip(slot as u8), &port.label))));
+                inputs.push((
+                    slot,
+                    port.x,
+                    port.y,
+                    port.z,
+                    incoming(
+                        &self.saved.wires,
+                        &before,
+                        &Pin::new(Node::Chip(slot as u8), &port.label),
+                    ),
+                ));
             }
         }
         for (slot, x, y, z, level) in inputs {
@@ -342,7 +415,8 @@ impl Board {
         // their tier's — they answer this tick.
         for chip in self.chips.iter_mut().take(max).flatten() {
             chip.sim.new_tick();
-            chip.sim.settle_until(chip.meta.tier.steps_per_tick(), deadline);
+            chip.sim
+                .settle_until(chip.meta.tier.steps_per_tick(), deadline);
         }
 
         // Out: what they put out now, through the output sides.
@@ -392,7 +466,12 @@ impl Board {
                         slot: slot as u8,
                         name: c.meta.name.clone(),
                         tier: c.meta.tier,
-                        pins: c.meta.ports.iter().map(|p| (p.label.clone(), p.dir)).collect(),
+                        pins: c
+                            .meta
+                            .ports
+                            .iter()
+                            .map(|p| (p.label.clone(), p.dir))
+                            .collect(),
                         active: slot < self.saved.tier.max_chips(),
                     })
                 })
@@ -405,7 +484,9 @@ impl Board {
                 .filter(|&(i, &side)| {
                     self.cables[i] == Some(cables::ANALOG)
                         || self.saved.wires.iter().any(|w| {
-                            [&w.from, &w.to].iter().any(|p| matches!(p.node, Node::In | Node::Out) && p.name == side)
+                            [&w.from, &w.to]
+                                .iter()
+                                .any(|p| matches!(p.node, Node::In | Node::Out) && p.name == side)
                         })
                 })
                 .map(|(_, &side)| SideView {
@@ -416,10 +497,21 @@ impl Board {
                 .collect(),
             buses: (0..SIDES.len() as u8)
                 .filter(|&i| self.is_bus(i as usize))
-                .map(|i| BusView { index: i, side: SIDES[i as usize].to_string(), channels: self.bus_channels(), rows: self.bus_rows(i) })
+                .map(|i| BusView {
+                    index: i,
+                    side: SIDES[i as usize].to_string(),
+                    channels: self.bus_channels(),
+                    rows: self.bus_rows(i),
+                })
                 .collect(),
             wires: self.saved.wires.clone(),
-            layout: self.saved.layout.iter().map(|&(s, p)| (Node::Chip(s), p)).chain(self.saved.panels.iter().copied()).collect(),
+            layout: self
+                .saved
+                .layout
+                .iter()
+                .map(|&(s, p)| (Node::Chip(s), p))
+                .chain(self.saved.panels.iter().copied())
+                .collect(),
             levels: self.levels.iter().map(|(p, l)| (p.clone(), *l)).collect(),
         }
     }
@@ -470,12 +562,30 @@ pub struct BoardView {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Request {
-    Connect { alu: AluId, from: Pin, to: Pin },
-    Disconnect { alu: AluId, to: Pin },
-    Clear { alu: AluId },
-    Move { alu: AluId, node: Node, x: f32, y: f32 },
+    Connect {
+        alu: AluId,
+        from: Pin,
+        to: Pin,
+    },
+    Disconnect {
+        alu: AluId,
+        to: Pin,
+    },
+    Clear {
+        alu: AluId,
+    },
+    Move {
+        alu: AluId,
+        node: Node,
+        x: f32,
+        y: f32,
+    },
     /// Pulls a bus node open to `rows` channels (or closes it to them).
-    BusRows { alu: AluId, side: u8, rows: u16 },
+    BusRows {
+        alu: AluId,
+        side: u8,
+        rows: u16,
+    },
 }
 
 impl Request {
@@ -499,7 +609,8 @@ pub fn send(request: &Request) {
 
 // ── The server side ──────────────────────────────────────────────────────────
 
-static BOARDS: LazyLock<Mutex<HashMap<AluId, Board>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static BOARDS: LazyLock<Mutex<HashMap<AluId, Board>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn side_index(name: &str) -> Option<u8> {
     SIDES.iter().position(|s| *s == name).map(|i| i as u8)
@@ -523,7 +634,13 @@ pub fn nested_wires(alu: &AluId) -> Vec<(NestedPin, NestedPin)> {
         .lock()
         .unwrap()
         .get(alu)
-        .map(|b| b.saved.wires.iter().filter_map(|w| Some((nested_pin(&w.from)?, nested_pin(&w.to)?))).collect())
+        .map(|b| {
+            b.saved
+                .wires
+                .iter()
+                .filter_map(|w| Some((nested_pin(&w.from)?, nested_pin(&w.to)?)))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -537,7 +654,13 @@ pub fn restore(alu: AluId, tier: Tier, wires: &[(NestedPin, NestedPin)]) {
         NestedPin::Bus(side, ch) => Pin::new(Node::Bus(*side), (ch + 1).to_string()),
     };
     let mut board = Board::new(tier);
-    board.saved.wires = wires.iter().map(|(f, t)| Wire { from: pin(f), to: pin(t) }).collect();
+    board.saved.wires = wires
+        .iter()
+        .map(|(f, t)| Wire {
+            from: pin(f),
+            to: pin(t),
+        })
+        .collect();
     BOARDS.lock().unwrap().insert(alu, board);
 }
 
@@ -545,7 +668,10 @@ pub fn restore(alu: AluId, tier: Tier, wires: &[(NestedPin, NestedPin)]) {
 /// editor field going).
 pub fn forget_in(dimension: &str, lo: BlockPos, hi: BlockPos) {
     BOARDS.lock().unwrap().retain(|a, _| {
-        !(a.dimension == dimension && (lo.x..=hi.x).contains(&a.x) && (lo.y..=hi.y).contains(&a.y) && (lo.z..=hi.z).contains(&a.z))
+        !(a.dimension == dimension
+            && (lo.x..=hi.x).contains(&a.x)
+            && (lo.y..=hi.y).contains(&a.y)
+            && (lo.z..=hi.z).contains(&a.z))
     });
 }
 /// Who has which ALU open, and what they were last sent.
@@ -560,7 +686,11 @@ pub fn tick(srv: &dyn yog_api::Server) {
         *t += 1;
         *t
     };
-    let names = if n % SYNC_EVERY == 0 { Some(cables::port_names(srv)) } else { None };
+    let names = if n % SYNC_EVERY == 0 {
+        Some(cables::port_names(srv))
+    } else {
+        None
+    };
     let cables_changed = cables::cables_changed();
     {
         let mut boards = BOARDS.lock().unwrap();
@@ -584,7 +714,12 @@ pub fn tick(srv: &dyn yog_api::Server) {
                 board.sync_chips(srv, alu);
                 board.side_names = SIDES
                     .iter()
-                    .filter_map(|&side| Some((side.to_string(), cables::side_port_name(srv, alu, side, names)?)))
+                    .filter_map(|&side| {
+                        Some((
+                            side.to_string(),
+                            cables::side_port_name(srv, alu, side, names)?,
+                        ))
+                    })
                     .collect();
             }
             board.tick(alu, std::time::Instant::now() + share);
@@ -599,7 +734,9 @@ fn send_views(srv: &dyn yog_api::Server) {
     let boards = BOARDS.lock().unwrap();
     let mut watchers = WATCHERS.lock().unwrap();
     for (player, (alu, last)) in watchers.iter_mut() {
-        let Some(board) = boards.get(alu) else { continue };
+        let Some(board) = boards.get(alu) else {
+            continue;
+        };
         let view = board.view(alu);
         if last.as_ref() != Some(&view) {
             if let Ok(json) = serde_json::to_string(&view) {
@@ -631,7 +768,12 @@ pub fn load(srv: &dyn yog_api::Server) {
 }
 
 pub fn save(srv: &dyn yog_api::Server) {
-    let saved: Vec<(AluId, Saved)> = BOARDS.lock().unwrap().iter().map(|(k, b)| (k.clone(), b.saved.clone())).collect();
+    let saved: Vec<(AluId, Saved)> = BOARDS
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(k, b)| (k.clone(), b.saved.clone()))
+        .collect();
     if let Ok(json) = serde_json::to_string(&saved) {
         let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
         store.set(STORE_KEY, &*json);
@@ -642,33 +784,56 @@ pub fn save(srv: &dyn yog_api::Server) {
 pub fn setup(registry: &mut Registry) {
     // Opening an ALU: it gets a board (if new) and the player watches it.
     registry.on_use_block(|e, phase, srv| -> bool {
-        let Some(tier) = Tier::from_alu(&e.block_id) else { return true };
+        let Some(tier) = Tier::from_alu(&e.block_id) else {
+            return true;
+        };
         if phase != EventPhase::Pre {
             return true;
         }
-        let alu = AluId { dimension: e.dimension.clone(), x: e.pos.x, y: e.pos.y, z: e.pos.z };
+        let alu = AluId {
+            dimension: e.dimension.clone(),
+            x: e.pos.x,
+            y: e.pos.y,
+            z: e.pos.z,
+        };
         {
             let mut boards = BOARDS.lock().unwrap();
-            let board = boards.entry(alu.clone()).or_insert_with(|| Board::new(tier));
+            let board = boards
+                .entry(alu.clone())
+                .or_insert_with(|| Board::new(tier));
             board.saved.tier = tier;
             board.sync_chips(srv, &alu);
         }
-        WATCHERS.lock().unwrap().insert(e.player_name.clone(), (alu, None));
+        WATCHERS
+            .lock()
+            .unwrap()
+            .insert(e.player_name.clone(), (alu, None));
         true // its inventory opens
     });
 
     registry.on_block_break(|e, phase, _srv| {
         if phase == EventPhase::Post && Tier::from_alu(&e.block_id).is_some() {
-            let alu = AluId { dimension: e.dimension.clone(), x: e.pos.x, y: e.pos.y, z: e.pos.z };
+            let alu = AluId {
+                dimension: e.dimension.clone(),
+                x: e.pos.x,
+                y: e.pos.y,
+                z: e.pos.z,
+            };
             BOARDS.lock().unwrap().remove(&alu);
         }
         true
     });
 
     registry.on_packet(REQUEST_CHANNEL, |ev, srv| {
-        let Ok(request) = serde_json::from_slice::<Request>(&ev.payload) else { return };
+        let Ok(request) = serde_json::from_slice::<Request>(&ev.payload) else {
+            return;
+        };
         let alu = request.alu().clone();
-        let result = BOARDS.lock().unwrap().get_mut(&alu).map(|b| b.apply(request));
+        let result = BOARDS
+            .lock()
+            .unwrap()
+            .get_mut(&alu)
+            .map(|b| b.apply(request));
         if let Some(Err(e)) = result {
             srv.send_actionbar(&ev.player, &e);
         }
@@ -684,51 +849,137 @@ mod tests {
     use crate::chip::Port;
 
     fn chip(slot: u8, ports: &[(&str, PortMode)]) -> (u8, Installed) {
-        let ports: Vec<Port> =
-            ports.iter().enumerate().map(|(i, (l, d))| Port { label: l.to_string(), x: i as u32, y: 0, z: 0, dir: *d }).collect();
-        let circuit = CircuitData { size: 16, blocks: Vec::new(), ports: ports.clone(), alus: Vec::new() };
-        let meta = ChipMeta { id: format!("c{slot}"), tier: Tier::ALL[0], name: "Chip".into(), ports };
+        let ports: Vec<Port> = ports
+            .iter()
+            .enumerate()
+            .map(|(i, (l, d))| Port {
+                label: l.to_string(),
+                x: i as u32,
+                y: 0,
+                z: 0,
+                dir: *d,
+            })
+            .collect();
+        let circuit = CircuitData {
+            size: 16,
+            blocks: Vec::new(),
+            ports: ports.clone(),
+            alus: Vec::new(),
+        };
+        let meta = ChipMeta {
+            id: format!("c{slot}"),
+            tier: Tier::ALL[0],
+            name: "Chip".into(),
+            ports,
+        };
         (slot, Installed::new(meta, circuit.clone(), circuit.vm()))
     }
 
     fn board() -> Board {
         let mut b = Board::new(Tier::ALL[0]);
-        for (slot, c) in [chip(0, &[("A", PortMode::Input), ("Q", PortMode::Output)]), chip(1, &[("D", PortMode::Bidirectional)])] {
+        for (slot, c) in [
+            chip(0, &[("A", PortMode::Input), ("Q", PortMode::Output)]),
+            chip(1, &[("D", PortMode::Bidirectional)]),
+        ] {
             b.chips[slot as usize] = Some(c);
         }
         b
     }
 
     fn connect(b: &mut Board, from: Pin, to: Pin) -> Result<(), String> {
-        let alu = AluId { dimension: String::new(), x: 0, y: 0, z: 0 };
+        let alu = AluId {
+            dimension: String::new(),
+            x: 0,
+            y: 0,
+            z: 0,
+        };
         b.apply(Request::Connect { alu, from, to })
     }
 
     #[test]
     fn wires_run_from_sources_to_sinks() {
         let mut b = board();
-        assert!(connect(&mut b, Pin::new(Node::Chip(0), "Q"), Pin::new(Node::Chip(1), "D")).is_ok());
-        assert!(connect(&mut b, Pin::new(Node::Chip(1), "D"), Pin::new(Node::Chip(0), "A")).is_ok(), "bidi is both");
-        assert!(connect(&mut b, Pin::new(Node::Chip(0), "A"), Pin::new(Node::Out, "N")).is_err(), "A is an input");
-        assert!(connect(&mut b, Pin::new(Node::In, "N"), Pin::new(Node::Out, "X")).is_err(), "no side X");
+        assert!(
+            connect(
+                &mut b,
+                Pin::new(Node::Chip(0), "Q"),
+                Pin::new(Node::Chip(1), "D")
+            )
+            .is_ok()
+        );
+        assert!(
+            connect(
+                &mut b,
+                Pin::new(Node::Chip(1), "D"),
+                Pin::new(Node::Chip(0), "A")
+            )
+            .is_ok(),
+            "bidi is both"
+        );
+        assert!(
+            connect(
+                &mut b,
+                Pin::new(Node::Chip(0), "A"),
+                Pin::new(Node::Out, "N")
+            )
+            .is_err(),
+            "A is an input"
+        );
+        assert!(
+            connect(&mut b, Pin::new(Node::In, "N"), Pin::new(Node::Out, "X")).is_err(),
+            "no side X"
+        );
         assert_eq!(b.saved.wires.len(), 2);
     }
 
     #[test]
     fn a_sink_takes_one_wire() {
         let mut b = board();
-        connect(&mut b, Pin::new(Node::In, "N"), Pin::new(Node::Chip(0), "A")).unwrap();
-        connect(&mut b, Pin::new(Node::In, "S"), Pin::new(Node::Chip(0), "A")).unwrap();
-        assert_eq!(b.saved.wires, [Wire { from: Pin::new(Node::In, "S"), to: Pin::new(Node::Chip(0), "A") }]);
+        connect(
+            &mut b,
+            Pin::new(Node::In, "N"),
+            Pin::new(Node::Chip(0), "A"),
+        )
+        .unwrap();
+        connect(
+            &mut b,
+            Pin::new(Node::In, "S"),
+            Pin::new(Node::Chip(0), "A"),
+        )
+        .unwrap();
+        assert_eq!(
+            b.saved.wires,
+            [Wire {
+                from: Pin::new(Node::In, "S"),
+                to: Pin::new(Node::Chip(0), "A")
+            }]
+        );
     }
 
     #[test]
     fn a_side_is_an_input_or_an_output() {
         let mut b = board();
-        connect(&mut b, Pin::new(Node::In, "N"), Pin::new(Node::Chip(0), "A")).unwrap();
-        connect(&mut b, Pin::new(Node::Chip(0), "Q"), Pin::new(Node::Out, "N")).unwrap();
+        connect(
+            &mut b,
+            Pin::new(Node::In, "N"),
+            Pin::new(Node::Chip(0), "A"),
+        )
+        .unwrap();
+        connect(
+            &mut b,
+            Pin::new(Node::Chip(0), "Q"),
+            Pin::new(Node::Out, "N"),
+        )
+        .unwrap();
         assert_eq!(b.saved.wires.len(), 1, "In:N went dark");
-        assert!(connect(&mut b, Pin::new(Node::In, "N"), Pin::new(Node::Chip(1), "D")).is_err());
+        assert!(
+            connect(
+                &mut b,
+                Pin::new(Node::In, "N"),
+                Pin::new(Node::Chip(1), "D")
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -737,7 +988,14 @@ mod tests {
         let max = b.saved.tier.max_chips() as u8;
         let (_, c) = chip(max, &[("Z", PortMode::Output)]);
         b.chips[max as usize] = Some(c);
-        assert!(connect(&mut b, Pin::new(Node::Chip(max), "Z"), Pin::new(Node::Chip(0), "A")).is_err());
+        assert!(
+            connect(
+                &mut b,
+                Pin::new(Node::Chip(max), "Z"),
+                Pin::new(Node::Chip(0), "A")
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -749,12 +1007,38 @@ mod tests {
         assert_eq!(b.bus_channels(), 32, "wood: 8 × 4 colors");
         assert!(b.is_source(&ch("1")) && b.is_sink(&ch("1")));
         assert!(b.is_sink(&ch("32")) && !b.is_sink(&ch("33")) && !b.is_source(&ch("0")));
-        assert_eq!(b.bus_channel(2, "32"), Some(31), "pins count from 1, Pipes' channels from 0");
+        assert_eq!(
+            b.bus_channel(2, "32"),
+            Some(31),
+            "pins count from 1, Pipes' channels from 0"
+        );
         assert_eq!(b.bus_rows(2), BUS_ROWS);
-        b.apply(Request::BusRows { alu: AluId { dimension: String::new(), x: 0, y: 0, z: 0 }, side: 2, rows: 500 }).unwrap();
+        b.apply(Request::BusRows {
+            alu: AluId {
+                dimension: String::new(),
+                x: 0,
+                y: 0,
+                z: 0,
+            },
+            side: 2,
+            rows: 500,
+        })
+        .unwrap();
         assert_eq!(b.bus_rows(2), 32, "no more rows than channels");
         // An In side straight onto a bus channel: a bus takes the sides' signals.
-        let alu = AluId { dimension: String::new(), x: 0, y: 0, z: 0 };
-        assert!(b.apply(Request::Connect { alu, from: Pin::new(Node::In, "N"), to: ch("5") }).is_ok());
+        let alu = AluId {
+            dimension: String::new(),
+            x: 0,
+            y: 0,
+            z: 0,
+        };
+        assert!(
+            b.apply(Request::Connect {
+                alu,
+                from: Pin::new(Node::In, "N"),
+                to: ch("5")
+            })
+            .is_ok()
+        );
     }
 }

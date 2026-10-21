@@ -3,8 +3,8 @@
 //! costs in them.
 
 use crate::chip::CircuitBlock;
-pub use crate::content::Resource;
 use crate::content::Cost;
+pub use crate::content::Resource;
 
 /// An amount of each [`Resource`], in [`Resource::ALL`] order.
 pub type Amounts = [u64; 6];
@@ -33,7 +33,11 @@ impl Resource {
         let unit = self.unit().max(1);
         let whole = units / unit;
         let tenth = units % unit * 10 / unit;
-        if whole < 10 && tenth > 0 { format!("{whole}.{tenth}") } else { compact(whole) }
+        if whole < 10 && tenth > 0 {
+            format!("{whole}.{tenth}")
+        } else {
+            compact(whole)
+        }
     }
 
     /// Whether `id` is this resource itself in a design.
@@ -45,7 +49,9 @@ impl Resource {
 /// Whether `id` is `pattern` — `*` in it any run of letters.
 fn fits(pattern: &str, id: &str) -> bool {
     match pattern.split_once('*') {
-        Some((pre, post)) => id.len() >= pre.len() + post.len() && id.starts_with(pre) && id.ends_with(post),
+        Some((pre, post)) => {
+            id.len() >= pre.len() + post.len() && id.starts_with(pre) && id.ends_with(post)
+        }
         None => pattern == id,
     }
 }
@@ -54,7 +60,10 @@ fn fits(pattern: &str, id: &str) -> bool {
 pub fn item_name(id: &str) -> String {
     let path = id.strip_prefix("minecraft:").unwrap_or(id);
     let block = path.ends_with("_block") || path == "cobblestone";
-    yog_api::tr(&format!("{}.minecraft.{path}", if block { "block" } else { "item" }))
+    yog_api::tr(&format!(
+        "{}.minecraft.{path}",
+        if block { "block" } else { "item" }
+    ))
 }
 
 /// `n` short: `999`, `1.2k`, `15k`, `1.5m`, `2b`, `3t`.
@@ -103,8 +112,17 @@ fn cost(blocks: &[CircuitBlock]) -> Amounts {
 /// its blocks, and of the circuits of the chips in its ALUs another share
 /// of that for each level down, to [`MAX_NESTING`](crate::chip::MAX_NESTING)
 /// (their circuits from `load`); rounded up once, at the end.
-pub fn circuit_cost(circuit: &crate::chip::CircuitData, load: &dyn Fn(&str) -> Option<crate::chip::CircuitData>) -> Amounts {
-    fn go(c: &crate::chip::CircuitData, load: &dyn Fn(&str) -> Option<crate::chip::CircuitData>, depth: u32, share: f64, total: &mut [f64; 6]) {
+pub fn circuit_cost(
+    circuit: &crate::chip::CircuitData,
+    load: &dyn Fn(&str) -> Option<crate::chip::CircuitData>,
+) -> Amounts {
+    fn go(
+        c: &crate::chip::CircuitData,
+        load: &dyn Fn(&str) -> Option<crate::chip::CircuitData>,
+        depth: u32,
+        share: f64,
+        total: &mut [f64; 6],
+    ) {
         for (t, x) in total.iter_mut().zip(craft(&c.blocks)) {
             *t += x * share;
         }
@@ -129,7 +147,10 @@ pub fn circuit_cost(circuit: &crate::chip::CircuitData, load: &dyn Fn(&str) -> O
 fn add_block(id: &str, n: f64, total: &mut [f64; 6]) {
     if let Some(r) = Resource::ALL.into_iter().find(|r| r.is(id)) {
         total[r.index()] += n * r.unit() as f64;
-    } else if let Some(c) = Cost::ALL.into_iter().find(|c| c.of().iter().any(|p| fits(p, id))) {
+    } else if let Some(c) = Cost::ALL
+        .into_iter()
+        .find(|c| c.of().iter().any(|p| fits(p, id)))
+    {
         for (what, k) in c.takes() {
             add_block(what, n * k, total);
         }
@@ -156,7 +177,14 @@ mod tests {
 
     #[test]
     fn cost_in_resources() {
-        let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new(), redstone_port: None };
+        let block = |state: &str| CircuitBlock {
+            x: 0,
+            y: 0,
+            z: 0,
+            state: state.into(),
+            items: Vec::new(),
+            redstone_port: None,
+        };
         // Half of crafting, rounded up: 8 dust → 4 redstone; 4 repeaters
         // (3 redstone, 3 stone, ¼ log each) → 6, 6, 1.
         let c = cost(&vec![block("minecraft:redstone_wire"); 8]);
@@ -169,24 +197,66 @@ mod tests {
 
     #[test]
     fn any_wood_is_wood() {
-        let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new(), redstone_port: None };
-        assert_eq!(cost(&[block("minecraft:spruce_planks"), block("minecraft:cherry_planks")]), [0, 0, 0, 0, 1, 0]);
-        assert_eq!(cost(&[block("minecraft:stripped_birch_log"), block("minecraft:crimson_stem")]), [0, 0, 0, 0, 1, 0]);
+        let block = |state: &str| CircuitBlock {
+            x: 0,
+            y: 0,
+            z: 0,
+            state: state.into(),
+            items: Vec::new(),
+            redstone_port: None,
+        };
+        assert_eq!(
+            cost(&[
+                block("minecraft:spruce_planks"),
+                block("minecraft:cherry_planks")
+            ]),
+            [0, 0, 0, 0, 1, 0]
+        );
+        assert_eq!(
+            cost(&[
+                block("minecraft:stripped_birch_log"),
+                block("minecraft:crimson_stem")
+            ]),
+            [0, 0, 0, 0, 1, 0]
+        );
     }
 
     #[test]
     fn a_chip_in_an_alu_in_the_design_costs_another_half() {
         use crate::chip::{ChipMeta, CircuitData, SavedAlu};
         use crate::content::Tier;
-        let block = |state: &str| CircuitBlock { x: 0, y: 0, z: 0, state: state.into(), items: Vec::new(), redstone_port: None };
+        let block = |state: &str| CircuitBlock {
+            x: 0,
+            y: 0,
+            z: 0,
+            state: state.into(),
+            items: Vec::new(),
+            redstone_port: None,
+        };
         // The inner chip: 64 dust — 32 redstone printed alone, 16 inside an ALU.
-        let inner = CircuitData { size: 16, blocks: vec![block("minecraft:redstone_wire"); 64], ..Default::default() };
-        let meta = ChipMeta { id: "inner".into(), tier: Tier::Wood, name: "x".into(), ports: Vec::new() };
+        let inner = CircuitData {
+            size: 16,
+            blocks: vec![block("minecraft:redstone_wire"); 64],
+            ..Default::default()
+        };
+        let meta = ChipMeta {
+            id: "inner".into(),
+            tier: Tier::Wood,
+            name: "x".into(),
+            ports: Vec::new(),
+        };
         let outer = CircuitData {
             size: 16,
             blocks: vec![block("minecraft:redstone_wire"); 8],
             ports: Vec::new(),
-            alus: vec![SavedAlu { x: 0, y: 0, z: 0, tier: Tier::Wood, chips: vec![(0, meta)], wires: Vec::new() }],
+            alus: vec![SavedAlu {
+                x: 0,
+                y: 0,
+                z: 0,
+                tier: Tier::Wood,
+                chips: vec![(0, meta)],
+                wires: Vec::new(),
+            }],
         };
         let load = |id: &str| (id == "inner").then(|| inner.clone());
         assert_eq!(circuit_cost(&inner, &load)[Resource::Redstone.index()], 32);

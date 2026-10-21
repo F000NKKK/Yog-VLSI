@@ -25,19 +25,40 @@ pub fn register(registry: &mut Registry) {
 
     // ── /vlsi info ─────────────────────────────────────────────────────────
     registry.on_typed_command("vlsi", "word", |ctx, srv| {
-        if ctx.arg_str(0).unwrap_or("") != "info" { return None; }
+        if ctx.arg_str(0).unwrap_or("") != "info" {
+            return None;
+        }
         let nbt = match srv.get_held_item_nbt(&ctx.source) {
-            Some(n) => n, None => return Some("§cNo NBT on held item.".into()),
+            Some(n) => n,
+            None => return Some("§cNo NBT on held item.".into()),
         };
         match ChipMeta::from_nbt(&nbt) {
             Some(meta) => {
-                let ports = if meta.ports.is_empty() { "§7(none)".into() }
-                else {
-                    meta.ports.iter()
-                        .map(|p| format!("  §e{}§7: {} ({}, {}, {})", p.label, p.dir.label(), p.x, p.y, p.z))
-                        .collect::<Vec<_>>().join("\n")
+                let ports = if meta.ports.is_empty() {
+                    "§7(none)".into()
+                } else {
+                    meta.ports
+                        .iter()
+                        .map(|p| {
+                            format!(
+                                "  §e{}§7: {} ({}, {}, {})",
+                                p.label,
+                                p.dir.label(),
+                                p.x,
+                                p.y,
+                                p.z
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 };
-                Some(format!("§6Chip: §f{}\n§7ID: §f{}\n§7Tier: §e{}\n§7Ports:\n{}", meta.name, meta.id, meta.tier.name(), ports))
+                Some(format!(
+                    "§6Chip: §f{}\n§7ID: §f{}\n§7Tier: §e{}\n§7Ports:\n{}",
+                    meta.name,
+                    meta.id,
+                    meta.tier.name(),
+                    ports
+                ))
             }
             None => Some("§cNo VLSI chip data.".into()),
         }

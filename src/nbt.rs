@@ -35,9 +35,13 @@ pub fn read(snbt: &str, tag: &str) -> Option<String> {
         if !matches!(before, None | Some('{' | ',' | ' ' | '"')) {
             continue;
         }
-        let Some(value) = after.strip_prefix(':') else { continue };
+        let Some(value) = after.strip_prefix(':') else {
+            continue;
+        };
         let value = value.trim_start();
-        let Some(quote) = value.chars().next().filter(|c| matches!(c, '"' | '\'')) else { continue };
+        let Some(quote) = value.chars().next().filter(|c| matches!(c, '"' | '\'')) else {
+            continue;
+        };
         return unescape_until(&value[1..], quote);
     }
 }
@@ -132,7 +136,10 @@ mod tests {
         let out = with_top_value(snbt, "Inventory", "[]");
         assert_eq!(out, "{Air:300s,Inventory:[],Pos:[1.0d,2.0d,3.0d]}");
         assert_eq!(with_top_value("{}", "Inventory", "[]"), "{Inventory:[]}");
-        assert_eq!(with_top_value("{A:1}", "Inventory", "[]"), "{A:1,Inventory:[]}");
+        assert_eq!(
+            with_top_value("{A:1}", "Inventory", "[]"),
+            "{A:1,Inventory:[]}"
+        );
     }
 
     #[test]
@@ -144,12 +151,18 @@ mod tests {
 
     #[test]
     fn reads_loader_spellings() {
-        assert_eq!(read(r#"{Other:1b,Tag: "x\"y"}"#, "Tag").as_deref(), Some("x\"y"));
+        assert_eq!(
+            read(r#"{Other:1b,Tag: "x\"y"}"#, "Tag").as_deref(),
+            Some("x\"y")
+        );
         assert_eq!(read(r#"{"Tag":"v"}"#, "Tag").as_deref(), Some("v"));
         assert_eq!(read(r#"{NotTag:"a",Tag:"b"}"#, "Tag").as_deref(), Some("b"));
         assert_eq!(read("{}", "Tag"), None);
         // How Minecraft prints a string holding double quotes.
-        assert_eq!(read(r#"{Tag:'{"name":"it\'s"}'}"#, "Tag").as_deref(), Some(r#"{"name":"it's"}"#));
+        assert_eq!(
+            read(r#"{Tag:'{"name":"it\'s"}'}"#, "Tag").as_deref(),
+            Some(r#"{"name":"it's"}"#)
+        );
         assert_eq!(read(r#"{Tag:"unterminated}"#, "Tag"), None);
     }
 }

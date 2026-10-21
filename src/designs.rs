@@ -56,19 +56,42 @@ pub struct Design {
 
 /// A board pin: `in:W`, `out:E`, `bus:E:3` (channel from 1), `0:A` (slot: port).
 fn pin(s: &str) -> Result<NestedPin, String> {
-    let face = |f: &str| ["N", "S", "E", "W", "U", "D"].iter().position(|x| *x == f).map(|i| i as u8).ok_or(format!("pin {s}: face {f}"));
+    let face = |f: &str| {
+        ["N", "S", "E", "W", "U", "D"]
+            .iter()
+            .position(|x| *x == f)
+            .map(|i| i as u8)
+            .ok_or(format!("pin {s}: face {f}"))
+    };
     let parts: Vec<&str> = s.split(':').collect();
     Ok(match parts[..] {
         ["in", f] => NestedPin::In(face(f)?),
         ["out", f] => NestedPin::Out(face(f)?),
-        ["bus", f, ch] => NestedPin::Bus(face(f)?, ch.parse::<u16>().ok().and_then(|c| c.checked_sub(1)).ok_or(format!("pin {s}: channel"))?),
-        [slot, label] => NestedPin::Chip(slot.parse().map_err(|_| format!("pin {s}: slot"))?, label.to_string()),
-        _ => return Err(format!("pin {s}: in:<face>, out:<face>, bus:<face>:<channel> or <slot>:<port>")),
+        ["bus", f, ch] => NestedPin::Bus(
+            face(f)?,
+            ch.parse::<u16>()
+                .ok()
+                .and_then(|c| c.checked_sub(1))
+                .ok_or(format!("pin {s}: channel"))?,
+        ),
+        [slot, label] => NestedPin::Chip(
+            slot.parse().map_err(|_| format!("pin {s}: slot"))?,
+            label.to_string(),
+        ),
+        _ => {
+            return Err(format!(
+                "pin {s}: in:<face>, out:<face>, bus:<face>:<channel> or <slot>:<port>"
+            ));
+        }
     })
 }
 
-static ALL: LazyLock<Vec<Design>> =
-    LazyLock::new(|| FILES.iter().map(|f| Design::parse(f).unwrap_or_else(|e| panic!("design: {e}"))).collect());
+static ALL: LazyLock<Vec<Design>> = LazyLock::new(|| {
+    FILES
+        .iter()
+        .map(|f| Design::parse(f).unwrap_or_else(|e| panic!("design: {e}")))
+        .collect()
+});
 
 /// Every design, in menu order.
 pub fn all() -> &'static [Design] {
@@ -110,14 +133,27 @@ impl Design {
             unlit: Vec::new(),
             alus: HashMap::new(),
         };
-        let ch = |w: Option<&str>| w.and_then(|w| w.chars().next()).ok_or_else(|| format!("{text:?}: no char"));
-        let num = |s: Option<&str>| s.and_then(|s| s.parse::<u32>().ok()).ok_or_else(|| format!("bad number in {text:?}"));
-        for line in text.lines().map(str::trim_end).filter(|l| !l.is_empty() && !l.starts_with("//")) {
+        let ch = |w: Option<&str>| {
+            w.and_then(|w| w.chars().next())
+                .ok_or_else(|| format!("{text:?}: no char"))
+        };
+        let num = |s: Option<&str>| {
+            s.and_then(|s| s.parse::<u32>().ok())
+                .ok_or_else(|| format!("bad number in {text:?}"))
+        };
+        for line in text
+            .lines()
+            .map(str::trim_end)
+            .filter(|l| !l.is_empty() && !l.starts_with("//"))
+        {
             let mut words = line.split_whitespace();
             match words.next() {
                 Some("name") => d.name = line["name".len()..].trim().to_string(),
                 Some("port") => {
-                    let ch = words.next().and_then(|w| w.chars().next()).ok_or("port: no char")?;
+                    let ch = words
+                        .next()
+                        .and_then(|w| w.chars().next())
+                        .ok_or("port: no char")?;
                     let label = words.next().ok_or("port: no label")?.to_string();
                     let mode = match words.next() {
                         Some("in") => PortMode::Input,
@@ -131,10 +167,16 @@ impl Design {
                     let at = (num(words.next())?, num(words.next())?, num(words.next())?);
                     d.delays.insert(at, num(words.next())?.clamp(1, 4) as u8);
                 }
-                Some("unlit") => d.unlit.push((num(words.next())?, num(words.next())?, num(words.next())?)),
+                Some("unlit") => {
+                    d.unlit
+                        .push((num(words.next())?, num(words.next())?, num(words.next())?))
+                }
                 Some("alu") => {
                     let c = ch(words.next())?;
-                    let tier = words.next().and_then(Tier::from_id).ok_or(format!("alu {c}: tier"))?;
+                    let tier = words
+                        .next()
+                        .and_then(Tier::from_id)
+                        .ok_or(format!("alu {c}: tier"))?;
                     d.alus.entry(c).or_default().tier = Some(tier);
                 }
                 Some("chip") => {
@@ -150,7 +192,11 @@ impl Design {
                     d.alus.entry(c).or_default().wires.push((from, to));
                 }
                 Some("layer") => d.layers.push(Vec::new()),
-                _ => d.layers.last_mut().ok_or("a row before any layer")?.push(line.chars().collect()),
+                _ => d
+                    .layers
+                    .last_mut()
+                    .ok_or("a row before any layer")?
+                    .push(line.chars().collect()),
             }
         }
         if d.name.is_empty() {
@@ -180,7 +226,9 @@ impl Design {
         match self.at(x + dx, y, z + dz) {
             '-' | 'T' | '^' | '>' | 'v' | '<' | '△' | '▷' | '▽' | '◁' => true,
             c if self.alus.contains_key(&c) => true,
-            c @ ('↑' | '→' | '↓' | '←') => dir(c).is_some_and(|(rx, rz, _)| rx.abs() == dx.abs() && rz.abs() == dz.abs()),
+            c @ ('↑' | '→' | '↓' | '←') => {
+                dir(c).is_some_and(|(rx, rz, _)| rx.abs() == dx.abs() && rz.abs() == dz.abs())
+            }
             c => self.ports.contains_key(&c),
         }
     }
@@ -188,10 +236,19 @@ impl Design {
     /// A wire's state: which way it runs (side, or up a step), as placed.
     fn wire_state(&self, x: i32, y: i32, z: i32) -> String {
         let open_above = !self.is_solid(x, y + 1, z);
-        let mut sides = [("north", 0, -1), ("east", 1, 0), ("south", 0, 1), ("west", -1, 0)].map(|(name, dx, dz)| {
+        let mut sides = [
+            ("north", 0, -1),
+            ("east", 1, 0),
+            ("south", 0, 1),
+            ("west", -1, 0),
+        ]
+        .map(|(name, dx, dz)| {
             let how = if self.connects(x, y, z, dx, dz) {
                 "side"
-            } else if self.is_solid(x + dx, y, z + dz) && open_above && self.at(x + dx, y + 1, z + dz) == '-' {
+            } else if self.is_solid(x + dx, y, z + dz)
+                && open_above
+                && self.at(x + dx, y + 1, z + dz) == '-'
+            {
                 "up"
             } else if !self.is_solid(x + dx, y, z + dz) && self.at(x + dx, y - 1, z + dz) == '-' {
                 "side"
@@ -211,18 +268,36 @@ impl Design {
 
     /// The smallest tier its drawing fits.
     pub fn tier(&self) -> Tier {
-        let width = self.layers.iter().flatten().map(Vec::len).max().unwrap_or(0) as u32;
+        let width = self
+            .layers
+            .iter()
+            .flatten()
+            .map(Vec::len)
+            .max()
+            .unwrap_or(0) as u32;
         let depth = self.layers.iter().map(Vec::len).max().unwrap_or(0) as u32;
         let extent = width.max(depth).max(self.layers.len() as u32);
-        Tier::ALL.into_iter().find(|t| t.world_size() >= extent).unwrap_or(Tier::Netherite)
+        Tier::ALL
+            .into_iter()
+            .find(|t| t.world_size() >= extent)
+            .unwrap_or(Tier::Netherite)
     }
 
     /// The design as a circuit for a `tier` chip, in the middle of its world.
     pub fn circuit(&self, tier: Tier) -> CircuitData {
         let size = tier.world_size();
-        let width = self.layers.iter().flatten().map(Vec::len).max().unwrap_or(0) as u32;
+        let width = self
+            .layers
+            .iter()
+            .flatten()
+            .map(Vec::len)
+            .max()
+            .unwrap_or(0) as u32;
         let depth = self.layers.iter().map(Vec::len).max().unwrap_or(0) as u32;
-        let (ox, oz) = (size.saturating_sub(width) / 2, size.saturating_sub(depth) / 2);
+        let (ox, oz) = (
+            size.saturating_sub(width) / 2,
+            size.saturating_sub(depth) / 2,
+        );
         let mut c = CircuitData::empty(tier);
         for (y, layer) in self.layers.iter().enumerate() {
             for (z, row) in layer.iter().enumerate() {
@@ -233,7 +308,10 @@ impl Design {
                         '.' | ' ' => continue,
                         '#' => "minecraft:stone".to_string(),
                         '-' => self.wire_state(x as i32, y as i32, z as i32),
-                        'T' => format!("minecraft:redstone_torch[lit={}]", !self.unlit.contains(&(x, y, z))),
+                        'T' => format!(
+                            "minecraft:redstone_torch[lit={}]",
+                            !self.unlit.contains(&(x, y, z))
+                        ),
                         '^' | '>' | 'v' | '<' => format!(
                             "minecraft:redstone_wall_torch[facing={},lit={}]",
                             dir(ch).map_or("north", |d| d.2),
@@ -257,20 +335,48 @@ impl Design {
                                 .filter_map(|(slot, name)| {
                                     let d = named(name)?;
                                     let inner = d.circuit(d.tier());
-                                    Some((*slot, ChipMeta { id: format!("{CHIP_PREFIX}{name}"), tier: d.tier(), name: name.clone(), ports: inner.ports }))
+                                    Some((
+                                        *slot,
+                                        ChipMeta {
+                                            id: format!("{CHIP_PREFIX}{name}"),
+                                            tier: d.tier(),
+                                            name: name.clone(),
+                                            ports: inner.ports,
+                                        },
+                                    ))
                                 })
                                 .collect();
-                            c.alus.push(SavedAlu { x: at.0, y: at.1, z: at.2, tier: t, chips, wires: alu.wires.clone() });
+                            c.alus.push(SavedAlu {
+                                x: at.0,
+                                y: at.1,
+                                z: at.2,
+                                tier: t,
+                                chips,
+                                wires: alu.wires.clone(),
+                            });
                             t.alu().to_string()
                         }
                         p => {
                             if let Some((label, mode)) = self.ports.get(&p) {
-                                c.ports.push(Port { label: label.clone(), x: at.0, y: at.1, z: at.2, dir: *mode });
+                                c.ports.push(Port {
+                                    label: label.clone(),
+                                    x: at.0,
+                                    y: at.1,
+                                    z: at.2,
+                                    dir: *mode,
+                                });
                             }
                             continue;
                         }
                     };
-                    c.blocks.push(CircuitBlock { x: at.0, y: at.1, z: at.2, state, items: Vec::new(), redstone_port: None });
+                    c.blocks.push(CircuitBlock {
+                        x: at.0,
+                        y: at.1,
+                        z: at.2,
+                        state,
+                        items: Vec::new(),
+                        redstone_port: None,
+                    });
                 }
             }
         }
@@ -291,8 +397,14 @@ mod tests {
 
     impl Bench {
         fn new(name: &str) -> Bench {
-            let c = named(name).unwrap_or_else(|| panic!("no design {name}")).circuit(Tier::Wood);
-            let ports = c.ports.iter().map(|p| (p.label.clone(), (p.x, p.y, p.z))).collect();
+            let c = named(name)
+                .unwrap_or_else(|| panic!("no design {name}"))
+                .circuit(Tier::Wood);
+            let ports = c
+                .ports
+                .iter()
+                .map(|p| (p.label.clone(), (p.x, p.y, p.z)))
+                .collect();
             let vm = c.vm_with(&|id| CircuitData::load_for_chip("", id), 1);
             let mut b = Bench { vm, ports };
             b.run(4);
@@ -327,7 +439,13 @@ mod tests {
 
     fn truth_table(name: &str, f: fn(bool, bool) -> bool) {
         let mut b = Bench::new(name);
-        for (a, bb) in [(false, false), (true, false), (false, true), (true, true), (false, false)] {
+        for (a, bb) in [
+            (false, false),
+            (true, false),
+            (false, true),
+            (true, true),
+            (false, false),
+        ] {
             b.set(&[("A", a), ("B", bb)], 3);
             assert_eq!(b.out("Q"), f(a, bb), "{name}({a}, {bb})");
         }
@@ -338,9 +456,19 @@ mod tests {
         for d in all() {
             let c = d.circuit(Tier::Wood);
             assert!(!c.ports.is_empty(), "{}: no ports", d.name);
-            assert!(c.blocks.iter().all(|b| b.x < 16 && b.y < 16 && b.z < 16), "{}", d.name);
+            assert!(
+                c.blocks.iter().all(|b| b.x < 16 && b.y < 16 && b.z < 16),
+                "{}",
+                d.name
+            );
             let labels: Vec<_> = c.ports.iter().map(|p| &p.label).collect();
-            assert!(labels.iter().all(|l| labels.iter().filter(|m| m == &l).count() == 1), "{}: a label twice", d.name);
+            assert!(
+                labels
+                    .iter()
+                    .all(|l| labels.iter().filter(|m| m == &l).count() == 1),
+                "{}: a label twice",
+                d.name
+            );
         }
     }
 
@@ -352,9 +480,14 @@ mod tests {
             for (y, layer) in d.layers.iter().enumerate().skip(1) {
                 for (z, row) in layer.iter().enumerate() {
                     for (x, &c) in row.iter().enumerate() {
-                        if matches!(c, '-' | 'T' | '↑' | '→' | '↓' | '←' | '△' | '▷' | '▽' | '◁') {
+                        if matches!(c, '-' | 'T' | '↑' | '→' | '↓' | '←' | '△' | '▷' | '▽' | '◁')
+                        {
                             let below = d.at(x as i32, y as i32 - 1, z as i32);
-                            assert!(below == '#' || d.alus.contains_key(&below), "{}: {c} at {x},{y},{z} on {below:?}", d.name);
+                            assert!(
+                                below == '#' || d.alus.contains_key(&below),
+                                "{}: {c} at {x},{y},{z} on {below:?}",
+                                d.name
+                            );
                         }
                     }
                 }
@@ -395,7 +528,10 @@ mod tests {
     #[test]
     fn d_latch() {
         let mut b = Bench::new("D latch");
-        assert!(b.set(&[("E", true), ("D", true)], 3).out("Q"), "open: follows D");
+        assert!(
+            b.set(&[("E", true), ("D", true)], 3).out("Q"),
+            "open: follows D"
+        );
         assert!(!b.set(&[("D", false)], 3).out("Q"));
         b.set(&[("D", true)], 3);
         assert!(b.set(&[("E", false)], 3).out("Q"));
@@ -407,7 +543,10 @@ mod tests {
     fn d_flip_flop() {
         let mut b = Bench::new("D flip-flop");
         assert!(!b.set(&[("D", true)], 3).out("Q"), "no edge yet");
-        assert!(b.set(&[("C", true)], 3).out("Q"), "takes D on the rising edge");
+        assert!(
+            b.set(&[("C", true)], 3).out("Q"),
+            "takes D on the rising edge"
+        );
         assert!(b.set(&[("D", false)], 3).out("Q"), "holds while C is on");
         assert!(b.set(&[("C", false)], 3).out("Q"), "and when it goes off");
         assert!(!b.set(&[("C", true)], 3).out("Q"), "takes the new D");
@@ -418,14 +557,22 @@ mod tests {
         let mut b = Bench::new("Half adder");
         for (x, y) in [(false, false), (true, false), (false, true), (true, true)] {
             b.set(&[("A", x), ("B", y)], 4);
-            assert_eq!((b.out("S"), b.out("C")), (x != y, x && y), "half adder {x} {y}");
+            assert_eq!(
+                (b.out("S"), b.out("C")),
+                (x != y, x && y),
+                "half adder {x} {y}"
+            );
         }
         let mut b = Bench::new("Full adder");
         for n in 0..8 {
             let (x, y, c) = (n & 1 != 0, n & 2 != 0, n & 4 != 0);
             b.set(&[("A", x), ("B", y), ("CI", c)], 4);
             let sum = x as u8 + y as u8 + c as u8;
-            assert_eq!((b.out("S"), b.out("CO")), (sum & 1 != 0, sum > 1), "full adder {x} {y} {c}");
+            assert_eq!(
+                (b.out("S"), b.out("CO")),
+                (sum & 1 != 0, sum > 1),
+                "full adder {x} {y} {c}"
+            );
         }
     }
 
@@ -445,7 +592,11 @@ mod tests {
         for n in 0..4u8 {
             b.set(&[("A0", n & 1 != 0), ("A1", n & 2 != 0)], 4);
             let on: Vec<bool> = ["Y0", "Y1", "Y2", "Y3"].iter().map(|y| b.out(y)).collect();
-            assert_eq!(on, (0..4).map(|i| i == n).collect::<Vec<_>>(), "decoder {n}");
+            assert_eq!(
+                on,
+                (0..4).map(|i| i == n).collect::<Vec<_>>(),
+                "decoder {n}"
+            );
         }
     }
 
@@ -462,13 +613,17 @@ mod tests {
         b.set(&[("C", true)], 4).set(&[("C", false)], 4);
         assert!(b.out("Q"), "kept");
         let mut m = Bench::new("Memory bit");
-        m.set(&[("D", true), ("S", true), ("W", true)], 4).set(&[("W", false)], 4);
+        m.set(&[("D", true), ("S", true), ("W", true)], 4)
+            .set(&[("W", false)], 4);
         assert!(m.out("Q"), "written");
         m.set(&[("D", false)], 4);
         assert!(m.out("Q"), "held without W");
         assert!(!m.set(&[("S", false)], 4).out("Q"), "hidden unselected");
         m.set(&[("W", true)], 4);
-        assert!(m.set(&[("W", false), ("S", true)], 4).out("Q"), "not written unselected");
+        assert!(
+            m.set(&[("W", false), ("S", true)], 4).out("Q"),
+            "not written unselected"
+        );
     }
 
     #[test]
@@ -479,7 +634,11 @@ mod tests {
             b.set(&[("C", true)], 3);
             assert_ne!(b.out("Q"), q, "flips on the rising edge");
             q = b.out("Q");
-            assert_eq!(b.set(&[("C", false)], 3).out("Q"), q, "not on the falling one");
+            assert_eq!(
+                b.set(&[("C", false)], 3).out("Q"),
+                q,
+                "not on the falling one"
+            );
         }
     }
 }
@@ -491,10 +650,16 @@ mod export {
     #[test]
     #[ignore]
     fn export_blueprints() {
-        let Ok(out) = std::env::var("OUT") else { return };
+        let Ok(out) = std::env::var("OUT") else {
+            return;
+        };
         let all: Vec<_> = super::all()
             .iter()
-            .map(|d| crate::chip::Blueprint { name: d.name.clone(), tier: d.tier(), circuit: d.circuit(d.tier()) })
+            .map(|d| crate::chip::Blueprint {
+                name: d.name.clone(),
+                tier: d.tier(),
+                circuit: d.circuit(d.tier()),
+            })
             .collect();
         std::fs::write(out, serde_json::to_string(&all).unwrap()).unwrap();
     }
