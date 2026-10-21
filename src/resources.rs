@@ -17,11 +17,11 @@ impl Resource {
 
     /// Units `item` is worth in this resource's slot, if it takes it (an
     /// input is an item or `#` a tag of them).
-    pub fn units_of(self, srv: &dyn yog_api::Server, item: &str) -> Option<u64> {
+    pub fn units_of(self, item: &str) -> Option<u64> {
         self.inputs()
             .iter()
             .find(|(input, _)| match input.strip_prefix('#') {
-                Some(tag) => srv.has_item_tag(item, tag),
+                Some(tag) => yog_api::event::tag::has_item(item, tag),
                 None => *input == item,
             })
             .map(|(_, n)| *n)

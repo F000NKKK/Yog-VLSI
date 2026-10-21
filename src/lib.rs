@@ -109,30 +109,30 @@ impl Mod for YogVlsi {
 
         // Redstone in, the ALUs step, redstone out — a signal crosses
         // ports, cables and ALUs in one tick; only the chips' steps take time.
-        registry.on_tick(|srv| {
-            cables::tick_inputs(srv);
-            board::tick(srv);
-            display::tick(srv);
-            cables::tick_outputs(srv);
-            workbench::tick(srv);
+        registry.on::<yog_api::event::server::game::Tick, _>(|_, _| {
+            cables::tick_inputs();
+            board::tick();
+            display::tick();
+            cables::tick_outputs();
+            workbench::tick();
         });
 
         // Persistence
-        registry.on_server_started(|srv| {
-            workbench::load_resources(srv);
-            board::load(srv);
-            cables::load(srv);
-            editor::load(srv);
-            port::load(srv);
-            display::load(srv);
+        registry.on::<yog_api::event::server::life::Started, _>(|_, _| {
+            workbench::load_resources();
+            board::load();
+            cables::load();
+            editor::load();
+            port::load();
+            display::load();
         });
-        registry.on_server_stopping(|srv| {
-            editor::save_sessions(srv);
-            workbench::save_resources(srv);
-            board::save(srv);
-            cables::save(srv);
-            port::save(srv);
-            display::save(srv);
+        registry.on::<yog_api::event::server::life::Stopping, _>(|_, _| {
+            editor::save_sessions();
+            workbench::save_resources();
+            board::save();
+            cables::save();
+            port::save();
+            display::save();
         });
 
         info!("[yog-vlsi] ready.");

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
-use yog_api::{BlockPos, EventPhase, Registry, Server, Storage};
+use yog_api::{BlockPos, EventPhase, Registry, Storage};
 use yog_kit::prelude::*;
 
 use crate::cables::{self, RedstonePort};
@@ -61,12 +61,12 @@ pub fn block_for_dir(dir: PortMode) -> &'static str {
 }
 
 /// The name of the port at `pos`, if it has one.
-pub fn read_label(_srv: &dyn yog_api::Server, dimension: &str, pos: BlockPos) -> Option<String> {
+pub fn read_label(dimension: &str, pos: BlockPos) -> Option<String> {
     LABELS.lock().unwrap().get(&key(dimension, pos)).cloned()
 }
 
 /// Names the port at `pos` (an empty name forgets it).
-pub fn write_label(_srv: &dyn yog_api::Server, dimension: &str, pos: BlockPos, label: &str) {
+pub fn write_label(dimension: &str, pos: BlockPos, label: &str) {
     let mut labels = LABELS.lock().unwrap();
     if label.trim().is_empty() {
         labels.remove(&key(dimension, pos));
@@ -150,8 +150,8 @@ impl PortVm {
                 channel,
                 ..edit.clone()
             };
-            if let (Some(srv), Ok(json)) = (yog_api::server(), serde_json::to_string(&out)) {
-                srv.send_to_server(CHANNEL, json.as_bytes());
+            if let Ok(json) = serde_json::to_string(&out) {
+                yog_api::event::net::send_to_server(CHANNEL, json.into_bytes());
             }
         }
         close();
@@ -163,8 +163,11 @@ impl PortVm {
 const STORE_FILE: &str = "yog-vlsi/port_labels";
 const STORE_KEY: &str = "labels";
 
-pub fn load(srv: &dyn yog_api::Server) {
-    let store = Storage::open(&srv.world_dir(), STORE_FILE);
+pub fn load() {
+    let store = Storage::open(
+        &yog_api::event::game::world_dir().unwrap_or_default(),
+        STORE_FILE,
+    );
     let saved: Vec<((String, i32, i32, i32), String)> = store
         .get(STORE_KEY)
         .and_then(|v| v.as_str())
@@ -173,7 +176,7 @@ pub fn load(srv: &dyn yog_api::Server) {
     *LABELS.lock().unwrap() = saved.into_iter().collect();
 }
 
-pub fn save(srv: &dyn yog_api::Server) {
+pub fn save() {
     let labels: Vec<_> = LABELS
         .lock()
         .unwrap()
@@ -181,7 +184,10 @@ pub fn save(srv: &dyn yog_api::Server) {
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     if let Ok(json) = serde_json::to_string(&labels) {
-        let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
+        let mut store = Storage::open(
+            &yog_api::event::game::world_dir().unwrap_or_default(),
+            STORE_FILE,
+        );
         store.set(STORE_KEY, &*json);
         let _ = store.flush();
     }
@@ -191,7 +197,7 @@ pub fn setup(registry: &mut Registry) {
     let screen = register(registry);
 
     // Server → client: open the screen on this port.
-    registry.on_client_packet(CHANNEL, move |ev, _srv| {
+    registry.on_client_packet(CHANNEL, move |ev| {
         if let Ok(edit) = serde_json::from_slice::<PortEdit>(&ev.payload) {
             screen.update(move |vm| vm.load(edit));
             open();
@@ -199,13 +205,13 @@ pub fn setup(registry: &mut Registry) {
     });
 
     // Client → server: the port's new name and mode.
-    registry.on_packet(CHANNEL, |ev, srv| {
+    registry.on_packet(CHANNEL, |ev| {
         let Ok(edit) = serde_json::from_slice::<PortEdit>(&ev.payload) else {
             return;
         };
         let (x, y, z) = edit.pos;
         let pos = BlockPos { x, y, z };
-        let Some(state) = srv.get_block_state(&edit.dimension, pos) else {
+        let Some(state) = yog_api::event::block::state(&edit.dimension, pos) else {
             return;
         };
         let id = state.split('[').next().unwrap_or(&state);
@@ -215,15 +221,16 @@ pub fn setup(registry: &mut Registry) {
                 name: edit.label.trim().to_string(),
                 channel: edit.channel,
             };
-            cables::set_redstone_port(srv, &edit.dimension, pos, port);
+            cables::set_redstone_port(&edit.dimension, pos, port);
         } else if !edit.redstone && is_port_block(id) {
-            write_label(srv, &edit.dimension, pos, &edit.label);
-            srv.set_block_state(&edit.dimension, pos, block_for_dir(edit.mode));
+            write_label(&edit.dimension, pos, &edit.label);
+            yog_api::event::block::set_state(&edit.dimension, pos, block_for_dir(edit.mode));
         }
     });
 
     // Right-click: edit it.
-    registry.on_use_block(|e, phase, srv| -> bool {
+    registry.on::<yog_api::event::block::Use, _>(|e, cx| -> bool {
+        let phase = cx.phase();
         if phase != EventPhase::Pre {
             return true;
         }
@@ -232,7 +239,7 @@ pub fn setup(registry: &mut Registry) {
             PortEdit {
                 dimension: e.dimension.clone(),
                 pos: at,
-                label: read_label(srv, &e.dimension, e.pos).unwrap_or_default(),
+                label: read_label(&e.dimension, e.pos).unwrap_or_default(),
                 mode: dir_for_block(&e.block_id).unwrap_or(PortMode::Input),
                 redstone: false,
                 channel: 0,
@@ -255,7 +262,7 @@ pub fn setup(registry: &mut Registry) {
             return true;
         };
         if let Ok(json) = serde_json::to_string(&edit) {
-            srv.send_to_player(&e.player_name, CHANNEL, json.as_bytes());
+            yog_api::event::net::send_to_player(&e.player_name, CHANNEL, json.as_bytes());
         }
         false
     });

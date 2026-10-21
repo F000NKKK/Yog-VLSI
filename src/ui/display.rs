@@ -5,7 +5,7 @@
 yog_api::ui_include!("ui/display");
 
 use serde::{Deserialize, Serialize};
-use yog_api::{BlockPos, EventPhase, Registry, Server};
+use yog_api::{BlockPos, EventPhase, Registry};
 use yog_kit::prelude::*;
 
 use crate::content::Blocks;
@@ -54,8 +54,8 @@ impl DisplayVm {
                 channel: self.first(),
                 ..edit.clone()
             };
-            if let (Some(srv), Ok(json)) = (yog_api::server(), serde_json::to_string(&out)) {
-                srv.send_to_server(CHANNEL, json.as_bytes());
+            if let Ok(json) = serde_json::to_string(&out) {
+                yog_api::event::net::send_to_server(CHANNEL, json.into_bytes());
             }
         }
         close();
@@ -65,29 +65,29 @@ impl DisplayVm {
 pub fn setup(registry: &mut Registry) {
     let screen = register(registry);
 
-    registry.on_client_packet(CHANNEL, move |ev, _srv| {
+    registry.on_client_packet(CHANNEL, move |ev| {
         if let Ok(edit) = serde_json::from_slice::<DisplayEdit>(&ev.payload) {
             screen.update(move |vm| vm.load(edit));
             open();
         }
     });
 
-    registry.on_packet(CHANNEL, |ev, srv| {
+    registry.on_packet(CHANNEL, |ev| {
         let Ok(edit) = serde_json::from_slice::<DisplayEdit>(&ev.payload) else {
             return;
         };
         let (x, y, z) = edit.pos;
         let pos = BlockPos { x, y, z };
-        if srv
-            .get_block_state(&edit.dimension, pos)
+        if yog_api::event::block::state(&edit.dimension, pos)
             .is_some_and(|s| s.starts_with(Blocks::DISPLAY))
-            && display::configure(srv, &edit.dimension, pos, edit.size, edit.channel).is_err()
+            && display::configure(&edit.dimension, pos, edit.size, edit.channel).is_err()
         {
-            srv.send_actionbar(&ev.player, &Strings::display_no_room(edit.size));
+            yog_api::event::chat::actionbar(&ev.player, Strings::display_no_room(edit.size));
         }
     });
 
-    registry.on_use_block(|e, phase, srv| -> bool {
+    registry.on::<yog_api::event::block::Use, _>(|e, cx| -> bool {
+        let phase = cx.phase();
         // The Display or any block of its picture.
         if phase != EventPhase::Pre
             || (e.block_id != Blocks::DISPLAY && e.block_id != Blocks::DISPLAY_PART)
@@ -107,7 +107,7 @@ pub fn setup(registry: &mut Registry) {
             channel: d.channel,
         };
         if let Ok(json) = serde_json::to_string(&edit) {
-            srv.send_to_player(&e.player_name, CHANNEL, json.as_bytes());
+            yog_api::event::net::send_to_player(&e.player_name, CHANNEL, json.as_bytes());
         }
         false
     });

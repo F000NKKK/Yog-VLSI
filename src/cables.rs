@@ -24,6 +24,14 @@ use yog_pipes::{
     AttachDef, CapabilityDef, Distribution, EndpointDef, EndpointTarget, Mechanic, PipePos,
 };
 
+/// What a Yog Pipes call answered; an error when Pipes isn't loaded.
+fn pipes<T>(answer: Option<Result<T, String>>) -> Result<T, String> {
+    answer.unwrap_or_else(|| Err(NO_PIPES.to_string()))
+}
+
+/// What a call says when Yog Pipes isn't there to answer.
+const NO_PIPES: &str = "Yog Pipes isn't loaded";
+
 use crate::content::Blocks;
 
 pub const ANALOG: &str = "yog-vlsi:analog";
@@ -101,7 +109,7 @@ pub fn redstone_port(dimension: &str, pos: BlockPos) -> RedstonePort {
 /// forgotten.
 pub fn refresh(dim: &str, pos: BlockPos, block: &str) {
     if (is_cable(block) || block == Blocks::REDSTONE_PORT)
-        && let Err(e) = yog_pipes::refresh(pipe_pos(dim, pos))
+        && let Err(e) = pipes(yog_pipes::refresh(pipe_pos(dim, pos)))
     {
         warn!("[yog-vlsi] Yog Pipes: {e}");
     }
@@ -116,14 +124,9 @@ pub fn forget_port(dim: &str, pos: BlockPos) {
 }
 
 /// Sets a Redstone Port's mode and name.
-pub fn set_redstone_port(
-    srv: &dyn yog_api::Server,
-    dimension: &str,
-    pos: BlockPos,
-    port: RedstonePort,
-) {
+pub fn set_redstone_port(dimension: &str, pos: BlockPos, port: RedstonePort) {
     if !port.output {
-        srv.set_redstone_output(dimension, pos, 0);
+        yog_api::event::block::set_redstone_output(dimension, pos, 0);
     }
     // Off the channel it was on.
     let before = PORTS
@@ -132,20 +135,28 @@ pub fn set_redstone_port(
         .insert((dimension.to_string(), pos.x, pos.y, pos.z), port);
     if let Some(old) = before {
         let (cap, ch) = old.link();
-        let _ = yog_pipes::emit(cap.to_string(), pipe_pos(dimension, pos), ch, 0);
+        let _ = pipes(yog_pipes::emit(
+            cap.to_string(),
+            pipe_pos(dimension, pos),
+            ch,
+            0,
+        ));
     }
 }
 
 /// The analog network a cable block is part of.
 fn network_at(dim: &str, pos: BlockPos) -> Option<u64> {
-    yog_pipes::network_info(ANALOG.to_string(), pipe_pos(dim, pos))
-        .ok()
-        .flatten()
-        .map(|n| n.network)
+    pipes(yog_pipes::network_info(
+        ANALOG.to_string(),
+        pipe_pos(dim, pos),
+    ))
+    .ok()
+    .flatten()
+    .map(|n| n.network)
 }
 
 /// The names of the named Redstone Ports, by the analog network they're on.
-pub fn port_names(srv: &dyn yog_api::Server) -> HashMap<(String, u64), String> {
+pub fn port_names() -> HashMap<(String, u64), String> {
     let ports: Vec<(Key, String)> = PORTS
         .lock()
         .unwrap()
@@ -157,7 +168,7 @@ pub fn port_names(srv: &dyn yog_api::Server) -> HashMap<(String, u64), String> {
     for ((dim, x, y, z), name) in ports {
         for side in ["N", "S", "E", "W", "U", "D"] {
             let at = beside((x, y, z), side);
-            if cable_at(srv, &dim, at) == Some(ANALOG)
+            if cable_at(&dim, at) == Some(ANALOG)
                 && let Some(net) = network_at(&dim, at)
             {
                 names.insert((dim.clone(), net), name.clone());
@@ -169,13 +180,12 @@ pub fn port_names(srv: &dyn yog_api::Server) -> HashMap<(String, u64), String> {
 
 /// The name of the Redstone Port the cable on an ALU side reaches.
 pub fn side_port_name(
-    srv: &dyn yog_api::Server,
     alu: &crate::board::AluId,
     side: &str,
     names: &HashMap<(String, u64), String>,
 ) -> Option<String> {
     let at = beside((alu.x, alu.y, alu.z), side);
-    (cable_at(srv, &alu.dimension, at)? == ANALOG).then_some(())?;
+    (cable_at(&alu.dimension, at)? == ANALOG).then_some(())?;
     names
         .get(&(alu.dimension.clone(), network_at(&alu.dimension, at)?))
         .cloned()
@@ -209,8 +219,8 @@ pub fn beside(pos: (i32, i32, i32), side: &str) -> BlockPos {
 }
 
 /// The cable network next to an ALU side: (capability, cable position).
-pub fn cable_at(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) -> Option<&'static str> {
-    match srv.get_block_state(dim, pos)?.split('[').next()? {
+pub fn cable_at(dim: &str, pos: BlockPos) -> Option<&'static str> {
+    match yog_api::event::block::state(dim, pos)?.split('[').next()? {
         id if id == Blocks::ANALOG_CABLE => Some(ANALOG),
         id if id == Blocks::DIGITAL_CABLE => Some(DIGITAL),
         _ => None,
@@ -223,29 +233,44 @@ fn is_cable(block: &str) -> bool {
 
 /// The level on channel `ch` of the bus at ALU side `side`.
 pub fn bus_level(dim: &str, alu: (i32, i32, i32), side: &str, ch: u8) -> u8 {
-    yog_pipes::level(DIGITAL.to_string(), pipe_pos(dim, beside(alu, side)), ch).unwrap_or(0)
+    pipes(yog_pipes::level(
+        DIGITAL.to_string(),
+        pipe_pos(dim, beside(alu, side)),
+        ch,
+    ))
+    .unwrap_or(0)
 }
 
 /// The level on channel `ch` of the bus a block joins (a Display).
 pub fn bus_level_at(dim: &str, pos: BlockPos, ch: u8) -> u8 {
-    yog_pipes::level(DIGITAL.to_string(), pipe_pos(dim, pos), ch).unwrap_or(0)
+    pipes(yog_pipes::level(
+        DIGITAL.to_string(),
+        pipe_pos(dim, pos),
+        ch,
+    ))
+    .unwrap_or(0)
 }
 
 /// Drives `level` onto channel `ch` of the bus a block joins.
 pub fn bus_drive_at(dim: &str, pos: BlockPos, ch: u8, level: u8) {
-    if let Err(e) = yog_pipes::emit(DIGITAL.to_string(), pipe_pos(dim, pos), ch, level.min(15)) {
+    if let Err(e) = pipes(yog_pipes::emit(
+        DIGITAL.to_string(),
+        pipe_pos(dim, pos),
+        ch,
+        level.min(15),
+    )) {
         warn!("[yog-vlsi] driving the bus: {e}");
     }
 }
 
 /// Drives `level` onto channel `ch` of the bus at ALU side `side`.
 pub fn bus_drive(dim: &str, alu: (i32, i32, i32), side: &str, ch: u8, level: u8) {
-    if let Err(e) = yog_pipes::emit(
+    if let Err(e) = pipes(yog_pipes::emit(
         DIGITAL.to_string(),
         pipe_pos(dim, beside(alu, side)),
         ch,
         level.min(15),
-    ) {
+    )) {
         warn!("[yog-vlsi] driving the bus: {e}");
     }
 }
@@ -254,11 +279,11 @@ pub fn bus_drive(dim: &str, alu: (i32, i32, i32), side: &str, ch: u8, level: u8)
 /// [`cable_at`] said): an analog one's, else `None`.
 pub fn side_input(dim: &str, alu: (i32, i32, i32), side: &str, cable: Option<&str>) -> Option<u8> {
     (cable? == ANALOG).then_some(())?;
-    yog_pipes::level(
+    pipes(yog_pipes::level(
         ANALOG.to_string(),
         pipe_pos(dim, beside(alu, side)),
         SIDE_CHANNEL,
-    )
+    ))
     .ok()
 }
 
@@ -266,12 +291,12 @@ pub fn side_input(dim: &str, alu: (i32, i32, i32), side: &str, cable: Option<&st
 pub fn side_output(dim: &str, alu: (i32, i32, i32), side: &str, cable: Option<&str>, level: u8) {
     let at = beside(alu, side);
     if cable == Some(ANALOG)
-        && let Err(e) = yog_pipes::emit(
+        && let Err(e) = pipes(yog_pipes::emit(
             ANALOG.to_string(),
             pipe_pos(dim, at),
             SIDE_CHANNEL,
             level.min(15),
-        )
+        ))
     {
         warn!("[yog-vlsi] driving an analog cable: {e}");
     }
@@ -294,21 +319,25 @@ fn register_networks() {
         },
     };
     let steps: [Result<(), String>; 7] = [
-        yog_pipes::register_capability(signal(ANALOG, "analog", 1)),
-        yog_pipes::register_capability(signal(DIGITAL, "digital", BUS_CHANNELS)),
-        yog_pipes::attach(AttachDef {
+        pipes(yog_pipes::register_capability(signal(ANALOG, "analog", 1))),
+        pipes(yog_pipes::register_capability(signal(
+            DIGITAL,
+            "digital",
+            BUS_CHANNELS,
+        ))),
+        pipes(yog_pipes::attach(AttachDef {
             block: Blocks::ANALOG_CABLE.to_string(),
             capability: ANALOG.to_string(),
             groups: vec!["analog".into()],
             params: HashMap::new(),
-        }),
-        yog_pipes::attach(AttachDef {
+        })),
+        pipes(yog_pipes::attach(AttachDef {
             block: Blocks::DIGITAL_CABLE.to_string(),
             capability: DIGITAL.to_string(),
             groups: vec!["digital".into()],
             params: HashMap::new(),
-        }),
-        yog_pipes::register_endpoint(EndpointDef {
+        })),
+        pipes(yog_pipes::register_endpoint(EndpointDef {
             capability: DIGITAL.to_string(),
             target: EndpointTarget::Block(Blocks::REDSTONE_PORT.to_string()),
             kinds: Vec::new(),
@@ -321,9 +350,9 @@ fn register_networks() {
             max_packet: 0,
             pressure: 0,
             handler: None,
-        }),
+        })),
         // A Display reads its registers' writes off the bus (`display.rs`).
-        yog_pipes::register_endpoint(EndpointDef {
+        pipes(yog_pipes::register_endpoint(EndpointDef {
             capability: DIGITAL.to_string(),
             target: EndpointTarget::Block(Blocks::DISPLAY.to_string()),
             kinds: Vec::new(),
@@ -336,8 +365,8 @@ fn register_networks() {
             max_packet: 0,
             pressure: 0,
             handler: None,
-        }),
-        yog_pipes::register_endpoint(EndpointDef {
+        })),
+        pipes(yog_pipes::register_endpoint(EndpointDef {
             capability: ANALOG.to_string(),
             target: EndpointTarget::Block(Blocks::REDSTONE_PORT.to_string()),
             kinds: Vec::new(),
@@ -350,7 +379,7 @@ fn register_networks() {
             max_packet: 0,
             pressure: 0,
             handler: None,
-        }),
+        })),
     ];
     for r in steps {
         if let Err(e) = r {
@@ -361,7 +390,7 @@ fn register_networks() {
 
 /// The Redstone Ports — every [`PORT_CHECK_EVERY`] ticks, those that still
 /// stand (`check`).
-fn ports(srv: &dyn yog_api::Server, check: bool) -> Vec<(Key, RedstonePort)> {
+fn ports(check: bool) -> Vec<(Key, RedstonePort)> {
     let all: Vec<(Key, RedstonePort)> = PORTS
         .lock()
         .unwrap()
@@ -373,16 +402,15 @@ fn ports(srv: &dyn yog_api::Server, check: bool) -> Vec<(Key, RedstonePort)> {
     }
     all.into_iter()
         .filter(|((dim, x, y, z), _)| {
-            let there = srv
-                .get_block_state(
-                    dim,
-                    BlockPos {
-                        x: *x,
-                        y: *y,
-                        z: *z,
-                    },
-                )
-                .is_some_and(|s| s.starts_with(Blocks::REDSTONE_PORT));
+            let there = yog_api::event::block::state(
+                dim,
+                BlockPos {
+                    x: *x,
+                    y: *y,
+                    z: *z,
+                },
+            )
+            .is_some_and(|s| s.starts_with(Blocks::REDSTONE_PORT));
             if !there {
                 PORTS.lock().unwrap().remove(&(dim.clone(), *x, *y, *z));
             }
@@ -393,46 +421,52 @@ fn ports(srv: &dyn yog_api::Server, check: bool) -> Vec<(Key, RedstonePort)> {
 
 /// Redstone into the cables, before the ALUs step: what reaches a port this
 /// tick is in its network for them this tick.
-pub fn tick_inputs(srv: &dyn yog_api::Server) {
+pub fn tick_inputs() {
     let check = PORT_TICKS
         .fetch_add(1, Ordering::Relaxed)
         .is_multiple_of(PORT_CHECK_EVERY);
-    for ((dim, x, y, z), port) in ports(srv, check) {
+    for ((dim, x, y, z), port) in ports(check) {
         let pos = BlockPos { x, y, z };
         if PORTS_SEEN.lock().unwrap().insert((dim.clone(), x, y, z)) {
-            refresh_around(srv, &dim, pos);
+            refresh_around(&dim, pos);
         }
         let (cap, ch) = port.link();
         let power = if port.output {
             0
         } else {
-            srv.redstone_power(&dim, pos).unwrap_or(0)
+            yog_api::event::block::redstone_power(&dim, pos).unwrap_or(0)
         };
-        let _ = yog_pipes::emit(cap.to_string(), pipe_pos(&dim, pos), ch, power);
+        let _ = pipes(yog_pipes::emit(
+            cap.to_string(),
+            pipe_pos(&dim, pos),
+            ch,
+            power,
+        ));
     }
 }
 
 /// Cable levels out as redstone, after the ALUs stepped: what they put out
 /// this tick leaves this tick.
-pub fn tick_outputs(srv: &dyn yog_api::Server) {
-    for ((dim, x, y, z), port) in ports(srv, false) {
+pub fn tick_outputs() {
+    for ((dim, x, y, z), port) in ports(false) {
         if port.output {
             let pos = BlockPos { x, y, z };
             let (cap, ch) = port.link();
-            let level = yog_pipes::level(cap.to_string(), pipe_pos(&dim, pos), ch).unwrap_or(0);
-            srv.set_redstone_output(&dim, pos, level);
+            let level =
+                pipes(yog_pipes::level(cap.to_string(), pipe_pos(&dim, pos), ch)).unwrap_or(0);
+            yog_api::event::block::set_redstone_output(&dim, pos, i32::from(level));
         }
     }
 }
 
 /// Yog Pipes looks again at `pos` and the cables beside it — joining up
 /// what was written into the world while the server was down.
-pub fn refresh_around(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) {
-    let _ = yog_pipes::refresh(pipe_pos(dim, pos));
+pub fn refresh_around(dim: &str, pos: BlockPos) {
+    let _ = pipes(yog_pipes::refresh(pipe_pos(dim, pos)));
     for side in ["N", "S", "E", "W", "U", "D"] {
         let at = beside((pos.x, pos.y, pos.z), side);
-        if cable_at(srv, dim, at).is_some() {
-            let _ = yog_pipes::refresh(pipe_pos(dim, at));
+        if cable_at(dim, at).is_some() {
+            let _ = pipes(yog_pipes::refresh(pipe_pos(dim, at)));
         }
     }
 }
@@ -440,9 +474,12 @@ pub fn refresh_around(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) {
 const STORE_FILE: &str = "yog-vlsi/redstone_ports";
 const STORE_KEY: &str = "ports";
 
-pub fn load(srv: &dyn yog_api::Server) {
+pub fn load() {
     register_networks();
-    let store = Storage::open(&srv.world_dir(), STORE_FILE);
+    let store = Storage::open(
+        &yog_api::event::game::world_dir().unwrap_or_default(),
+        STORE_FILE,
+    );
     let saved: Vec<(Key, RedstonePort)> = store
         .get(STORE_KEY)
         .and_then(|v| v.as_str())
@@ -451,7 +488,7 @@ pub fn load(srv: &dyn yog_api::Server) {
     *PORTS.lock().unwrap() = saved.into_iter().collect();
 }
 
-pub fn save(srv: &dyn yog_api::Server) {
+pub fn save() {
     let ports: Vec<(Key, RedstonePort)> = PORTS
         .lock()
         .unwrap()
@@ -459,7 +496,10 @@ pub fn save(srv: &dyn yog_api::Server) {
         .map(|(k, p)| (k.clone(), p.clone()))
         .collect();
     if let Ok(json) = serde_json::to_string(&ports) {
-        let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
+        let mut store = Storage::open(
+            &yog_api::event::game::world_dir().unwrap_or_default(),
+            STORE_FILE,
+        );
         store.set(STORE_KEY, &*json);
         let _ = store.flush();
     }
@@ -468,7 +508,8 @@ pub fn save(srv: &dyn yog_api::Server) {
 pub fn register(registry: &mut Registry) {
     // A placed port starts as an unnamed input; right-click opens its
     // screen (`port.rs`).
-    registry.on_player_place_block(|e, phase, _srv| {
+    registry.on::<yog_api::event::block::Place, _>(|e, cx| {
+        let phase = cx.phase();
         if phase == EventPhase::Pre && e.block_id == Blocks::REDSTONE_PORT {
             PORTS.lock().unwrap().insert(
                 (e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z),
@@ -480,7 +521,8 @@ pub fn register(registry: &mut Registry) {
         }
         true
     });
-    registry.on_block_break(|e, phase, _srv| {
+    registry.on::<yog_api::event::block::Break, _>(|e, cx| {
+        let phase = cx.phase();
         if phase == EventPhase::Post {
             if e.block_id == Blocks::REDSTONE_PORT {
                 PORTS

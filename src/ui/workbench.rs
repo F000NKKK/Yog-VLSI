@@ -18,8 +18,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
-use yog_api::player::Player;
-use yog_api::{BlockPos, EventPhase, Registry, Server, Storage};
+use yog_api::{BlockPos, EventPhase, Registry, Storage};
 use yog_kit::prelude::*;
 
 use crate::chip::{Blueprint, ChipMeta};
@@ -311,8 +310,8 @@ impl WorkbenchVm {
 
 /// The game's name of item or block `id`.
 fn send(request: &Request) {
-    if let (Some(srv), Ok(json)) = (yog_api::server(), serde_json::to_string(request)) {
-        srv.send_to_server(REQUEST_CHANNEL, json.as_bytes());
+    if let Ok(json) = serde_json::to_string(request) {
+        yog_api::event::net::send_to_server(REQUEST_CHANNEL, json.into_bytes());
     }
 }
 
@@ -328,16 +327,23 @@ static WATCHERS: LazyLock<Mutex<HashMap<String, Watching>>> =
 static TICKS: Mutex<u64> = Mutex::new(0);
 
 /// Moves what's in the resource slots of `bench` into its store.
-fn absorb(srv: &dyn yog_api::Server, bench: &BenchId) {
+fn absorb(bench: &BenchId) {
     let mut gained = [0u64; 6];
     for r in Resource::ALL {
-        let Some((item, count, _)) =
-            srv.get_inventory_slot(&bench.dimension, bench.pos(), r.slot())
+        let Some(yog_api::Stack { item, count, .. }) =
+            yog_api::event::block::inventory_slot(&bench.dimension, bench.pos(), r.slot())
         else {
             continue;
         };
-        if let Some(units) = r.units_of(srv, &item)
-            && srv.set_inventory_slot(&bench.dimension, bench.pos(), r.slot(), &item, 0, "")
+        if let Some(units) = r.units_of(&item)
+            && yog_api::event::block::set_inventory_slot(
+                &bench.dimension,
+                bench.pos(),
+                r.slot(),
+                item,
+                0,
+                "",
+            )
         {
             gained[r.index()] += units * count as u64;
         }
@@ -351,9 +357,13 @@ fn absorb(srv: &dyn yog_api::Server, bench: &BenchId) {
     }
 }
 
-fn blueprint_in(srv: &dyn yog_api::Server, bench: &BenchId) -> (BlueprintView, Option<Blueprint>) {
-    match srv.get_inventory_slot(&bench.dimension, bench.pos(), BLUEPRINT_SLOT) {
-        Some((id, _, nbt)) if id == BLUEPRINT_ID => match Blueprint::from_nbt(&nbt) {
+fn blueprint_in(bench: &BenchId) -> (BlueprintView, Option<Blueprint>) {
+    match yog_api::event::block::inventory_slot(&bench.dimension, bench.pos(), BLUEPRINT_SLOT) {
+        Some(yog_api::Stack {
+            item: id,
+            snbt: nbt,
+            ..
+        }) if id.as_str() == BLUEPRINT_ID => match Blueprint::from_nbt(&nbt) {
             Some(bp) => {
                 let view = BlueprintView::Design {
                     name: bp.name.clone(),
@@ -361,7 +371,10 @@ fn blueprint_in(srv: &dyn yog_api::Server, bench: &BenchId) -> (BlueprintView, O
                     ports: bp.circuit.ports.len(),
                     blocks: bp.circuit.blocks.len(),
                     cost: crate::resources::circuit_cost(&bp.circuit, &|id| {
-                        crate::chip::CircuitData::load_for_chip(&srv.world_dir(), id)
+                        crate::chip::CircuitData::load_for_chip(
+                            &yog_api::event::game::world_dir().unwrap_or_default(),
+                            id,
+                        )
                     }),
                 };
                 (view, Some(bp))
@@ -372,7 +385,7 @@ fn blueprint_in(srv: &dyn yog_api::Server, bench: &BenchId) -> (BlueprintView, O
     }
 }
 
-fn state_of(srv: &dyn yog_api::Server, bench: &BenchId) -> BenchState {
+fn state_of(bench: &BenchId) -> BenchState {
     BenchState {
         bench: bench.clone(),
         stored: STORES
@@ -381,15 +394,14 @@ fn state_of(srv: &dyn yog_api::Server, bench: &BenchId) -> BenchState {
             .get(bench)
             .copied()
             .unwrap_or_default(),
-        blueprint: blueprint_in(srv, bench).0,
-        chip_free: srv
-            .get_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT)
+        blueprint: blueprint_in(bench).0,
+        chip_free: yog_api::event::block::inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT)
             .is_none(),
     }
 }
 
 /// Every few ticks: swallow resources, and tell watchers what changed.
-pub fn tick(srv: &dyn yog_api::Server) {
+pub fn tick() {
     let n = {
         let mut t = TICKS.lock().unwrap();
         *t += 1;
@@ -405,15 +417,15 @@ pub fn tick(srv: &dyn yog_api::Server) {
         .map(|(p, (b, _))| (p.clone(), b.clone()))
         .collect();
     for (player, bench) in watchers {
-        absorb(srv, &bench);
-        let state = state_of(srv, &bench);
+        absorb(&bench);
+        let state = state_of(&bench);
         let mut w = WATCHERS.lock().unwrap();
         let Some((_, last)) = w.get_mut(&player) else {
             continue;
         };
         if last.as_ref() != Some(&state) {
             if let Ok(json) = serde_json::to_string(&state) {
-                srv.send_to_player(&player, STATE_CHANNEL, json.as_bytes());
+                yog_api::event::net::send_to_player(&player, STATE_CHANNEL, json.as_bytes());
             }
             *last = Some(state);
         }
@@ -421,7 +433,7 @@ pub fn tick(srv: &dyn yog_api::Server) {
 }
 
 /// Runs a client's request; the reply goes to its action bar.
-fn run_request(srv: &dyn yog_api::Server, player: &str, request: Request) -> String {
+fn run_request(player: &str, request: Request) -> String {
     match request {
         Request::Create {
             bench,
@@ -429,7 +441,7 @@ fn run_request(srv: &dyn yog_api::Server, player: &str, request: Request) -> Str
             tier,
             design,
         } => {
-            if !matches!(blueprint_in(srv, &bench).0, BlueprintView::Blank) {
+            if !matches!(blueprint_in(&bench).0, BlueprintView::Blank) {
                 return "§cPut a blank Blueprint in the workbench.".into();
             }
             let mut bp = Blueprint::new(name.clone(), tier);
@@ -439,53 +451,56 @@ fn run_request(srv: &dyn yog_api::Server, player: &str, request: Request) -> Str
                 };
                 bp.circuit = d.circuit(tier);
             }
-            if !srv.set_inventory_slot(
+            if !yog_api::event::block::set_inventory_slot(
                 &bench.dimension,
                 bench.pos(),
                 BLUEPRINT_SLOT,
                 BLUEPRINT_ID,
                 1,
-                &bp.to_nbt(),
+                bp.to_nbt(),
             ) {
                 return "§cCouldn't write the Blueprint.".into();
             }
             format!("§aCreated '{name}' ({} tier).", tier.name())
         }
         Request::Edit { bench } => {
-            let Some(bp) = blueprint_in(srv, &bench).1 else {
+            let Some(bp) = blueprint_in(&bench).1 else {
                 return "§cPut a written Blueprint in the workbench.".into();
             };
-            let back = Player::new(srv, player).position().unwrap_or((
-                bench.x as f64 + 0.5,
-                bench.y as f64 + 1.0,
-                bench.z as f64 + 0.5,
-            ));
+            let back = yog_api::event::player::info(player)
+                .and_then(|i| yog_api::event::entity::position(i.uuid))
+                .map(|p| (p.x, p.y, p.z))
+                .unwrap_or((
+                    bench.x as f64 + 0.5,
+                    bench.y as f64 + 1.0,
+                    bench.z as f64 + 0.5,
+                ));
             let source = editor::Source {
                 dimension: bench.dimension.clone(),
                 pos: bench.pos(),
                 slot: BLUEPRINT_SLOT,
             };
-            match editor::enter(srv, player, &bp, source, &bench.dimension, back) {
+            match editor::enter(player, &bp, source, &bench.dimension, back) {
                 Ok(()) => String::new(),
                 Err(e) => e,
             }
         }
-        Request::Fabricate { bench } => fabricate(srv, &bench),
+        Request::Fabricate { bench } => fabricate(&bench),
     }
 }
 
-fn fabricate(srv: &dyn yog_api::Server, bench: &BenchId) -> String {
-    let Some(bp) = blueprint_in(srv, bench).1 else {
+fn fabricate(bench: &BenchId) -> String {
+    let Some(bp) = blueprint_in(bench).1 else {
         return "§cPut a written Blueprint in the workbench.".into();
     };
-    if srv
-        .get_inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT)
-        .is_some()
-    {
+    if yog_api::event::block::inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT).is_some() {
         return "§cTake the chip out of the chip slot first.".into();
     }
     let cost = crate::resources::circuit_cost(&bp.circuit, &|id| {
-        crate::chip::CircuitData::load_for_chip(&srv.world_dir(), id)
+        crate::chip::CircuitData::load_for_chip(
+            &yog_api::event::game::world_dir().unwrap_or_default(),
+            id,
+        )
     });
     {
         let stores = STORES.lock().unwrap();
@@ -511,14 +526,17 @@ fn fabricate(srv: &dyn yog_api::Server, bench: &BenchId) -> String {
         name: bp.name.clone(),
         ports: bp.circuit.ports.clone(),
     };
-    bp.circuit.save_for_chip(&srv.world_dir(), &meta.id);
-    if !srv.set_inventory_slot(
+    bp.circuit.save_for_chip(
+        &yog_api::event::game::world_dir().unwrap_or_default(),
+        &meta.id,
+    );
+    if !yog_api::event::block::set_inventory_slot(
         &bench.dimension,
         bench.pos(),
         CHIP_SLOT,
         bp.tier.chip(),
-        1,
-        &meta.to_nbt(),
+        1u32,
+        meta.to_nbt(),
     ) {
         return "§cCouldn't put the chip in the chip slot.".into();
     }
@@ -541,19 +559,19 @@ pub fn setup(registry: &mut Registry) {
     // (content/vlsi_workbench.yblock opens it).
     let screen = register(registry);
 
-    registry.on_client_packet(STATE_CHANNEL, move |ev, _srv| {
+    registry.on_client_packet(STATE_CHANNEL, move |ev| {
         if let Ok(state) = serde_json::from_slice::<BenchState>(&ev.payload) {
             screen.update(move |vm| vm.apply(state));
         }
     });
 
-    registry.on_packet(REQUEST_CHANNEL, |ev, srv| {
+    registry.on_packet(REQUEST_CHANNEL, |ev| {
         let Ok(request) = serde_json::from_slice::<Request>(&ev.payload) else {
             return;
         };
-        let reply = run_request(srv, &ev.player, request);
+        let reply = run_request(&ev.player, request);
         if !reply.is_empty() {
-            srv.send_actionbar(&ev.player, &reply);
+            yog_api::event::chat::actionbar(&ev.player, &reply);
         }
         // Whatever changed shows on the next look.
         if let Some((_, last)) = WATCHERS.lock().unwrap().get_mut(&ev.player) {
@@ -562,7 +580,8 @@ pub fn setup(registry: &mut Registry) {
     });
 
     // Opening a workbench: watch it from now on.
-    registry.on_use_block(|e, phase, _srv| -> bool {
+    registry.on::<yog_api::event::block::Use, _>(|e, cx| -> bool {
+        let phase = cx.phase();
         if phase == EventPhase::Pre && e.block_id == WORKBENCH_ID {
             let bench = BenchId {
                 dimension: e.dimension.clone(),
@@ -582,8 +601,11 @@ pub fn setup(registry: &mut Registry) {
 const STORE_FILE: &str = "yog-vlsi/workbenches";
 const STORE_KEY: &str = "stores";
 
-pub fn load_resources(srv: &dyn yog_api::Server) {
-    let store = Storage::open(&srv.world_dir(), STORE_FILE);
+pub fn load_resources() {
+    let store = Storage::open(
+        &yog_api::event::game::world_dir().unwrap_or_default(),
+        STORE_FILE,
+    );
     let saved: Vec<(BenchId, Amounts)> = store
         .get(STORE_KEY)
         .and_then(|v| v.as_str())
@@ -592,7 +614,7 @@ pub fn load_resources(srv: &dyn yog_api::Server) {
     *STORES.lock().unwrap() = saved.into_iter().collect();
 }
 
-pub fn save_resources(srv: &dyn yog_api::Server) {
+pub fn save_resources() {
     let stores: Vec<(BenchId, Amounts)> = STORES
         .lock()
         .unwrap()
@@ -600,7 +622,10 @@ pub fn save_resources(srv: &dyn yog_api::Server) {
         .map(|(k, v)| (k.clone(), *v))
         .collect();
     if let Ok(json) = serde_json::to_string(&stores) {
-        let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
+        let mut store = Storage::open(
+            &yog_api::event::game::world_dir().unwrap_or_default(),
+            STORE_FILE,
+        );
         store.set(STORE_KEY, &*json);
         let _ = store.flush();
     }

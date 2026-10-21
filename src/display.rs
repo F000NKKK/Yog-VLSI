@@ -121,13 +121,7 @@ pub fn get(dim: &str, pos: BlockPos) -> Option<Display> {
 
 /// Sets a Display's size and first channel; a size that doesn't fit is
 /// refused (`Err`), the channel set all the same.
-pub fn configure(
-    srv: &dyn yog_api::Server,
-    dim: &str,
-    pos: BlockPos,
-    size: u16,
-    channel: u16,
-) -> Result<(), ()> {
+pub fn configure(dim: &str, pos: BlockPos, size: u16, channel: u16) -> Result<(), ()> {
     let mut displays = DISPLAYS.lock().unwrap();
     let Some(d) = displays.get_mut(&(dim.to_string(), pos.x, pos.y, pos.z)) else {
         return Ok(());
@@ -138,12 +132,12 @@ pub fn configure(
         return Ok(());
     }
     let old = area(pos, d.facing, d.size);
-    if !fits(srv, dim, pos, d.facing, size, Some(old)) {
+    if !fits(dim, pos, d.facing, size, Some(old)) {
         return Err(());
     }
-    srv.fill_region(dim, old.0, old.1, "minecraft:air");
+    yog_api::event::world::fill_region(dim, old.0, old.1, "minecraft:air");
     d.size = size;
-    stand(srv, dim, pos, d);
+    stand(dim, pos, d);
     Ok(())
 }
 
@@ -202,7 +196,6 @@ const WORLD_TOP: i32 = 319;
 /// Whether a picture `size` blocks a side fits at `pos`: nothing in its box
 /// but the Display itself and, resizing, the blocks it stands in now (`own`).
 fn fits(
-    srv: &dyn yog_api::Server,
     dim: &str,
     pos: BlockPos,
     facing: Facing,
@@ -211,25 +204,24 @@ fn fits(
 ) -> bool {
     let b = area(pos, facing, size);
     b.1.y <= WORLD_TOP
-        && srv
-            .scan_region(dim, b.0, b.1)
+        && yog_api::event::world::scan_region(dim, b.0, b.1)
             .iter()
-            .all(|(p, _)| *p == pos || own.is_some_and(|o| inside(o, *p)))
+            .all(|b| b.pos == pos || own.is_some_and(|o| inside(o, b.pos)))
 }
 
 /// Stands a Display's parts in its box and the Display at its corner.
-fn stand(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos, d: &Display) {
+fn stand(dim: &str, pos: BlockPos, d: &Display) {
     let b = area(pos, d.facing, d.size);
-    srv.fill_region(
+    yog_api::event::world::fill_region(
         dim,
         b.0,
         b.1,
-        &format!("{}[facing={}]", Blocks::DISPLAY_PART, d.facing.word()),
+        format!("{}[facing={}]", Blocks::DISPLAY_PART, d.facing.word()),
     );
-    srv.set_block_state(
+    yog_api::event::block::set_state(
         dim,
         pos,
-        &format!("{}[facing={}]", Blocks::DISPLAY, d.facing.word()),
+        format!("{}[facing={}]", Blocks::DISPLAY, d.facing.word()),
     );
 }
 
@@ -251,7 +243,7 @@ pub fn owner(dim: &str, pos: BlockPos) -> Option<BlockPos> {
 
 /// The bus's writes into the GPUs, after the ALUs stepped; then what they
 /// show out to the players near them.
-pub fn tick(srv: &dyn yog_api::Server) {
+pub fn tick() {
     let n = {
         let mut t = TICKS.lock().unwrap();
         *t += 1;
@@ -267,7 +259,7 @@ pub fn tick(srv: &dyn yog_api::Server) {
             };
             if n == 1 {
                 // Joined to cables written into the world while the server was down.
-                cables::refresh_around(srv, dim, pos);
+                cables::refresh_around(dim, pos);
             }
             let bit = |offset: u16| cables::bus_level_at(dim, pos, d.ch(offset)) > 0;
             let toggle = bit(TOGGLE);
@@ -285,20 +277,19 @@ pub fn tick(srv: &dyn yog_api::Server) {
             }
         }
     }
-    send(srv, n);
+    send(n);
 }
 
 /// What the players near each Display haven't got of it.
-fn send(srv: &dyn yog_api::Server, n: u64) {
+fn send(n: u64) {
     let displays = DISPLAYS.lock().unwrap();
     if displays.is_empty() {
         return;
     }
     let mut sent = SENT.lock().unwrap();
-    for player in srv.online_players() {
-        let Some(info) = srv
-            .player_info(&player)
-            .and_then(|p| srv.entity_info(&p.uuid))
+    for player in yog_api::event::player::online() {
+        let Some(info) = yog_api::event::player::info(&player)
+            .and_then(|p| yog_api::event::entity::info(&p.uuid))
         else {
             continue;
         };
@@ -307,12 +298,14 @@ fn send(srv: &dyn yog_api::Server, n: u64) {
             // From the picture's middle (roughly: it spreads up and to one side).
             let half = d.size as f64 / 2.0;
             let (dx, dy, dz) = (
-                info.pos.0 - *x as f64,
-                info.pos.1 - (*y as f64 + half),
-                info.pos.2 - *z as f64,
+                info.pos.x - *x as f64,
+                info.pos.y - (*y as f64 + half),
+                info.pos.z - *z as f64,
             );
             let reach = VIEW_DISTANCE + d.size as f64;
-            if *dim != info.dimension || dx * dx + dy * dy + dz * dz > reach * reach {
+            if dim.as_str() != info.dimension.as_str()
+                || dx * dx + dy * dy + dz * dz > reach * reach
+            {
                 continue;
             }
             let id = (player.clone(), key.clone());
@@ -328,7 +321,7 @@ fn send(srv: &dyn yog_api::Server, n: u64) {
                 ops: d.gpu.front.clone(),
             };
             if let Ok(json) = serde_json::to_string(&frame) {
-                srv.send_to_player(&player, FRAME_CHANNEL, json.as_bytes());
+                yog_api::event::net::send_to_player(&player, FRAME_CHANNEL, json.as_bytes());
             }
             sent.insert(id, d.gpu.version);
         }
@@ -336,8 +329,8 @@ fn send(srv: &dyn yog_api::Server, n: u64) {
 }
 
 /// The way a Display's front faces: its block's `facing`.
-fn facing_of(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) -> Facing {
-    let state = srv.get_block_state(dim, pos).unwrap_or_default();
+fn facing_of(dim: &str, pos: BlockPos) -> Facing {
+    let state = yog_api::event::block::state(dim, pos).unwrap_or_default();
     match state
         .split("facing=")
         .nth(1)
@@ -353,8 +346,11 @@ fn facing_of(srv: &dyn yog_api::Server, dim: &str, pos: BlockPos) -> Facing {
 const STORE_FILE: &str = "yog-vlsi/displays";
 const STORE_KEY: &str = "displays";
 
-pub fn load(srv: &dyn yog_api::Server) {
-    let store = Storage::open(&srv.world_dir(), STORE_FILE);
+pub fn load() {
+    let store = Storage::open(
+        &yog_api::event::game::world_dir().unwrap_or_default(),
+        STORE_FILE,
+    );
     let saved: Vec<(Key, Display)> = store
         .get(STORE_KEY)
         .and_then(|v| v.as_str())
@@ -364,7 +360,7 @@ pub fn load(srv: &dyn yog_api::Server) {
     *TICKS.lock().unwrap() = 0;
 }
 
-pub fn save(srv: &dyn yog_api::Server) {
+pub fn save() {
     let saved: Vec<(Key, Display)> = DISPLAYS
         .lock()
         .unwrap()
@@ -372,7 +368,10 @@ pub fn save(srv: &dyn yog_api::Server) {
         .map(|(k, d)| (k.clone(), d.clone()))
         .collect();
     if let Ok(json) = serde_json::to_string(&saved) {
-        let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
+        let mut store = Storage::open(
+            &yog_api::event::game::world_dir().unwrap_or_default(),
+            STORE_FILE,
+        );
         store.set(STORE_KEY, &*json);
         let _ = store.flush();
     }
@@ -381,7 +380,8 @@ pub fn save(srv: &dyn yog_api::Server) {
 pub fn register(registry: &mut Registry) {
     // A Display goes up only where its whole picture fits, and stands in
     // blocks over all of it.
-    registry.on_player_place_block(|e, phase, srv| {
+    registry.on::<yog_api::event::block::Place, _>(|e, cx| {
+        let phase = cx.phase();
         if e.block_id != Blocks::DISPLAY {
             return true;
         }
@@ -389,22 +389,20 @@ pub fn register(registry: &mut Registry) {
             return true;
         }
         // It faces as it was placed; without room for the picture it comes back off.
-        let d = Display::new(facing_of(srv, &e.dimension, e.pos));
-        if !fits(srv, &e.dimension, e.pos, d.facing, d.size, None) {
-            srv.set_block_state(&e.dimension, e.pos, "minecraft:air");
-            if srv
-                .player_info(&e.player_name)
-                .is_none_or(|p| p.gamemode != "creative")
+        let d = Display::new(facing_of(&e.dimension, e.pos));
+        if !fits(&e.dimension, e.pos, d.facing, d.size, None) {
+            yog_api::event::block::set_state(&e.dimension, e.pos, "minecraft:air");
+            if yog_api::event::player::info(&e.player_name).is_none_or(|p| p.gamemode != "creative")
             {
-                srv.give_item(&e.player_name, Blocks::DISPLAY, 1);
+                yog_api::event::player::give_item(&e.player_name, Blocks::DISPLAY, 1u32);
             }
-            srv.send_actionbar(
+            yog_api::event::chat::actionbar(
                 &e.player_name,
-                &crate::res::Strings::display_no_room(DEFAULT_SIZE),
+                crate::res::Strings::display_no_room(DEFAULT_SIZE),
             );
             return true;
         }
-        stand(srv, &e.dimension, e.pos, &d);
+        stand(&e.dimension, e.pos, &d);
         DISPLAYS
             .lock()
             .unwrap()
@@ -413,7 +411,8 @@ pub fn register(registry: &mut Registry) {
     });
     // Breaking any block of it takes the whole Display down; a part drops
     // the Display (the Display's own block drops itself).
-    registry.on_block_break(|e, phase, srv| {
+    registry.on::<yog_api::event::block::Break, _>(|e, cx| {
+        let phase = cx.phase();
         let part = e.block_id == Blocks::DISPLAY_PART;
         if phase == EventPhase::Post && (part || e.block_id == Blocks::DISPLAY) {
             let at = if part {
@@ -425,12 +424,11 @@ pub fn register(registry: &mut Registry) {
             let key = (e.dimension.clone(), at.x, at.y, at.z);
             if let Some(d) = DISPLAYS.lock().unwrap().remove(&key) {
                 let b = area(at, d.facing, d.size);
-                srv.fill_region(&e.dimension, b.0, b.1, "minecraft:air");
-                let creative = srv
-                    .player_info(&e.player_name)
+                yog_api::event::world::fill_region(&e.dimension, b.0, b.1, "minecraft:air");
+                let creative = yog_api::event::player::info(&e.player_name)
                     .is_some_and(|p| p.gamemode == "creative");
                 if part && !creative {
-                    srv.give_item(&e.player_name, Blocks::DISPLAY, 1);
+                    yog_api::event::player::give_item(&e.player_name, Blocks::DISPLAY, 1u32);
                 }
                 let gone = Frame {
                     pos: (key.1, key.2, key.3),
@@ -441,8 +439,12 @@ pub fn register(registry: &mut Registry) {
                     ops: Vec::new(),
                 };
                 if let Ok(json) = serde_json::to_string(&gone) {
-                    for player in srv.online_players() {
-                        srv.send_to_player(&player, FRAME_CHANNEL, json.as_bytes());
+                    for player in yog_api::event::player::online() {
+                        yog_api::event::net::send_to_player(
+                            &player,
+                            FRAME_CHANNEL,
+                            json.as_bytes(),
+                        );
                     }
                 }
             }
@@ -450,7 +452,8 @@ pub fn register(registry: &mut Registry) {
         }
         true
     });
-    registry.on_player_leave(|e, _phase, _srv| {
+    registry.on::<yog_api::event::player::session::Leave, _>(|e, cx| {
+        let _phase = cx.phase();
         SENT.lock().unwrap().retain(|(p, _), _| *p != e.player_name);
         true
     });
@@ -464,7 +467,13 @@ mod client {
     use std::time::{Duration, Instant};
 
     use yog_api::gfx_core::{DataType, DrawMode};
-    use yog_api::gfx_gl::{Buffer, ShaderProgram, Texture, VertexArray};
+    use yog_api::gfx_gl::{Attrib, Buffer, ShaderProgram, Texture, VertexArray};
+
+    /// A vertex: position (3 floats), then its picture's uv (2): bytes per
+    /// vertex, and where the uv starts.
+    const STRIDE: u32 = 5 * FLOAT;
+    const UV_OFFSET: u32 = 3 * FLOAT;
+    const FLOAT: u32 = std::mem::size_of::<f32>() as u32;
     use yog_api::{GfxContext, Registry};
 
     use super::{FRAME_CHANNEL, Facing, Frame};
@@ -595,8 +604,16 @@ void main() {
             let vao = gfx.create_vao();
             let vbo = gfx.create_buffer();
             vbo.upload_bytes(gfx, &[0u8; 6 * 5 * 4], true);
-            vao.attrib(gfx, &vbo, 0, 3, DataType::F32, false, 20, 0);
-            vao.attrib(gfx, &vbo, 1, 2, DataType::F32, false, 20, 12);
+            let attrib = |index, components, offset| Attrib {
+                index,
+                components,
+                dtype: DataType::F32,
+                normalized: false,
+                stride: STRIDE,
+                offset,
+            };
+            vao.attrib(gfx, &vbo, attrib(0, 3, 0));
+            vao.attrib(gfx, &vbo, attrib(1, 2, UV_OFFSET));
             *gl = Some(Gl { program, vao, vbo });
         }
         let Some(gl) = gl.as_ref() else { return };
@@ -647,7 +664,7 @@ void main() {
     }
 
     pub fn register(registry: &mut Registry) {
-        registry.on_client_packet(FRAME_CHANNEL, |ev, _srv| {
+        registry.on_client_packet(FRAME_CHANNEL, |ev| {
             if let Ok(frame) = serde_json::from_slice::<Frame>(&ev.payload) {
                 received(frame);
             }

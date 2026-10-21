@@ -124,8 +124,11 @@ fn lane_for(player_name: &str) -> u32 {
 }
 
 /// Writes the sessions and lanes to disk: a session survives a crash.
-fn persist(srv: &dyn yog_api::Server) {
-    let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
+fn persist() {
+    let mut store = Storage::open(
+        &yog_api::event::game::world_dir().unwrap_or_default(),
+        STORE_FILE,
+    );
     if let Ok(json) = serde_json::to_string(&*SESSIONS.lock().unwrap()) {
         store.set(SESSIONS_KEY, &*json);
     }
@@ -138,8 +141,11 @@ fn persist(srv: &dyn yog_api::Server) {
 }
 
 /// Reads the sessions and lanes back (the server started).
-pub fn load(srv: &dyn yog_api::Server) {
-    let store = Storage::open(&srv.world_dir(), STORE_FILE);
+pub fn load() {
+    let store = Storage::open(
+        &yog_api::event::game::world_dir().unwrap_or_default(),
+        STORE_FILE,
+    );
     let read = |key: &str| store.get(key).and_then(|v| v.as_str().map(str::to_string));
     *SESSIONS.lock().unwrap() = read(SESSIONS_KEY)
         .and_then(|j| serde_json::from_str(&j).ok())
@@ -150,39 +156,36 @@ pub fn load(srv: &dyn yog_api::Server) {
 }
 
 /// The player's whole inventory, as their entity data has it.
-fn inventory_of(srv: &dyn yog_api::Server, player: &str) -> Option<String> {
-    let uuid = srv.player_info(player)?.uuid;
-    let nbt = srv.entity_get_nbt(&uuid)?;
+fn inventory_of(player: &str) -> Option<String> {
+    let uuid = yog_api::event::player::info(player)?.uuid;
+    let nbt = yog_api::event::entity::nbt(&uuid)?;
     let r = crate::nbt::top_value(&nbt, INVENTORY_TAG)?;
     Some(nbt[r].to_string())
 }
 
 /// Gives the player back `inventory` (from [`inventory_of`]) — everything
 /// else about them as it is now.
-fn restore_inventory(srv: &dyn yog_api::Server, player: &str, inventory: &str) -> bool {
-    let Some(uuid) = srv.player_info(player).map(|i| i.uuid) else {
+fn restore_inventory(player: &str, inventory: &str) -> bool {
+    let Some(uuid) = yog_api::event::player::info(player).map(|i| i.uuid) else {
         return false;
     };
-    let Some(now) = srv.entity_get_nbt(&uuid) else {
+    let Some(now) = yog_api::event::entity::nbt(&uuid) else {
         return false;
     };
-    srv.entity_set_nbt(
+    yog_api::event::entity::set_nbt(
         &uuid,
-        &crate::nbt::with_top_value(&now, INVENTORY_TAG, inventory),
+        crate::nbt::with_top_value(&now, INVENTORY_TAG, inventory),
     )
 }
 
 /// Removes whatever isn't a player from a field (dropped items, mobs, …).
-fn clear_entities(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i32) {
+fn clear_entities(origin_x: i32, origin_z: i32, size: i32) {
     let (lo, hi) = interior(origin_x, origin_z, size);
     let min = ((lo.x - 2) as f64, (lo.y - 2) as f64, (lo.z - 2) as f64);
     let max = ((hi.x + 3) as f64, (hi.y + 3) as f64, (hi.z + 3) as f64);
-    for uuid in srv.entities_in_box(DIMENSION_ID, min, max) {
-        if srv
-            .entity_info(&uuid)
-            .is_some_and(|e| e.type_id != "minecraft:player")
-        {
-            srv.entity_kill(&uuid);
+    for uuid in yog_api::event::world::entities_in_box(DIMENSION_ID, min, max) {
+        if yog_api::event::entity::info(&uuid).is_some_and(|e| e.type_id != "minecraft:player") {
+            yog_api::event::entity::kill(&uuid);
         }
     }
 }
@@ -230,8 +233,8 @@ fn skin(lo: BlockPos, hi: BlockPos) -> [(BlockPos, BlockPos); 6] {
 
 /// Paints one face of the skin: wool, a grid line every [`GRID_EVERY`]
 /// blocks from the field's corner `lo`, a lantern where two lines cross.
-fn paint_face(srv: &dyn yog_api::Server, (from, to): (BlockPos, BlockPos), lo: BlockPos) {
-    srv.fill_region(DIMENSION_ID, from, to, SKIN);
+fn paint_face((from, to): (BlockPos, BlockPos), lo: BlockPos) {
+    yog_api::event::world::fill_region(DIMENSION_ID, from, to, SKIN);
     let get = |p: BlockPos, axis: usize| [p.x, p.y, p.z][axis];
     let set = |mut p: BlockPos, axis: usize, v: i32| {
         match axis {
@@ -247,32 +250,39 @@ fn paint_face(srv: &dyn yog_api::Server, (from, to): (BlockPos, BlockPos), lo: B
     for &a in &span {
         for v in get(from, a)..=get(to, a) {
             if on_grid(a, v) {
-                srv.fill_region(DIMENSION_ID, set(from, a, v), set(to, a, v), GRID);
+                yog_api::event::world::fill_region(
+                    DIMENSION_ID,
+                    set(from, a, v),
+                    set(to, a, v),
+                    GRID,
+                );
             }
         }
     }
     let (a, b) = (span[0], span[1]);
     for u in (get(from, a)..=get(to, a)).filter(|&u| on_grid(a, u)) {
         for v in (get(from, b)..=get(to, b)).filter(|&v| on_grid(b, v)) {
-            srv.set_block_state(DIMENSION_ID, set(set(from, a, u), b, v), LIGHT);
+            yog_api::event::block::set_state(DIMENSION_ID, set(set(from, a, u), b, v), LIGHT);
         }
     }
 }
 
 /// Wraps the lane's cube in its barrier shell and the skin that shows it,
 /// and empties it.
-fn build_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i32) {
+fn build_room(origin_x: i32, origin_z: i32, size: i32) {
     let (lo, hi) = interior(origin_x, origin_z, size);
     for (from, to) in shell(lo, hi) {
-        srv.fill_region(DIMENSION_ID, from, to, WALL);
+        yog_api::event::world::fill_region(DIMENSION_ID, from, to, WALL);
     }
     for face in skin(lo, hi) {
-        paint_face(srv, face, lo);
+        paint_face(face, lo);
     }
     // What a previous design left inside.
-    for (pos, state) in srv.scan_region(DIMENSION_ID, lo, hi) {
-        srv.set_block_state(DIMENSION_ID, pos, "minecraft:air");
-        let id = state.split('[').next().unwrap_or(&state);
+    for yog_api::PlacedBlock { pos, state } in
+        yog_api::event::world::scan_region(DIMENSION_ID, lo, hi)
+    {
+        yog_api::event::block::set_state(DIMENSION_ID, pos, "minecraft:air");
+        let id = yog_api::split_state(&state).0;
         cables::refresh(DIMENSION_ID, pos, id);
         if id == Blocks::REDSTONE_PORT {
             cables::forget_port(DIMENSION_ID, pos);
@@ -283,7 +293,6 @@ fn build_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i32
 /// Opens `blueprint` (from `source`) in `player_name`'s lane and moves them
 /// there; `/vlsi save` takes them back to `return_dim`/`return_pos`.
 pub fn enter(
-    srv: &dyn yog_api::Server,
     player_name: &str,
     blueprint: &Blueprint,
     source: Source,
@@ -294,7 +303,7 @@ pub fn enter(
     let origin_x = BASE_X + lane as i32 * LANE_SPACING;
     let origin_z = BASE_Z;
     let size = blueprint.tier.world_size();
-    build_room(srv, origin_x, origin_z, size as i32);
+    build_room(origin_x, origin_z, size as i32);
 
     let at = |x: u32, y: u32, z: u32| BlockPos {
         x: origin_x + x as i32,
@@ -310,9 +319,16 @@ pub fn enter(
         .partition(|b| needs_support(b.id()));
     for block in standing.into_iter().chain(hanging) {
         let pos = at(block.x, block.y, block.z);
-        srv.set_block_state(DIMENSION_ID, pos, &block.state);
+        yog_api::event::block::set_state(DIMENSION_ID, pos, &block.state);
         for (slot, item, count) in &block.items {
-            srv.set_inventory_slot(DIMENSION_ID, pos, *slot as u32, item, *count as u32, "");
+            yog_api::event::block::set_inventory_slot(
+                DIMENSION_ID,
+                pos,
+                *slot as u32,
+                item,
+                *count as u32,
+                "",
+            );
         }
         // A Redstone Port as it was set (an old design's: an unnamed input).
         if block.id() == Blocks::REDSTONE_PORT {
@@ -320,7 +336,7 @@ pub fn enter(
                 .redstone_port
                 .clone()
                 .unwrap_or_else(RedstonePort::new);
-            cables::set_redstone_port(srv, DIMENSION_ID, pos, port);
+            cables::set_redstone_port(DIMENSION_ID, pos, port);
         }
     }
     // Cables and ports placed, Yog Pipes joins them up.
@@ -328,20 +344,24 @@ pub fn enter(
         cables::refresh(DIMENSION_ID, at(block.x, block.y, block.z), block.id());
     }
     for p in &blueprint.circuit.ports {
-        srv.set_block_state(DIMENSION_ID, at(p.x, p.y, p.z), port::block_for_dir(p.dir));
-        port::write_label(srv, DIMENSION_ID, at(p.x, p.y, p.z), &p.label);
+        yog_api::event::block::set_state(
+            DIMENSION_ID,
+            at(p.x, p.y, p.z),
+            port::block_for_dir(p.dir),
+        );
+        port::write_label(DIMENSION_ID, at(p.x, p.y, p.z), &p.label);
     }
     // Its ALUs as they were: their chips in their slots, their boards.
     for a in &blueprint.circuit.alus {
         let pos = at(a.x, a.y, a.z);
         for (slot, meta) in &a.chips {
-            srv.set_inventory_slot(
+            yog_api::event::block::set_inventory_slot(
                 DIMENSION_ID,
                 pos,
                 *slot as u32,
                 meta.tier.chip(),
                 1,
-                &meta.to_nbt(),
+                meta.to_nbt(),
             );
         }
         board::restore(
@@ -361,14 +381,17 @@ pub fn enter(
         (origin_z + size as i32 / 2) as f64,
     );
     // What they come in with, theirs again on the way out.
-    let inventory = inventory_of(srv, player_name);
-    let gamemode = srv
-        .player_info(player_name)
-        .map_or_else(|| "survival".to_string(), |i| i.gamemode);
-    if !srv.teleport_to_dim(player_name, DIMENSION_ID, cx, (EDITOR_Y + 1) as f64, cz) {
+    let inventory = inventory_of(player_name);
+    let gamemode = yog_api::event::player::info(player_name)
+        .map_or_else(|| "survival".to_string(), |i| i.gamemode.to_string());
+    if !yog_api::event::player::teleport_to_dim(
+        player_name,
+        DIMENSION_ID,
+        (cx, (EDITOR_Y + 1) as f64, cz),
+    ) {
         return Err("§cCouldn't enter the editor dimension — see the game log.".into());
     }
-    srv.set_gamemode(player_name, "creative");
+    yog_api::event::player::set_gamemode(player_name, "creative");
     SESSIONS.lock().unwrap().insert(
         player_name.to_string(),
         EditorSession {
@@ -384,10 +407,10 @@ pub fn enter(
             gamemode,
         },
     );
-    persist(srv);
-    srv.send_actionbar(
+    persist();
+    yog_api::event::chat::actionbar(
         player_name,
-        &format!(
+        format!(
             "§6Editing '{}' — {} tier, {}×{}. §7/vlsi save when done.",
             blueprint.name,
             blueprint.tier.name(),
@@ -400,30 +423,32 @@ pub fn enter(
 
 /// `/vlsi save`: writes the design back onto its Blueprint, takes the
 /// player back and removes their editing field. Returns a status message.
-pub fn save(srv: &dyn yog_api::Server, player_name: &str) -> String {
+pub fn save(player_name: &str) -> String {
     let Some(session) = SESSIONS.lock().unwrap().remove(player_name) else {
         return "§cYou are not editing a VLSI circuit right now.".into();
     };
-    let message = finish(srv, player_name, session);
-    persist(srv);
+    let message = finish(player_name, session);
+    persist();
     message
 }
 
 /// Reads the design off the player's field.
-fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
+fn scan(session: &EditorSession) -> Blueprint {
     let mut blocks = Vec::new();
     let mut ports = Vec::new();
     let mut alus = Vec::new();
     let (lo, hi) = interior(session.origin_x, session.origin_z, session.size as i32);
-    for (p, state) in srv.scan_region(DIMENSION_ID, lo, hi) {
+    for yog_api::PlacedBlock { pos: p, state } in
+        yog_api::event::world::scan_region(DIMENSION_ID, lo, hi)
+    {
         let (x, y, z) = (
             (p.x - lo.x) as u32,
             (p.y - lo.y) as u32,
             (p.z - lo.z) as u32,
         );
-        let id = state.split('[').next().unwrap_or(&state);
+        let id = yog_api::split_state(&state).0;
         if let Some(dir) = port::dir_for_block(id) {
-            let label = port::read_label(srv, DIMENSION_ID, p)
+            let label = port::read_label(DIMENSION_ID, p)
                 .unwrap_or_else(|| format!("Port {}", ports.len()));
             ports.push(Port {
                 label,
@@ -438,7 +463,8 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
         if let Some(tier) = Tier::from_alu(id) {
             let chips = (0..board::CHIP_SLOTS)
                 .filter_map(|slot| {
-                    let (_, _, nbt) = srv.get_inventory_slot(DIMENSION_ID, p, slot as u32)?;
+                    let nbt =
+                        yog_api::event::block::inventory_slot(DIMENSION_ID, p, slot as u32)?.snbt;
                     Some((slot, ChipMeta::from_nbt(&nbt)?))
                 })
                 .collect();
@@ -459,8 +485,9 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
         }
         let items = (0..container_slots(id))
             .filter_map(|slot| {
-                let (item, count, _) = srv.get_inventory_slot(DIMENSION_ID, p, slot as u32)?;
-                Some((slot, item, count.min(255) as u8))
+                let yog_api::Stack { item, count, .. } =
+                    yog_api::event::block::inventory_slot(DIMENSION_ID, p, slot as u32)?;
+                Some((slot, item.to_string(), count.min(255) as u8))
             })
             .collect();
         let redstone_port =
@@ -469,7 +496,7 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
             x,
             y,
             z,
-            state,
+            state: state.to_string(),
             items,
             redstone_port,
         });
@@ -490,8 +517,8 @@ fn scan(srv: &dyn yog_api::Server, session: &EditorSession) -> Blueprint {
 /// mode back, the design onto its Blueprint, onto a new one in their
 /// inventory, or — when neither works — dropped as a Blueprint where they
 /// go back to. Then the field goes, and they go back.
-fn finish(srv: &dyn yog_api::Server, player_name: &str, session: EditorSession) -> String {
-    let blueprint = scan(srv, &session);
+fn finish(player_name: &str, session: EditorSession) -> String {
+    let blueprint = scan(&session);
     let summary = format!(
         "{} ports, {} blocks",
         blueprint.circuit.ports.len(),
@@ -503,34 +530,39 @@ fn finish(srv: &dyn yog_api::Server, player_name: &str, session: EditorSession) 
 
     // Their own things back before a new Blueprint goes among them.
     if let Some(inventory) = &session.inventory
-        && !restore_inventory(srv, player_name, inventory)
+        && !restore_inventory(player_name, inventory)
     {
         yog_api::warn!("[yog-vlsi] couldn't give {player_name} back their inventory");
     }
-    srv.set_gamemode(player_name, &session.gamemode);
+    yog_api::event::player::set_gamemode(player_name, &session.gamemode);
 
-    let still_there = srv
-        .get_inventory_slot(&src.dimension, src.pos, src.slot)
-        .is_some_and(|(id, _, _)| id == Items::BLUEPRINT);
+    let still_there = yog_api::event::block::inventory_slot(&src.dimension, src.pos, src.slot)
+        .is_some_and(|s| s.item.as_str() == Items::BLUEPRINT);
     let message = if still_there
-        && srv.set_inventory_slot(&src.dimension, src.pos, src.slot, Items::BLUEPRINT, 1, &nbt)
-    {
+        && yog_api::event::block::set_inventory_slot(
+            &src.dimension,
+            src.pos,
+            src.slot,
+            Items::BLUEPRINT,
+            1,
+            &nbt,
+        ) {
         format!("§aSaved '{}' to its Blueprint — {summary}.", blueprint.name)
     } else {
-        let taken: Vec<u32> = srv
-            .player_inventory(player_name)
+        let taken: Vec<u32> = yog_api::event::player::inventory(player_name)
             .into_iter()
-            .map(|(slot, ..)| slot)
+            .map(|s| s.slot)
             .collect();
         let free = (0..PLAYER_SLOTS).find(|s| !taken.contains(s));
-        if free.is_some_and(|slot| srv.set_slot_item(player_name, slot, Items::BLUEPRINT, 1, &nbt))
-        {
+        if free.is_some_and(|slot| {
+            yog_api::event::player::set_slot_item(player_name, slot, Items::BLUEPRINT, 1, &nbt)
+        }) {
             format!(
                 "§aSaved '{}' to a new Blueprint in your inventory — {summary}.",
                 blueprint.name
             )
         } else {
-            srv.spawn_item(
+            yog_api::event::item::spawn_item(
                 &session.return_dim,
                 (rx, ry, rz),
                 (0.0, 0.0, 0.0),
@@ -547,27 +579,28 @@ fn finish(srv: &dyn yog_api::Server, player_name: &str, session: EditorSession) 
 
     // The field goes — and what its blocks dropped going — while it's
     // still loaded around the player.
-    remove_room(srv, session.origin_x, session.origin_z, session.size as i32);
-    clear_entities(srv, session.origin_x, session.origin_z, session.size as i32);
-    srv.teleport_to_dim(player_name, &session.return_dim, rx, ry, rz);
+    remove_room(session.origin_x, session.origin_z, session.size as i32);
+    clear_entities(session.origin_x, session.origin_z, session.size as i32);
+    yog_api::event::player::teleport_to_dim(player_name, &session.return_dim, (rx, ry, rz));
     message
 }
 
 /// Removes a field: what's in it, and its shell.
-fn remove_room(srv: &dyn yog_api::Server, origin_x: i32, origin_z: i32, size: i32) {
+fn remove_room(origin_x: i32, origin_z: i32, size: i32) {
     let (lo, hi) = interior(origin_x, origin_z, size);
-    for (pos, _) in srv.scan_region(DIMENSION_ID, lo, hi) {
-        srv.set_block_state(DIMENSION_ID, pos, "minecraft:air");
+    for yog_api::PlacedBlock { pos, .. } in yog_api::event::world::scan_region(DIMENSION_ID, lo, hi)
+    {
+        yog_api::event::block::set_state(DIMENSION_ID, pos, "minecraft:air");
     }
     for (from, to) in shell(lo, hi).into_iter().chain(skin(lo, hi)) {
-        srv.fill_region(DIMENSION_ID, from, to, "minecraft:air");
+        yog_api::event::world::fill_region(DIMENSION_ID, from, to, "minecraft:air");
     }
     board::forget_in(DIMENSION_ID, lo, hi);
 }
 
 /// Keeps every session for the next run (the server stops).
-pub fn save_sessions(srv: &dyn yog_api::Server) {
-    persist(srv);
+pub fn save_sessions() {
+    persist();
 }
 
 /// Blocks that break without the block they stand on or hang from.
@@ -601,16 +634,17 @@ fn is_structure(block_id: &str) -> bool {
 
 pub fn register(registry: &mut Registry) {
     // `/vlsi save` — save the active editor session and return.
-    registry.on_typed_command("vlsi", "word", |ctx, srv| {
+    registry.on_typed_command("vlsi", "word", |ctx| {
         if ctx.arg_str(0).unwrap_or("") != "save" {
             return None;
         }
-        Some(save(srv, &ctx.source))
+        Some(save(&ctx.source))
     });
 
     // Nobody stays in the editor dimension without a session (a warp, a
     // teleport, a rejoin): back to where they last were outside it.
-    registry.on_player_move(|e, phase, srv| {
+    registry.on::<yog_api::event::player::action::Move, _>(|e, cx| {
+        let phase = cx.phase();
         if phase != EventPhase::Pre {
             return true;
         }
@@ -630,8 +664,8 @@ pub fn register(registry: &mut Registry) {
             .get(&e.player_name)
             .cloned()
             .unwrap_or_else(|| ("minecraft:overworld".into(), (0.5, 100.0, 0.5)));
-        srv.teleport_to_dim(&e.player_name, &dim, x, y, z);
-        srv.send_actionbar(
+        yog_api::event::player::teleport_to_dim(&e.player_name, &dim, (x, y, z));
+        yog_api::event::chat::actionbar(
             &e.player_name,
             "§cThe circuit editor is only open from a VLSI Workbench.",
         );
@@ -639,7 +673,8 @@ pub fn register(registry: &mut Registry) {
     });
 
     // The shell stays — even for creative players.
-    registry.on_block_break(|e, phase, _srv| {
+    registry.on::<yog_api::event::block::Break, _>(|e, cx| {
+        let phase = cx.phase();
         !(phase == EventPhase::Pre && e.dimension == DIMENSION_ID && is_structure(&e.block_id))
     });
 }

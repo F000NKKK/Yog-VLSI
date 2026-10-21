@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
-use yog_api::{BlockPos, EventPhase, Registry, Server, Storage};
+use yog_api::{BlockPos, EventPhase, Registry, Storage};
 
 use crate::cables;
 use crate::chip::{ChipMeta, CircuitData};
@@ -290,20 +290,23 @@ impl Board {
     }
 
     /// Looks at the chip slots: new chips get a VM, removed ones lose it.
-    fn sync_chips(&mut self, srv: &dyn yog_api::Server, alu: &AluId) {
+    fn sync_chips(&mut self, alu: &AluId) {
         for slot in 0..CHIP_SLOTS {
-            let meta = srv
-                .get_inventory_slot(&alu.dimension, alu.pos(), slot as u32)
-                .filter(|(id, _, _)| Tier::from_chip(id).is_some())
-                .and_then(|(_, _, nbt)| ChipMeta::from_nbt(&nbt));
+            let meta =
+                yog_api::event::block::inventory_slot(&alu.dimension, alu.pos(), slot as u32)
+                    .filter(|s| Tier::from_chip(s.item.as_str()).is_some())
+                    .and_then(|s| ChipMeta::from_nbt(&s.snbt));
             let entry = &mut self.chips[slot as usize];
             match meta {
                 Some(meta) if entry.as_ref().is_some_and(|c| c.meta.id == meta.id) => {}
                 Some(meta) => {
-                    let circuit = CircuitData::load_for_chip(&srv.world_dir(), &meta.id)
-                        .unwrap_or_else(|| CircuitData::empty(meta.tier));
+                    let circuit = CircuitData::load_for_chip(
+                        &yog_api::event::game::world_dir().unwrap_or_default(),
+                        &meta.id,
+                    )
+                    .unwrap_or_else(|| CircuitData::empty(meta.tier));
                     // Its ALUs run inside it, their chips' circuits from the store.
-                    let world_dir = srv.world_dir();
+                    let world_dir = yog_api::event::game::world_dir().unwrap_or_default();
                     let vm = circuit.vm_with(&|id| CircuitData::load_for_chip(&world_dir, id), 1);
                     *entry = Some(Installed::new(meta, circuit, vm));
                 }
@@ -313,14 +316,14 @@ impl Board {
     }
 
     /// Which sides a digital cable reaches now.
-    fn sync_cables(&mut self, srv: &dyn yog_api::Server, alu: &AluId) {
+    fn sync_cables(&mut self, alu: &AluId) {
         // The first look: cables written into the world while the server was
         // down are joined up.
         if !self.cables_known {
-            cables::refresh_around(srv, &alu.dimension, alu.pos());
+            cables::refresh_around(&alu.dimension, alu.pos());
         }
         for (i, side) in SIDES.iter().enumerate() {
-            self.cables[i] = cables::cable_at(srv, &alu.dimension, cables::beside(alu.xyz(), side));
+            self.cables[i] = cables::cable_at(&alu.dimension, cables::beside(alu.xyz(), side));
         }
         self.cables_known = true;
     }
@@ -602,8 +605,8 @@ impl Request {
 
 /// Sends `request` to the server (from the screen).
 pub fn send(request: &Request) {
-    if let (Some(srv), Ok(json)) = (yog_api::server(), serde_json::to_string(request)) {
-        srv.send_to_server(REQUEST_CHANNEL, json.as_bytes());
+    if let Ok(json) = serde_json::to_string(request) {
+        yog_api::event::net::send_to_server(REQUEST_CHANNEL, json.into_bytes());
     }
 }
 
@@ -680,14 +683,14 @@ static WATCHERS: LazyLock<Mutex<HashMap<String, Watching>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static TICKS: Mutex<u64> = Mutex::new(0);
 
-pub fn tick(srv: &dyn yog_api::Server) {
+pub fn tick() {
     let n = {
         let mut t = TICKS.lock().unwrap();
         *t += 1;
         *t
     };
     let names = if n % SYNC_EVERY == 0 {
-        Some(cables::port_names(srv))
+        Some(cables::port_names())
     } else {
         None
     };
@@ -708,17 +711,14 @@ pub fn tick(srv: &dyn yog_api::Server) {
             let share = TICK_BUDGET.saturating_sub(spent) / left as u32;
             left -= 1;
             if names.is_some() || cables_changed || !board.cables_known {
-                board.sync_cables(srv, alu);
+                board.sync_cables(alu);
             }
             if let Some(names) = &names {
-                board.sync_chips(srv, alu);
+                board.sync_chips(alu);
                 board.side_names = SIDES
                     .iter()
                     .filter_map(|&side| {
-                        Some((
-                            side.to_string(),
-                            cables::side_port_name(srv, alu, side, names)?,
-                        ))
+                        Some((side.to_string(), cables::side_port_name(alu, side, names)?))
                     })
                     .collect();
             }
@@ -726,11 +726,11 @@ pub fn tick(srv: &dyn yog_api::Server) {
         }
     }
     if n % SEND_EVERY == 0 {
-        send_views(srv);
+        send_views();
     }
 }
 
-fn send_views(srv: &dyn yog_api::Server) {
+fn send_views() {
     let boards = BOARDS.lock().unwrap();
     let mut watchers = WATCHERS.lock().unwrap();
     for (player, (alu, last)) in watchers.iter_mut() {
@@ -740,7 +740,7 @@ fn send_views(srv: &dyn yog_api::Server) {
         let view = board.view(alu);
         if last.as_ref() != Some(&view) {
             if let Ok(json) = serde_json::to_string(&view) {
-                srv.send_to_player(player, VIEW_CHANNEL, json.as_bytes());
+                yog_api::event::net::send_to_player(player, VIEW_CHANNEL, json.as_bytes());
             }
             *last = Some(view);
         }
@@ -750,8 +750,11 @@ fn send_views(srv: &dyn yog_api::Server) {
 const STORE_FILE: &str = "yog-vlsi/boards";
 const STORE_KEY: &str = "boards";
 
-pub fn load(srv: &dyn yog_api::Server) {
-    let store = Storage::open(&srv.world_dir(), STORE_FILE);
+pub fn load() {
+    let store = Storage::open(
+        &yog_api::event::game::world_dir().unwrap_or_default(),
+        STORE_FILE,
+    );
     let saved: Vec<(AluId, Saved)> = store
         .get(STORE_KEY)
         .and_then(|v| v.as_str())
@@ -762,12 +765,12 @@ pub fn load(srv: &dyn yog_api::Server) {
     for (alu, saved) in saved {
         let mut board = Board::new(saved.tier);
         board.saved = saved;
-        board.sync_chips(srv, &alu);
+        board.sync_chips(&alu);
         boards.insert(alu, board);
     }
 }
 
-pub fn save(srv: &dyn yog_api::Server) {
+pub fn save() {
     let saved: Vec<(AluId, Saved)> = BOARDS
         .lock()
         .unwrap()
@@ -775,7 +778,10 @@ pub fn save(srv: &dyn yog_api::Server) {
         .map(|(k, b)| (k.clone(), b.saved.clone()))
         .collect();
     if let Ok(json) = serde_json::to_string(&saved) {
-        let mut store = Storage::open(&srv.world_dir(), STORE_FILE);
+        let mut store = Storage::open(
+            &yog_api::event::game::world_dir().unwrap_or_default(),
+            STORE_FILE,
+        );
         store.set(STORE_KEY, &*json);
         let _ = store.flush();
     }
@@ -783,7 +789,8 @@ pub fn save(srv: &dyn yog_api::Server) {
 
 pub fn setup(registry: &mut Registry) {
     // Opening an ALU: it gets a board (if new) and the player watches it.
-    registry.on_use_block(|e, phase, srv| -> bool {
+    registry.on::<yog_api::event::block::Use, _>(|e, cx| -> bool {
+        let phase = cx.phase();
         let Some(tier) = Tier::from_alu(&e.block_id) else {
             return true;
         };
@@ -802,7 +809,7 @@ pub fn setup(registry: &mut Registry) {
                 .entry(alu.clone())
                 .or_insert_with(|| Board::new(tier));
             board.saved.tier = tier;
-            board.sync_chips(srv, &alu);
+            board.sync_chips(&alu);
         }
         WATCHERS
             .lock()
@@ -811,7 +818,8 @@ pub fn setup(registry: &mut Registry) {
         true // its inventory opens
     });
 
-    registry.on_block_break(|e, phase, _srv| {
+    registry.on::<yog_api::event::block::Break, _>(|e, cx| {
+        let phase = cx.phase();
         if phase == EventPhase::Post && Tier::from_alu(&e.block_id).is_some() {
             let alu = AluId {
                 dimension: e.dimension.clone(),
@@ -824,7 +832,7 @@ pub fn setup(registry: &mut Registry) {
         true
     });
 
-    registry.on_packet(REQUEST_CHANNEL, |ev, srv| {
+    registry.on_packet(REQUEST_CHANNEL, |ev| {
         let Ok(request) = serde_json::from_slice::<Request>(&ev.payload) else {
             return;
         };
@@ -835,7 +843,7 @@ pub fn setup(registry: &mut Registry) {
             .get_mut(&alu)
             .map(|b| b.apply(request));
         if let Some(Err(e)) = result {
-            srv.send_actionbar(&ev.player, &e);
+            yog_api::event::chat::actionbar(&ev.player, &e);
         }
         if let Some((_, last)) = WATCHERS.lock().unwrap().get_mut(&ev.player) {
             *last = None;

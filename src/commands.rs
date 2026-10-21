@@ -13,7 +13,7 @@ use crate::chip::ChipMeta;
 
 pub fn register(registry: &mut Registry) {
     // ── /vlsi ──────────────────────────────────────────────────────────────
-    registry.on_command("vlsi", |_ctx, _srv| {
+    registry.on_command("vlsi", |_ctx| {
         Some(
             "§6Yog VLSI §7— Very Large Scale Integration\n\
              §7Designs live on Blueprints: put one in a VLSI Workbench.\n\
@@ -24,11 +24,11 @@ pub fn register(registry: &mut Registry) {
     });
 
     // ── /vlsi info ─────────────────────────────────────────────────────────
-    registry.on_typed_command("vlsi", "word", |ctx, srv| {
+    registry.on_typed_command("vlsi", "word", |ctx| {
         if ctx.arg_str(0).unwrap_or("") != "info" {
             return None;
         }
-        let nbt = match srv.get_held_item_nbt(&ctx.source) {
+        let nbt = match yog_api::event::player::held_item_nbt(&ctx.source) {
             Some(n) => n,
             None => return Some("§cNo NBT on held item.".into()),
         };

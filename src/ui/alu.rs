@@ -21,7 +21,7 @@ yog_api::ui_include!("ui/alu");
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex, Once};
 
-use yog_api::gfx_draw2d::Draw2D;
+use yog_api::gfx_draw2d::{Draw2D, TextStyle};
 use yog_api::ui::{Color, Pointer, Rect, Surface, Vec2};
 use yog_api::{GfxContext, Registry};
 use yog_kit::prelude::*;
@@ -732,7 +732,13 @@ impl Canvas for Draw2D<'_> {
         Draw2D::rect(self, Rect::from_edges(x0, y0, x1, y1), Color(color));
     }
     fn text(&self, text: &str, x: f32, y: f32, scale: f32, color: u32) {
-        self.text_scaled(text, "", Vec2::new(x, y), scale, Color(color), false);
+        let style = TextStyle {
+            font: "",
+            scale,
+            color: Color(color),
+            shadow: false,
+        };
+        self.text_scaled(text, Vec2::new(x, y), &style);
     }
     fn text_width(&self, text: &str) -> f32 {
         Draw2D::text_width(self, text, "")
@@ -1188,7 +1194,7 @@ pub fn setup(registry: &mut Registry) {
     let screen = register(registry);
     SURFACE.call_once(|| yog_api::ui::surface::register(SURFACE_ID, Arc::new(GraphSurface)));
 
-    registry.on_client_packet(board::VIEW_CHANNEL, move |ev, _srv| {
+    registry.on_client_packet(board::VIEW_CHANNEL, move |ev| {
         let Ok(view) = serde_json::from_slice::<BoardView>(&ev.payload) else {
             return;
         };
