@@ -1,4 +1,1 @@
-{
-  image: "@BlockImages.block.display",
-  atlas: "minecraft:blocks",
-}
+YOGDimage5@BlockImages.block.displayatlas!minecraft:blocks

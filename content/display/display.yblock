@@ -1,27 +1,1 @@
-{
-  "name": "@Strings.block.display",
-  "tooltip": "@Strings.block.display.desc",
-  "block": {
-    "hardness": 2,
-    "resistance": 6,
-    "sound": "glass",
-    "connect_groups": [
-      "digital"
-    ]
-  },
-  "model": {
-    "parent": "cube",
-    "textures": {
-      "north": "@texture:yog-vlsi:block/display",
-      "south": "@texture:yog-vlsi:block/display_back",
-      "east": "@texture:yog-vlsi:block/display_side",
-      "west": "@texture:yog-vlsi:block/display_side",
-      "up": "@texture:yog-vlsi:block/display_top",
-      "down": "@texture:yog-vlsi:block/display_top",
-      "particle": "@texture:yog-vlsi:block/display_side"
-    }
-  },
-  "states": {
-    "facing": "horizontal"
-  }
-}
+YOGD	name-@Strings.block.displaytooltip7@Strings.block.display.descblockhardnessresistancesoundglassconnect_groupsdigitalmodelparent	cubetexturesnorth?@texture:yog-vlsi:block/displaysouthI@texture:yog-vlsi:block/display_back	eastI@texture:yog-vlsi:block/display_side	west(upG@texture:yog-vlsi:block/display_top	down.particle(statesfacinghorizontal

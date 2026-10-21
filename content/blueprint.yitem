@@ -1,13 +1,1 @@
-{
-  "name": "@Strings.item.blueprint",
-  "tooltip": "@Strings.item.blueprint.desc",
-  "item": {
-    "stack_size": 1
-  },
-  "model": {
-    "parent": "generated",
-    "textures": {
-      "layer0": "@texture:yog-vlsi:item/blueprint"
-    }
-  }
-}
+YOGD	name/@Strings.item.blueprinttooltip9@Strings.item.blueprint.desc	itemstack_sizemodelparentgeneratedtextureslayer0A@texture:yog-vlsi:item/blueprint

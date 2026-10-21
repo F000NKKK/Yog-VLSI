@@ -1,11 +1,1 @@
-{
-  "type": "shaped",
-  "pattern": [
-    "RRR"
-  ],
-  "key": {
-    "R": "@tag:item:yog:dusts/redstone"
-  },
-  "result": "@item:yog-vlsi:analog_cable",
-  "count": 3
-}
+YOGD	typeshapedpatternRRRkeyR9@tag:item:yog:dusts/redstoneresult7@item:yog-vlsi:analog_cablecount

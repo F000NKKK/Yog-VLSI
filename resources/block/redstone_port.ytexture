@@ -1,4 +1,1 @@
-{
-  image: "@BlockImages.block.redstone_port",
-  atlas: "minecraft:blocks",
-}
+YOGDimageA@BlockImages.block.redstone_portatlas!minecraft:blocks

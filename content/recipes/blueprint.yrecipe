@@ -1,13 +1,1 @@
-{
-  "type": "shaped",
-  "pattern": [
-    "PPP",
-    "PIP",
-    "PPP"
-  ],
-  "key": {
-    "P": "@item:minecraft:paper",
-    "I": "@tag:item:yog:ingots/iron"
-  },
-  "result": "@item:yog-vlsi:blueprint"
-}
+YOGD	typeshapedpatternPPPPIPkeyP+@item:minecraft:paperI3@tag:item:yog:ingots/ironresult1@item:yog-vlsi:blueprint

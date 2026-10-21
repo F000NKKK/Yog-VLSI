@@ -1,14 +1,1 @@
-{
-  "name": "@Strings.item.chip_netherite",
-  "tooltip": "@Strings.item.chip_netherite.desc",
-  "tags": ["chips"],
-  "item": {
-    "stack_size": 1
-  },
-  "model": {
-    "parent": "generated",
-    "textures": {
-      "layer0": "@texture:yog-vlsi:item/chip_netherite"
-    }
-  }
-}
+YOGD	name9@Strings.item.chip_netheritetooltipC@Strings.item.chip_netherite.desc	tagschips	itemstack_sizemodelparentgeneratedtextureslayer0K@texture:yog-vlsi:item/chip_netherite

@@ -1,26 +1,2 @@
-{
-  "name": "@Strings.block.alu_netherite",
-  "tooltip": "@Strings.block.alu_netherite.desc",
-  "tags": ["alus"],
-  "block": {
-    "hardness": 5,
-    "resistance": 12,
-    "sound": "metal",
-    "light": 7,
-    "tool": "pickaxe",
-    "requires_tool": true,
-    "inventory": "yog-vlsi:alu",
-    "connect_groups": [
-      "analog",
-      "digital"
-    ]
-  },
-  "model": {
-    "parent": "cube_bottom_top",
-    "textures": {
-      "top": "@texture:yog-vlsi:block/alu_top_netherite",
-      "bottom": "@texture:yog-vlsi:block/alu_top_netherite",
-      "side": "@texture:yog-vlsi:block/alu_side_netherite"
-    }
-  }
-}
+YOGD	name9@Strings.block.alu_netheritetooltipC@Strings.block.alu_netherite.desc	tags	alusblockhardness
+resistancesoundmetallight	toolpickaxerequires_toolinventoryyog-vlsi:aluconnect_groupsanalogdigitalmodelparentcube_bottom_toptexturestopS@texture:yog-vlsi:block/alu_top_netheritebottom2	sideU@texture:yog-vlsi:block/alu_side_netherite

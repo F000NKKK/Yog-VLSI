@@ -1,16 +1,1 @@
-{
-  "name": "@Strings.block.port_input",
-  "tooltip": "@Strings.block.port.desc",
-  "tags": ["ports"],
-  "block": {
-    "hardness": 1,
-    "resistance": 3,
-    "sound": "stone"
-  },
-  "model": {
-    "parent": "cube_all",
-    "textures": {
-      "all": "@texture:yog-vlsi:block/port_input"
-    }
-  }
-}
+YOGD	name3@Strings.block.port_inputtooltip1@Strings.block.port.desc	tagsportsblockhardnessresistancesoundstonemodelparentcube_alltexturesallE@texture:yog-vlsi:block/port_input

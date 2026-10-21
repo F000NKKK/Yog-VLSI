@@ -1,89 +1,5 @@
-// The six materials a workbench stores: what its slot for each takes (an
-// item, or `#` a tag of them â€” Yog's common tags take every mod's â€” and how
-// many units it's worth), how many units one of the resource is (`unit`:
-// metals count nuggets, an ingot 9), and the ids that are it in a design
-// (`*` any run of letters).
-{
-  "kind": "table",
-  "id": "resource",
-  "serde": true,
-  "columns": {
-    "name": "text",
-    "inputs": "{string: u64}",
-    "unit": "u64",
-    "base": "[string]"
-  },
-  "rows": {
-    "redstone": {
-      "name": "@Strings.resource_redstone",
-      "inputs": {
-        "#yog:dusts/redstone": 1,
-        "#yog:storage_blocks/redstone": 9
-      },
-      "unit": 1,
-      "base": [
-        "minecraft:redstone",
-        "minecraft:redstone_wire"
-      ]
-    },
-    "iron": {
-      "name": "@Strings.resource_iron",
-      "inputs": {
-        "#yog:nuggets/iron": 1,
-        "#yog:ingots/iron": 9,
-        "#yog:storage_blocks/iron": 81
-      },
-      "unit": 9,
-      "base": [
-        "minecraft:iron_ingot"
-      ]
-    },
-    "gold": {
-      "name": "@Strings.resource_gold",
-      "inputs": {
-        "#yog:nuggets/gold": 1,
-        "#yog:ingots/gold": 9,
-        "#yog:storage_blocks/gold": 81
-      },
-      "unit": 9,
-      "base": [
-        "minecraft:gold_ingot"
-      ]
-    },
-    "quartz": {
-      "name": "@Strings.resource_quartz",
-      "inputs": {
-        "#yog:gems/quartz": 1,
-        "#yog:storage_blocks/quartz": 4
-      },
-      "unit": 1,
-      "base": [
-        "minecraft:quartz"
-      ]
-    },
-    "wood": {
-      "name": "@Strings.resource_wood",
-      "inputs": {
-        "#yog:logs": 1
-      },
-      "unit": 1,
-      "base": [
-        "minecraft:*_log",
-        "minecraft:*_wood",
-        "minecraft:*_stem",
-        "minecraft:*_hyphae"
-      ]
-    },
-    "stone": {
-      "name": "@Strings.resource_stone",
-      "inputs": {
-        "#yog:cobblestones": 1,
-        "#yog:stones": 1
-      },
-      "unit": 1,
-      "base": [
-        "minecraft:cobblestone"
-      ]
-    }
-  }
-}
+YOGDcommentùThe six materials a workbench stores: what its slot for each takes (an
+item, or `#` a tag of them â€” Yog's common tags take every mod's â€” and how
+many units it's worth), how many units one of the resource is (`unit`:
+metals count nuggets, an ingot 9), and the ids that are it in a design
+(`*` any run of letters).	kindtableidresourceserdecolumns	name	textinputs{string: u64}	unitu64	base[string]	rowsredstone5@Strings.resource_redstone'#yog:dusts/redstone9#yog:storage_blocks/redstone%minecraft:redstone/minecraft:redstone_wire	iron-@Strings.resource_iron##yog:nuggets/iron!#yog:ingots/iron1#yog:storage_blocks/iron¢)minecraft:iron_ingot	gold-@Strings.resource_gold##yog:nuggets/gold!#yog:ingots/gold1#yog:storage_blocks/gold¢)minecraft:gold_ingotquartz1@Strings.resource_quartz!#yog:gems/quartz5#yog:storage_blocks/quartz!minecraft:quartz	wood-@Strings.resource_wood#yog:logsminecraft:*_log!minecraft:*_wood!minecraft:*_stem%minecraft:*_hyphaestone/@Strings.resource_stone##yog:cobblestones#yog:stones+minecraft:cobblestone

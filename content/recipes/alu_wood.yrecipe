@@ -1,15 +1,1 @@
-{
-  "type": "shaped",
-  "pattern": [
-    "GCG",
-    "CRC",
-    "GDG"
-  ],
-  "key": {
-    "G": "@tag:item:yog:planks",
-    "C": "@tag:item:yog:ingots/copper",
-    "R": "@item:minecraft:repeater",
-    "D": "@tag:item:yog:storage_blocks/redstone"
-  },
-  "result": "@item:yog-vlsi:alu_wood"
-}
+YOGD	typeshapedpatternGCGCRCGDGkeyG)@tag:item:yog:planksC7@tag:item:yog:ingots/copperR1@item:minecraft:repeaterDK@tag:item:yog:storage_blocks/redstoneresult/@item:yog-vlsi:alu_wood

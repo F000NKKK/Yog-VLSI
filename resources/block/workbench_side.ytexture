@@ -1,4 +1,1 @@
-{
-  image: "@BlockImages.block.workbench_side",
-  atlas: "minecraft:blocks",
-}
+YOGDimageC@BlockImages.block.workbench_sideatlas!minecraft:blocks

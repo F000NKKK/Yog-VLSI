@@ -1,19 +1,1 @@
-{
-  "name": "@Strings.block.redstone_port",
-  "tooltip": "@Strings.block.redstone_port.desc",
-  "block": {
-    "hardness": 2,
-    "resistance": 6,
-    "sound": "stone",
-    "redstone": true,
-    "connect_groups": [
-      "analog"
-    ]
-  },
-  "model": {
-    "parent": "cube_all",
-    "textures": {
-      "all": "@texture:yog-vlsi:block/redstone_port"
-    }
-  }
-}
+YOGD	name9@Strings.block.redstone_porttooltipC@Strings.block.redstone_port.descblockhardnessresistancesoundstoneredstoneconnect_groupsanalogmodelparentcube_alltexturesallK@texture:yog-vlsi:block/redstone_port

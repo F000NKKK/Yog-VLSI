@@ -1,26 +1,2 @@
-{
-  "name": "@Strings.block.alu_iron",
-  "tooltip": "@Strings.block.alu_iron.desc",
-  "tags": ["alus"],
-  "block": {
-    "hardness": 5,
-    "resistance": 12,
-    "sound": "metal",
-    "light": 7,
-    "tool": "pickaxe",
-    "requires_tool": true,
-    "inventory": "yog-vlsi:alu",
-    "connect_groups": [
-      "analog",
-      "digital"
-    ]
-  },
-  "model": {
-    "parent": "cube_bottom_top",
-    "textures": {
-      "top": "@texture:yog-vlsi:block/alu_top_iron",
-      "bottom": "@texture:yog-vlsi:block/alu_top_iron",
-      "side": "@texture:yog-vlsi:block/alu_side_iron"
-    }
-  }
-}
+YOGD	name/@Strings.block.alu_irontooltip9@Strings.block.alu_iron.desc	tags	alusblockhardness
+resistancesoundmetallight	toolpickaxerequires_toolinventoryyog-vlsi:aluconnect_groupsanalogdigitalmodelparentcube_bottom_toptexturestopI@texture:yog-vlsi:block/alu_top_ironbottom2	sideK@texture:yog-vlsi:block/alu_side_iron

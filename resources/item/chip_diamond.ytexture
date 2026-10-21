@@ -1,4 +1,1 @@
-{
-  image: "@ItemImages.item.chip_diamond",
-  atlas: "minecraft:blocks",
-}
+YOGDimage;@ItemImages.item.chip_diamondatlas!minecraft:blocks

@@ -1,14 +1,1 @@
-{
-  "type": "shaped",
-  "pattern": [
-    " R ",
-    "RSR",
-    " R "
-  ],
-  "key": {
-    "R": "@tag:item:yog:dusts/redstone",
-    "S": "@item:minecraft:stone"
-  },
-  "result": "@item:yog-vlsi:port_input",
-  "count": 2
-}
+YOGD	typeshapedpattern R RSRkeyR9@tag:item:yog:dusts/redstoneS+@item:minecraft:stoneresult3@item:yog-vlsi:port_inputcount

@@ -1,15 +1,1 @@
-{
-  "type": "shaped",
-  "pattern": [
-    "GGG",
-    "GLG",
-    "SCS"
-  ],
-  "key": {
-    "G": "@tag:item:yog:glass_panes/colorless",
-    "L": "@item:minecraft:redstone_lamp",
-    "S": "@item:minecraft:smooth_stone",
-    "C": "@item:yog-vlsi:digital_cable"
-  },
-  "result": "@item:yog-vlsi:display"
-}
+YOGD	typeshapedpatternGGGGLGSCSkeyGG@tag:item:yog:glass_panes/colorlessL;@item:minecraft:redstone_lampS9@item:minecraft:smooth_stoneC9@item:yog-vlsi:digital_cableresult-@item:yog-vlsi:display

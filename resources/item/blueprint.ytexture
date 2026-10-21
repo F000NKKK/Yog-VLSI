@@ -1,4 +1,1 @@
-{
-  image: "@ItemImages.item.blueprint",
-  atlas: "minecraft:blocks",
-}
+YOGDimage5@ItemImages.item.blueprintatlas!minecraft:blocks

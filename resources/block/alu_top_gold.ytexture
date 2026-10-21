@@ -1,4 +1,1 @@
-{
-  image: "@BlockImages.block.alu_top_gold",
-  atlas: "minecraft:blocks",
-}
+YOGDimage?@BlockImages.block.alu_top_goldatlas!minecraft:blocks

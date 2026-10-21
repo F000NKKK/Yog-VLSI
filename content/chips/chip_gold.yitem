@@ -1,14 +1,1 @@
-{
-  "name": "@Strings.item.chip_gold",
-  "tooltip": "@Strings.item.chip_gold.desc",
-  "tags": ["chips"],
-  "item": {
-    "stack_size": 1
-  },
-  "model": {
-    "parent": "generated",
-    "textures": {
-      "layer0": "@texture:yog-vlsi:item/chip_gold"
-    }
-  }
-}
+YOGD	name/@Strings.item.chip_goldtooltip9@Strings.item.chip_gold.desc	tagschips	itemstack_sizemodelparentgeneratedtextureslayer0A@texture:yog-vlsi:item/chip_gold

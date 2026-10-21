@@ -1,13 +1,1 @@
-{
-  "type": "shaped",
-  "pattern": [
-    "SSS",
-    "SRS",
-    "SSS"
-  ],
-  "key": {
-    "S": "@item:minecraft:smooth_stone",
-    "R": "@tag:item:yog:dusts/redstone"
-  },
-  "result": "@item:yog-vlsi:redstone_port"
-}
+YOGD	typeshapedpatternSSSSRSkeyS9@item:minecraft:smooth_stoneR9@tag:item:yog:dusts/redstoneresult9@item:yog-vlsi:redstone_port

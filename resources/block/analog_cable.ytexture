@@ -1,4 +1,1 @@
-{
-  image: "@BlockImages.block.analog_cable",
-  atlas: "minecraft:blocks",
-}
+YOGDimage?@BlockImages.block.analog_cableatlas!minecraft:blocks

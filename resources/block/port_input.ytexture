@@ -1,4 +1,1 @@
-{
-  image: "@BlockImages.block.port_input",
-  atlas: "minecraft:blocks",
-}
+YOGDimage;@BlockImages.block.port_inputatlas!minecraft:blocks
