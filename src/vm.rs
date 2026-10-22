@@ -54,11 +54,11 @@
 //!   being powered. A comparator reads a container's fill behind it, or
 //!   behind the solid block behind it.
 //!
-//! Self-contained (std + serde only) so `benches/` can build it alone.
+//! Self-contained (std and the Yog Data derive only) so `benches/` can build it alone.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use serde::{Deserialize, Serialize};
+use yog_api::Schema;
 
 /// A map keyed by cell index, hashed fast.
 type CellMap<V> = HashMap<u32, V, std::hash::BuildHasherDefault<Fnv>>;
@@ -320,7 +320,7 @@ impl Facing {
 }
 
 /// Direction of a chip I/O port (DESIGN.md §4.5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Schema)]
 pub enum PortMode {
     Input,
     Output,
@@ -1398,7 +1398,7 @@ impl RedstoneVM {
                 }
             }
             for (f, ch) in alu.sinks.iter().filter_map(|p| match *p {
-                NestedPin::Bus(f, ch) => Some((f, ch)),
+                NestedPin::Bus { side: f, channel: ch } => Some((f, ch)),
                 _ => None,
             }) {
                 if let Some(r) = runs[f as usize % 6] {
@@ -1991,12 +1991,12 @@ impl RedstoneVM {
 /// (`Out`), by its index in N S E W U D, a chip's port by its slot and
 /// label, or a channel (0-based) of the bus on a side — read as a source,
 /// driven as a sink.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Schema)]
 pub enum NestedPin {
     In(u8),
     Out(u8),
-    Chip(u8, String),
-    Bus(u8, u16),
+    Chip { slot: u8, label: String },
+    Bus { side: u8, channel: u16 },
 }
 
 /// A port of a chip in a nested ALU.
@@ -2131,7 +2131,7 @@ impl NestedAlu {
         let mut reads: Vec<(u8, u16)> = wires
             .iter()
             .filter_map(|(f, _)| match *f {
-                NestedPin::Bus(face, ch) => Some((face, ch)),
+                NestedPin::Bus { side: face, channel: ch } => Some((face, ch)),
                 _ => None,
             })
             .collect();
@@ -2146,7 +2146,7 @@ impl NestedAlu {
             at.insert(NestedPin::In(f), f as usize);
         }
         for (k, &(f, ch)) in reads.iter().enumerate() {
-            at.insert(NestedPin::Bus(f, ch), 6 + k);
+            at.insert(NestedPin::Bus { side: f, channel: ch }, 6 + k);
         }
         let mut board = Board {
             size: 6 + reads.len(),
@@ -2158,7 +2158,7 @@ impl NestedAlu {
                 .iter()
                 .filter(|p| p.mode.outputs())
                 .map(|p| {
-                    at.insert(NestedPin::Chip(c.slot, p.label.clone()), board.size);
+                    at.insert(NestedPin::Chip { slot: c.slot, label: p.label.clone() }, board.size);
                     board.size += 1;
                     board.size - 1
                 })
@@ -2174,7 +2174,7 @@ impl NestedAlu {
                 c.ports
                     .iter()
                     .filter(|p| p.mode.inputs())
-                    .map(|p| from.get(&NestedPin::Chip(c.slot, p.label.clone())).copied())
+                    .map(|p| from.get(&NestedPin::Chip { slot: c.slot, label: p.label.clone() }).copied())
                     .collect(),
             );
         }
@@ -2190,7 +2190,7 @@ impl NestedAlu {
         board.drives = wires
             .iter()
             .filter_map(|(_, t)| match *t {
-                NestedPin::Bus(f, ch) => Some(((f, ch), from.get(t).copied())),
+                NestedPin::Bus { side: f, channel: ch } => Some(((f, ch), from.get(t).copied())),
                 _ => None,
             })
             .collect();
@@ -2978,10 +2978,10 @@ mod tests {
         let wires = vec![
             (
                 NestedPin::In(Facing::West.index() as u8),
-                NestedPin::Chip(0, "IN".into()),
+                NestedPin::Chip { slot: 0, label: "IN".into() },
             ),
             (
-                NestedPin::Chip(0, "OUT".into()),
+                NestedPin::Chip { slot: 0, label: "OUT".into() },
                 NestedPin::Out(Facing::East.index() as u8),
             ),
         ];
@@ -3008,10 +3008,10 @@ mod tests {
         let wires = vec![
             (
                 NestedPin::In(Facing::West.index() as u8),
-                NestedPin::Chip(0, "IN".into()),
+                NestedPin::Chip { slot: 0, label: "IN".into() },
             ),
             (
-                NestedPin::Chip(0, "OUT".into()),
+                NestedPin::Chip { slot: 0, label: "OUT".into() },
                 NestedPin::Out(Facing::East.index() as u8),
             ),
         ];
@@ -3058,11 +3058,11 @@ mod tests {
             2,
             0,
             0,
-            NestedAlu::new(Vec::new(), vec![(NestedPin::In(w), NestedPin::Bus(e, 3))]),
+            NestedAlu::new(Vec::new(), vec![(NestedPin::In(w), NestedPin::Bus { side: e, channel: 3 })]),
         );
         let wires = vec![
-            (NestedPin::Bus(w, 3), NestedPin::Chip(0, "IN".into())),
-            (NestedPin::Chip(0, "OUT".into()), NestedPin::Out(e)),
+            (NestedPin::Bus { side: w, channel: 3 }, NestedPin::Chip { slot: 0, label: "IN".into() }),
+            (NestedPin::Chip { slot: 0, label: "OUT".into() }, NestedPin::Out(e)),
         ];
         vm.set_nested(5, 0, 0, NestedAlu::new(vec![not_chip(8)], wires));
         let run = |vm: &mut RedstoneVM| {

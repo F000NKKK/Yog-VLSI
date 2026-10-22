@@ -18,8 +18,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 
-use serde::{Deserialize, Serialize};
-use yog_api::{BlockPos, EventPhase, Registry, Storage, warn};
+use yog_api::Schema;
+use yog_api::{BlockPos, EventPhase, Registry, warn};
 use yog_pipes::{
     AttachDef, CapabilityDef, Distribution, EndpointDef, EndpointTarget, Mechanic, PipePos,
 };
@@ -42,7 +42,7 @@ const SIDE_CHANNEL: u8 = 0;
 pub const BUS_CHANNELS: u16 = 256;
 
 /// A Redstone Port.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Schema)]
 pub struct RedstonePort {
     /// `true`: the cable's level comes out as redstone; `false`: the
     /// redstone it receives goes into the cable.
@@ -50,7 +50,7 @@ pub struct RedstonePort {
     pub name: String,
     /// A bus channel (from 1): it joins that channel of a digital cable;
     /// 0, an analog cable.
-    #[serde(default)]
+    #[data(default)]
     pub channel: u16,
 }
 
@@ -471,20 +471,12 @@ pub fn refresh_around(dim: &str, pos: BlockPos) {
     }
 }
 
-const STORE_FILE: &str = "yog-vlsi/redstone_ports";
-const STORE_KEY: &str = "ports";
+/// Where it's kept in the world store.
+const STORE_KEY: &str = "redstone_ports";
 
 pub fn load() {
     register_networks();
-    let store = Storage::open(
-        &yog_api::event::game::world_dir().unwrap_or_default(),
-        STORE_FILE,
-    );
-    let saved: Vec<(Key, RedstonePort)> = store
-        .get(STORE_KEY)
-        .and_then(|v| v.as_str())
-        .and_then(|j| serde_json::from_str(j).ok())
-        .unwrap_or_default();
+    let saved: Vec<(Key, RedstonePort)> = crate::saved::load(STORE_KEY);
     *PORTS.lock().unwrap() = saved.into_iter().collect();
 }
 
@@ -495,14 +487,7 @@ pub fn save() {
         .iter()
         .map(|(k, p)| (k.clone(), p.clone()))
         .collect();
-    if let Ok(json) = serde_json::to_string(&ports) {
-        let mut store = Storage::open(
-            &yog_api::event::game::world_dir().unwrap_or_default(),
-            STORE_FILE,
-        );
-        store.set(STORE_KEY, &*json);
-        let _ = store.flush();
-    }
+    crate::saved::save(STORE_KEY, &ports);
 }
 
 pub fn register(registry: &mut Registry) {

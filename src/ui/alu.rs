@@ -1195,7 +1195,7 @@ pub fn setup(registry: &mut Registry) {
     SURFACE.call_once(|| yog_api::ui::surface::register(SURFACE_ID, Arc::new(GraphSurface)));
 
     registry.on_client_packet(board::VIEW_CHANNEL, move |ev| {
-        let Ok(view) = serde_json::from_slice::<BoardView>(&ev.payload) else {
+        let Ok(view) = yog_api::yog_data::read_bytes::<BoardView>(&ev.payload) else {
             return;
         };
         {
@@ -1433,29 +1433,35 @@ mod tests {
     /// from a `.yres` (`LANG`), measured as the game's font would be.
     struct Recorder(std::cell::RefCell<Vec<String>>, HashMap<String, String>);
 
+    /// What follows a translation key's namespace.
+    const KEY_SEP: char = '.';
+
     impl Recorder {
         fn new() -> Self {
             let mut lang = HashMap::new();
             if let Ok(path) = std::env::var("LANG_YRES")
                 && let Ok(text) = std::fs::read_to_string(path)
-                && let Ok(serde_json::Value::Object(map)) =
-                    serde_json::from_str::<serde_json::Value>(&text)
+                && let Ok(doc) = yog_api::yog_data::text::parse(&text)
+                && let Some(map) = doc.value.as_map()
             {
-                for (k, v) in map {
+                for (k, v) in map.iter() {
+                    let k = k.to_string();
                     let v = v
                         .as_str()
                         .map(str::to_string)
-                        .or_else(|| v.get("value").and_then(|v| v.as_str()).map(str::to_string));
+                        .or_else(|| v.get(yog_api::yog_ids::word::VALUE).and_then(|v| v.as_str()).map(str::to_string));
                     if let Some(v) = v {
-                        lang.insert(format!("{}.{k}", crate::MOD_ID), v);
+                        lang.insert(k, v);
                     }
                 }
             }
             Recorder(Default::default(), lang)
         }
         fn shown(&self, text: &str) -> String {
+            // A key's name after the mod's namespace (`<mod>.status.idle`).
+            let name = text.split_once(KEY_SEP).map_or(text, |(_, name)| name);
             self.1
-                .get(text)
+                .get(name)
                 .cloned()
                 .unwrap_or_else(|| text.to_string())
         }
@@ -1486,8 +1492,8 @@ mod tests {
         let pin = |p: &crate::vm::NestedPin| match p {
             crate::vm::NestedPin::In(i) => Pin::new(Node::In, board::SIDES[*i as usize]),
             crate::vm::NestedPin::Out(i) => Pin::new(Node::Out, board::SIDES[*i as usize]),
-            crate::vm::NestedPin::Chip(slot, name) => Pin::new(Node::Chip(*slot), name.as_str()),
-            crate::vm::NestedPin::Bus(i, ch) => Pin::new(Node::Bus(*i), (ch + 1).to_string()),
+            crate::vm::NestedPin::Chip { slot, label } => Pin::new(Node::Chip(*slot), label.as_str()),
+            crate::vm::NestedPin::Bus { side, channel } => Pin::new(Node::Bus(*side), (channel + 1).to_string()),
         };
         let outs: Vec<&str> = alu
             .wires

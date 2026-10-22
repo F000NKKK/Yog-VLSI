@@ -1,8 +1,41 @@
-//! JSON payloads stored in item / block-entity NBT as one SNBT string tag.
+//! The mod's data in item / block-entity NBT: one SNBT string tag holding
+//! it as Yog Data — binary, base64, deflated first when it's long.
 //!
-//! The loader hands NBT around as SNBT text; this mod keeps its structured
-//! data (chip metadata, blueprints, port labels) as a JSON string under one
-//! tag, so only that tag needs (un)escaping — no general SNBT parser.
+//! The loader hands NBT around as SNBT text; only that tag needs
+//! (un)escaping — no general SNBT parser.
+
+use base64::Engine as _;
+use yog_api::Schema;
+
+/// Longer than this (bytes), a value is deflated: an NBT string holds at most 64 KiB.
+const PACK_OVER: usize = 20_000;
+/// What a deflated value starts with.
+pub(crate) const PACKED: &str = "z:";
+/// How hard it's deflated.
+const DEFLATE_LEVEL: u8 = 9;
+const BASE64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
+
+/// `{<tag>:"<value as Yog Data>"}`.
+pub fn wrap_data<T: Schema>(tag: &str, value: &T) -> String {
+    let bytes = yog_api::yog_data::to_bytes(value);
+    let text = if bytes.len() > PACK_OVER {
+        let packed = miniz_oxide::deflate::compress_to_vec(&bytes, DEFLATE_LEVEL);
+        format!("{PACKED}{}", BASE64.encode(packed))
+    } else {
+        BASE64.encode(bytes)
+    };
+    wrap(tag, &text)
+}
+
+/// The value [`wrap_data`] put under `tag` in `snbt`, if it's there and reads as `T`.
+pub fn read_data<T: Schema>(snbt: &str, tag: &str) -> Option<T> {
+    let text = read(snbt, tag)?;
+    let bytes = match text.strip_prefix(PACKED) {
+        Some(packed) => miniz_oxide::inflate::decompress_to_vec(&BASE64.decode(packed).ok()?).ok()?,
+        None => BASE64.decode(&text).ok()?,
+    };
+    yog_api::yog_data::read_bytes(&bytes).ok()
+}
 
 /// `{<tag>:"<escaped value>"}`.
 pub fn wrap(tag: &str, value: &str) -> String {
@@ -143,10 +176,13 @@ mod tests {
     }
 
     #[test]
-    fn round_trips_json() {
-        let json = r#"{"name":"a \"q\" \\ b","n":1}"#;
-        let snbt = wrap("Tag", json);
-        assert_eq!(read(&snbt, "Tag").as_deref(), Some(json));
+    fn round_trips_data_short_and_long() {
+        let short = vec!["a \"q\" \\ b".to_owned()];
+        assert_eq!(read_data::<Vec<String>>(&wrap_data("Tag", &short), "Tag"), Some(short));
+        let long: Vec<String> = (0..5000).map(|i| format!("wire {i}")).collect();
+        let snbt = wrap_data("Tag", &long);
+        assert!(snbt.contains(PACKED));
+        assert_eq!(read_data::<Vec<String>>(&snbt, "Tag"), Some(long));
     }
 
     #[test]

@@ -1,2 +1,8 @@
-YOGD	kindtableid	tierserdecolumns	name	textsteps_per_ticku32world_sizemax_chipsusize!digital_channels	chip	itemalublock	rows	wood%@Strings.tier_wood 1@item:yog-vlsi:chip_wood 1@block:yog-vlsi:alu_woodstone'@Strings.tier_stone@@ 3@item:yog-vlsi:chip_stone 3@block:yog-vlsi:alu_stone	gold%@Strings.tier_gold€€01@item:yog-vlsi:chip_gold 1@block:yog-vlsi:alu_gold	iron%@Strings.tier_iron€€
-@1@item:yog-vlsi:chip_iron 1@block:yog-vlsi:alu_irondiamond+@Strings.tier_diamond€@€`7@item:yog-vlsi:chip_diamond 7@block:yog-vlsi:alu_diamondnetherite/@Strings.tier_netherite€€€€;@item:yog-vlsi:chip_netherite ;@block:yog-vlsi:alu_netherite
+YOGD	kindtableid	tiercolumns	name	textsteps_per_ticku32world_sizemax_chipsusize!digital_channels	chip	itemalublock	rows	wood
+%@Strings.tier_wood 1@item:yog-vlsi:chip_wood1@block:yog-vlsi:alu_woodstone
+'@Strings.tier_stone@@ 3@item:yog-vlsi:chip_stone3@block:yog-vlsi:alu_stone	gold
+%@Strings.tier_gold€€01@item:yog-vlsi:chip_gold1@block:yog-vlsi:alu_gold	iron
+%@Strings.tier_iron€€
+@1@item:yog-vlsi:chip_iron1@block:yog-vlsi:alu_irondiamond
++@Strings.tier_diamond€@€`7@item:yog-vlsi:chip_diamond7@block:yog-vlsi:alu_diamondnetherite
+/@Strings.tier_netherite€€€€;@item:yog-vlsi:chip_netherite;@block:yog-vlsi:alu_netherite

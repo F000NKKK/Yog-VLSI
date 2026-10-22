@@ -15,7 +15,7 @@
 //!
 //! Colors are RGB332 bytes (`rrrgggbb`). Turns are in 256ths of a turn.
 
-use serde::{Deserialize, Serialize};
+use yog_api::Schema;
 
 /// The widest and tallest a screen can be, in pixels.
 pub const MAX_SIZE: u16 = 1024;
@@ -99,7 +99,7 @@ pub mod mode {
 }
 
 /// A mesh drawn with a transform.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Schema)]
 pub struct Draw {
     pub mode: u16,
     pub color: u8,
@@ -112,7 +112,7 @@ pub struct Draw {
 }
 
 /// One thing drawn into a frame.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Schema)]
 pub enum Op {
     Clear {
         color: u8,
@@ -133,8 +133,8 @@ pub enum Op {
 }
 
 /// The GPU's state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Schema)]
+#[data(default)]
 pub struct Gpu {
     pub regs: Vec<u16>,
     /// A high byte waiting for the next write.
@@ -187,7 +187,7 @@ impl Gpu {
     }
 
     /// `REG ← DATA`: a byte off the bus.
-    pub fn write(&mut self, r: u8, data: u8) {
+    pub fn write_register(&mut self, r: u8, data: u8) {
         if r == reg::HIGH {
             self.high = Some(data);
             return;
@@ -530,7 +530,7 @@ mod tests {
     }
 
     fn cube(g: &mut Gpu, half: i8) {
-        g.write(reg::VPTR, 0);
+        g.write_register(reg::VPTR, 0);
         for v in [
             [-1, -1, -1],
             [1, -1, -1],
@@ -542,10 +542,10 @@ mod tests {
             [-1, 1, 1],
         ] {
             for c in v {
-                g.write(reg::VDATA, (c * half) as u8);
+                g.write_register(reg::VDATA, (c * half) as u8);
             }
         }
-        g.write(reg::IPTR, 0);
+        g.write_register(reg::IPTR, 0);
         // Counter-clockwise seen from outside.
         let faces = [
             [4, 5, 6],
@@ -563,33 +563,33 @@ mod tests {
         ];
         for f in faces {
             for i in f {
-                g.write(reg::IDATA, i);
+                g.write_register(reg::IDATA, i);
             }
         }
-        g.write(reg::COUNT, 36);
+        g.write_register(reg::COUNT, 36);
     }
 
     fn frame(g: &mut Gpu) {
-        g.write(reg::CMD, cmd::CLEAR as u8);
-        g.write(reg::CMD, cmd::DRAW as u8);
-        g.write(reg::CMD, cmd::SWAP as u8);
+        g.write_register(reg::CMD, cmd::CLEAR as u8);
+        g.write_register(reg::CMD, cmd::DRAW as u8);
+        g.write_register(reg::CMD, cmd::SWAP as u8);
     }
 
     #[test]
     fn a_pixel_and_a_line_land_where_asked() {
         let mut g = Gpu::default();
-        g.write(reg::BG, 0b000_000_01);
-        g.write(reg::CMD, cmd::CLEAR as u8);
-        g.write(reg::COLOR, 0b111_000_00);
-        g.write(reg::X, 10);
-        g.write(reg::Y, 20);
-        g.write(reg::CMD, cmd::PIXEL as u8);
-        g.write(reg::X2, 50);
-        g.write(reg::Y2, 20);
-        g.write(reg::CMD, cmd::LINE as u8);
+        g.write_register(reg::BG, 0b000_000_01);
+        g.write_register(reg::CMD, cmd::CLEAR as u8);
+        g.write_register(reg::COLOR, 0b111_000_00);
+        g.write_register(reg::X, 10);
+        g.write_register(reg::Y, 20);
+        g.write_register(reg::CMD, cmd::PIXEL as u8);
+        g.write_register(reg::X2, 50);
+        g.write_register(reg::Y2, 20);
+        g.write_register(reg::CMD, cmd::LINE as u8);
         // Not shown till SWAP.
         assert_eq!(g.front, blank());
-        g.write(reg::CMD, cmd::SWAP as u8);
+        g.write_register(reg::CMD, cmd::SWAP as u8);
         let img = render(&g.front, 0.0);
         assert_eq!(px(&img, 10, 20), [255, 0, 0, 255]);
         assert_eq!(px(&img, 30, 20), [255, 0, 0, 255]);
@@ -605,20 +605,20 @@ mod tests {
             (reg::X, 1000),
             (reg::Y, 590),
         ] {
-            g.write(reg::HIGH, (v >> 8) as u8);
-            g.write(r, v as u8);
+            g.write_register(reg::HIGH, (v >> 8) as u8);
+            g.write_register(r, v as u8);
         }
-        g.write(reg::CMD, cmd::CLEAR as u8);
-        g.write(reg::CMD, cmd::PIXEL as u8);
-        g.write(reg::CMD, cmd::SWAP as u8);
+        g.write_register(reg::CMD, cmd::CLEAR as u8);
+        g.write_register(reg::CMD, cmd::PIXEL as u8);
+        g.write_register(reg::CMD, cmd::SWAP as u8);
         let img = render(&g.front, 0.0);
         assert_eq!((img.0, img.1, img.2.len()), (1024, 600, 1024 * 600 * 4));
         assert_eq!(px(&img, 1000, 590), [255, 255, 255, 255]);
         // A byte alone: small and, for a coordinate, signed.
-        g.write(reg::VPTR, 0);
-        g.write(reg::VDATA, -100i8 as u8);
-        g.write(reg::HIGH, 0x12);
-        g.write(reg::VDATA, 0x34);
+        g.write_register(reg::VPTR, 0);
+        g.write_register(reg::VDATA, -100i8 as u8);
+        g.write_register(reg::HIGH, 0x12);
+        g.write_register(reg::VDATA, 0x34);
         assert_eq!(&g.vertices[0][..2], &[-100, 0x1234]);
         assert_eq!(g.regs[reg::X as usize], 1000);
     }
@@ -627,8 +627,8 @@ mod tests {
     fn a_cube_of_faces_covers_the_middle_and_hides_its_back() {
         let mut g = Gpu::default();
         cube(&mut g, 40);
-        g.write(reg::MODE, mode::FACES as u8);
-        g.write(reg::COLOR, 0b111_111_11);
+        g.write_register(reg::MODE, mode::FACES as u8);
+        g.write_register(reg::COLOR, 0b111_111_11);
         frame(&mut g);
         let Op::Draw(d) = &g.front[1] else { panic!() };
         assert_eq!((d.vertices.len(), d.indices.len()), (8, 36));
@@ -638,7 +638,7 @@ mod tests {
         assert!(mid[0] > 100 && mid == px(&img, 140, 110), "{mid:?}");
         assert_eq!(px(&img, 5, 5), [0, 0, 0, 255]);
         // Turned an eighth about y, two faces show, lit differently.
-        g.write(reg::YAW, 32);
+        g.write_register(reg::YAW, 32);
         frame(&mut g);
         let img = render(&g.front, 0.0);
         assert_ne!(px(&img, 108, 128), px(&img, 148, 128));
@@ -648,8 +648,8 @@ mod tests {
     fn spin_turns_the_shown_frame_and_the_registers() {
         let mut g = Gpu::default();
         cube(&mut g, 40);
-        g.write(reg::MODE, mode::WIRE as u8);
-        g.write(reg::SPIN_YAW, 4);
+        g.write_register(reg::MODE, mode::WIRE as u8);
+        g.write_register(reg::SPIN_YAW, 4);
         frame(&mut g);
         assert_ne!(render(&g.front, 0.0), render(&g.front, 3.0));
         // 64 ticks of 4: a full turn, the cube as it was.
@@ -657,7 +657,7 @@ mod tests {
         g.tick();
         assert_eq!(g.regs[reg::YAW as usize], 4);
         // A negative spin turns back.
-        g.write(reg::SPIN_YAW, -4i8 as u8);
+        g.write_register(reg::SPIN_YAW, -4i8 as u8);
         g.tick();
         assert_eq!(g.regs[reg::YAW as usize], 0);
     }
@@ -665,17 +665,17 @@ mod tests {
     #[test]
     fn the_buffers_fill_in_order_and_wrap() {
         let mut g = Gpu::default();
-        g.write(reg::HIGH, 0x0F);
-        g.write(reg::VPTR, 0xFF);
+        g.write_register(reg::HIGH, 0x0F);
+        g.write_register(reg::VPTR, 0xFF);
         for c in [1, 2, 3, 4] {
-            g.write(reg::VDATA, c);
+            g.write_register(reg::VDATA, c);
         }
         assert_eq!(g.vertices[BUFFER - 1], [1, 2, 3]);
         assert_eq!(g.vertices[0], [4, 0, 0]);
-        g.write(reg::HIGH, 0x0F);
-        g.write(reg::IPTR, 0xFE);
+        g.write_register(reg::HIGH, 0x0F);
+        g.write_register(reg::IPTR, 0xFE);
         for i in [7, 8, 9] {
-            g.write(reg::IDATA, i);
+            g.write_register(reg::IDATA, i);
         }
         assert_eq!(
             (g.indices[BUFFER - 2], g.indices[BUFFER - 1], g.indices[0]),
@@ -691,11 +691,13 @@ mod tests {
             return;
         };
         let writes: Vec<(u8, u8)> =
-            serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+            yog_api::yog_data::from_text(&std::fs::read_to_string(file).unwrap())
+                .unwrap()
+                .value;
         let mut g = Gpu::default();
         for (r, d) in writes {
             let shown = g.version;
-            g.write(r, d);
+            g.write_register(r, d);
             if g.version != shown {
                 let (w, h, img) = render(&g.front, 10.0);
                 let rgb: Vec<u8> = img
@@ -721,10 +723,10 @@ mod tests {
         ] {
             let mut g = Gpu::default();
             cube(&mut g, 30);
-            g.write(reg::MODE, m as u8);
-            g.write(reg::COLOR, color);
-            g.write(reg::YAW, 20);
-            g.write(reg::PITCH, 18);
+            g.write_register(reg::MODE, m as u8);
+            g.write_register(reg::COLOR, color);
+            g.write_register(reg::YAW, 20);
+            g.write_register(reg::PITCH, 18);
             frame(&mut g);
             let (w, h, img) = render(&g.front, 0.0);
             let rgb: Vec<u8> = img

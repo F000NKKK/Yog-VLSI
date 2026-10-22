@@ -26,8 +26,8 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use serde::{Deserialize, Serialize};
-use yog_api::{BlockPos, EventPhase, Registry, Storage};
+use yog_api::Schema;
+use yog_api::{BlockPos, EventPhase, Registry};
 
 use crate::cables;
 use crate::chip::{ChipMeta, CircuitData};
@@ -49,7 +49,7 @@ const SYNC_EVERY: u64 = 10;
 /// How often watchers are sent what changed, in server ticks.
 const SEND_EVERY: u64 = 4;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Schema)]
 pub struct AluId {
     pub dimension: String,
     pub x: i32,
@@ -71,7 +71,7 @@ impl AluId {
 }
 
 /// A node of the graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Schema)]
 pub enum Node {
     In,
     Out,
@@ -81,7 +81,7 @@ pub enum Node {
 }
 
 /// A pin: a side of `In`/`Out` (`"N"`, …) or a chip's port label.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Schema)]
 pub struct Pin {
     pub node: Node,
     pub name: String,
@@ -96,24 +96,24 @@ impl Pin {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Schema)]
 pub struct Wire {
     pub from: Pin,
     pub to: Pin,
 }
 
 /// What's saved of a board.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Schema)]
 struct Saved {
     tier: Tier,
     wires: Vec<Wire>,
     /// Where the player put each chip slot's node.
     layout: Vec<(u8, (f32, f32))>,
     /// Where the player put the In and Out panels (and the buses).
-    #[serde(default)]
+    #[data(default)]
     panels: Vec<(Node, (f32, f32))>,
     /// How many channel rows each bus node shows, by side.
-    #[serde(default)]
+    #[data(default)]
     bus_rows: Vec<(u8, u16)>,
 }
 
@@ -300,14 +300,10 @@ impl Board {
             match meta {
                 Some(meta) if entry.as_ref().is_some_and(|c| c.meta.id == meta.id) => {}
                 Some(meta) => {
-                    let circuit = CircuitData::load_for_chip(
-                        &yog_api::event::game::world_dir().unwrap_or_default(),
-                        &meta.id,
-                    )
-                    .unwrap_or_else(|| CircuitData::empty(meta.tier));
+                    let circuit = CircuitData::load_for_chip(&meta.id)
+                        .unwrap_or_else(|| CircuitData::empty(meta.tier));
                     // Its ALUs run inside it, their chips' circuits from the store.
-                    let world_dir = yog_api::event::game::world_dir().unwrap_or_default();
-                    let vm = circuit.vm_with(&|id| CircuitData::load_for_chip(&world_dir, id), 1);
+                    let vm = circuit.vm_with(&CircuitData::load_for_chip, 1);
                     *entry = Some(Installed::new(meta, circuit, vm));
                 }
                 None => *entry = None,
@@ -522,7 +518,7 @@ impl Board {
 
 // ── What the screen gets and sends ──────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Schema)]
 pub struct ChipView {
     pub slot: u8,
     pub name: String,
@@ -532,7 +528,7 @@ pub struct ChipView {
     pub active: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Schema)]
 pub struct SideView {
     pub side: String,
     /// The Redstone Port at the other end of its cable.
@@ -542,7 +538,7 @@ pub struct SideView {
 
 /// A bus node: the side it's on, how many channels the tier sees, how
 /// many rows it shows.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Schema)]
 pub struct BusView {
     pub index: u8,
     pub side: String,
@@ -550,7 +546,7 @@ pub struct BusView {
     pub rows: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Schema)]
 pub struct BoardView {
     pub alu: AluId,
     pub tier: Tier,
@@ -563,7 +559,7 @@ pub struct BoardView {
     pub levels: Vec<(Pin, u8)>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Schema)]
 pub enum Request {
     Connect {
         alu: AluId,
@@ -605,9 +601,8 @@ impl Request {
 
 /// Sends `request` to the server (from the screen).
 pub fn send(request: &Request) {
-    if let Ok(json) = serde_json::to_string(request) {
-        yog_api::event::net::send_to_server(REQUEST_CHANNEL, json.into_bytes());
-    }
+    let bytes = yog_api::yog_data::to_bytes(request);
+    yog_api::event::net::send_to_server(REQUEST_CHANNEL, &bytes);
 }
 
 // ── The server side ──────────────────────────────────────────────────────────
@@ -624,9 +619,12 @@ fn nested_pin(pin: &Pin) -> Option<NestedPin> {
     Some(match pin.node {
         Node::In => NestedPin::In(side_index(&pin.name)?),
         Node::Out => NestedPin::Out(side_index(&pin.name)?),
-        Node::Chip(slot) => NestedPin::Chip(slot, pin.name.clone()),
+        Node::Chip(slot) => NestedPin::Chip { slot, label: pin.name.clone() },
         // A bus pin is its channel's number, from 1.
-        Node::Bus(side) => NestedPin::Bus(side, pin.name.parse::<u16>().ok()?.checked_sub(1)?),
+        Node::Bus(side) => NestedPin::Bus {
+            side,
+            channel: pin.name.parse::<u16>().ok()?.checked_sub(1)?,
+        },
     })
 }
 
@@ -653,8 +651,8 @@ pub fn restore(alu: AluId, tier: Tier, wires: &[(NestedPin, NestedPin)]) {
     let pin = |p: &NestedPin| match p {
         NestedPin::In(i) => Pin::new(Node::In, SIDES[*i as usize % 6]),
         NestedPin::Out(i) => Pin::new(Node::Out, SIDES[*i as usize % 6]),
-        NestedPin::Chip(slot, name) => Pin::new(Node::Chip(*slot), name.as_str()),
-        NestedPin::Bus(side, ch) => Pin::new(Node::Bus(*side), (ch + 1).to_string()),
+        NestedPin::Chip { slot, label } => Pin::new(Node::Chip(*slot), label.as_str()),
+        NestedPin::Bus { side, channel } => Pin::new(Node::Bus(*side), (channel + 1).to_string()),
     };
     let mut board = Board::new(tier);
     board.saved.wires = wires
@@ -739,27 +737,18 @@ fn send_views() {
         };
         let view = board.view(alu);
         if last.as_ref() != Some(&view) {
-            if let Ok(json) = serde_json::to_string(&view) {
-                yog_api::event::net::send_to_player(player, VIEW_CHANNEL, json.as_bytes());
-            }
+            let bytes = yog_api::yog_data::to_bytes(&view);
+            yog_api::event::net::send_to_player(player, VIEW_CHANNEL, &bytes);
             *last = Some(view);
         }
     }
 }
 
-const STORE_FILE: &str = "yog-vlsi/boards";
+/// Where it's kept in the world store.
 const STORE_KEY: &str = "boards";
 
 pub fn load() {
-    let store = Storage::open(
-        &yog_api::event::game::world_dir().unwrap_or_default(),
-        STORE_FILE,
-    );
-    let saved: Vec<(AluId, Saved)> = store
-        .get(STORE_KEY)
-        .and_then(|v| v.as_str())
-        .and_then(|j| serde_json::from_str(j).ok())
-        .unwrap_or_default();
+    let saved: Vec<(AluId, Saved)> = crate::saved::load(STORE_KEY);
     let mut boards = BOARDS.lock().unwrap();
     boards.clear();
     for (alu, saved) in saved {
@@ -777,14 +766,7 @@ pub fn save() {
         .iter()
         .map(|(k, b)| (k.clone(), b.saved.clone()))
         .collect();
-    if let Ok(json) = serde_json::to_string(&saved) {
-        let mut store = Storage::open(
-            &yog_api::event::game::world_dir().unwrap_or_default(),
-            STORE_FILE,
-        );
-        store.set(STORE_KEY, &*json);
-        let _ = store.flush();
-    }
+    crate::saved::save(STORE_KEY, &saved);
 }
 
 pub fn setup(registry: &mut Registry) {
@@ -833,7 +815,7 @@ pub fn setup(registry: &mut Registry) {
     });
 
     registry.on_packet(REQUEST_CHANNEL, |ev| {
-        let Ok(request) = serde_json::from_slice::<Request>(&ev.payload) else {
+        let Ok(request) = yog_api::yog_data::read_bytes::<Request>(&ev.payload) else {
             return;
         };
         let alu = request.alu().clone();

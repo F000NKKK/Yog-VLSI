@@ -20,8 +20,8 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use serde::{Deserialize, Serialize};
-use yog_api::{BlockPos, EventPhase, Registry, Storage};
+use yog_api::Schema;
+use yog_api::{BlockPos, EventPhase, Registry};
 
 use crate::cables;
 use crate::content::Blocks;
@@ -47,7 +47,7 @@ const RESEND_EVERY: u64 = 20;
 pub type Key = cables::Key;
 
 /// Which way a Display's picture faces: `N` `S` `E` `W`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Schema)]
 pub enum Facing {
     N,
     S,
@@ -55,7 +55,7 @@ pub enum Facing {
     W,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Schema)]
 pub struct Display {
     pub facing: Facing,
     /// The picture's side, in blocks.
@@ -63,14 +63,14 @@ pub struct Display {
     /// The first bus channel (from 1).
     pub channel: u16,
     /// TOGGLE as last taken.
-    #[serde(default)]
+    #[data(default)]
     toggle: bool,
-    #[serde(default)]
+    #[data(default)]
     gpu: Gpu,
     /// The tick what it shows was swapped in (not kept).
-    #[serde(skip)]
+    #[data(skip)]
     shown_at: u64,
-    #[serde(skip)]
+    #[data(skip)]
     shown_version: u64,
 }
 
@@ -99,7 +99,7 @@ static SENT: LazyLock<Mutex<HashMap<(String, Key), u64>>> = LazyLock::new(Defaul
 static TICKS: Mutex<u64> = Mutex::new(0);
 
 /// What a client is sent: a Display and what it shows.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Schema)]
 pub struct Frame {
     pub pos: (i32, i32, i32),
     pub facing: Facing,
@@ -266,7 +266,7 @@ pub fn tick() {
             if toggle != d.toggle {
                 let byte = |from: u16| (0..8).fold(0u8, |b, i| b | (u8::from(bit(from + i)) << i));
                 let (data, reg) = (byte(0), byte(8));
-                d.gpu.write(reg, data);
+                d.gpu.write_register(reg, data);
                 d.toggle = toggle;
             }
             cables::bus_drive_at(dim, pos, d.ch(ACK), if d.toggle { 15 } else { 0 });
@@ -320,9 +320,8 @@ fn send(n: u64) {
                 age: n.saturating_sub(d.shown_at),
                 ops: d.gpu.front.clone(),
             };
-            if let Ok(json) = serde_json::to_string(&frame) {
-                yog_api::event::net::send_to_player(&player, FRAME_CHANNEL, json.as_bytes());
-            }
+            let bytes = yog_api::yog_data::to_bytes(&frame);
+            yog_api::event::net::send_to_player(&player, FRAME_CHANNEL, &bytes);
             sent.insert(id, d.gpu.version);
         }
     }
@@ -343,19 +342,11 @@ fn facing_of(dim: &str, pos: BlockPos) -> Facing {
     }
 }
 
-const STORE_FILE: &str = "yog-vlsi/displays";
+/// Where it's kept in the world store.
 const STORE_KEY: &str = "displays";
 
 pub fn load() {
-    let store = Storage::open(
-        &yog_api::event::game::world_dir().unwrap_or_default(),
-        STORE_FILE,
-    );
-    let saved: Vec<(Key, Display)> = store
-        .get(STORE_KEY)
-        .and_then(|v| v.as_str())
-        .and_then(|j| serde_json::from_str(j).ok())
-        .unwrap_or_default();
+    let saved: Vec<(Key, Display)> = crate::saved::load(STORE_KEY);
     *DISPLAYS.lock().unwrap() = saved.into_iter().collect();
     *TICKS.lock().unwrap() = 0;
 }
@@ -367,14 +358,7 @@ pub fn save() {
         .iter()
         .map(|(k, d)| (k.clone(), d.clone()))
         .collect();
-    if let Ok(json) = serde_json::to_string(&saved) {
-        let mut store = Storage::open(
-            &yog_api::event::game::world_dir().unwrap_or_default(),
-            STORE_FILE,
-        );
-        store.set(STORE_KEY, &*json);
-        let _ = store.flush();
-    }
+    crate::saved::save(STORE_KEY, &saved);
 }
 
 pub fn register(registry: &mut Registry) {
@@ -438,14 +422,13 @@ pub fn register(registry: &mut Registry) {
                     age: 0,
                     ops: Vec::new(),
                 };
-                if let Ok(json) = serde_json::to_string(&gone) {
-                    for player in yog_api::event::player::online() {
-                        yog_api::event::net::send_to_player(
-                            &player,
-                            FRAME_CHANNEL,
-                            json.as_bytes(),
-                        );
-                    }
+                let bytes = yog_api::yog_data::to_bytes(&gone);
+                for player in yog_api::event::player::online() {
+                    yog_api::event::net::send_to_player(
+                        &player,
+                        FRAME_CHANNEL,
+                        &bytes,
+                    );
                 }
             }
             SENT.lock().unwrap().retain(|(_, k), _| *k != key);
@@ -665,7 +648,7 @@ void main() {
 
     pub fn register(registry: &mut Registry) {
         registry.on_client_packet(FRAME_CHANNEL, |ev| {
-            if let Ok(frame) = serde_json::from_slice::<Frame>(&ev.payload) {
+            if let Ok(frame) = yog_api::yog_data::read_bytes::<Frame>(&ev.payload) {
                 received(frame);
             }
         });

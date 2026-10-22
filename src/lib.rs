@@ -11,6 +11,7 @@ mod editor;
 mod gpu;
 mod nbt;
 mod resources;
+mod saved;
 mod ui;
 pub mod vm;
 
@@ -22,9 +23,6 @@ yog_api::resources!();
 yog_api::content!();
 
 use yog_api::{Mod, Registry, YogDimensionDef, YogDimensionTypeDef, info};
-
-/// The mod id — its `Storage` namespace.
-pub const MOD_ID: &str = "yog-vlsi";
 
 pub struct YogVlsi;
 
@@ -126,7 +124,8 @@ impl Mod for YogVlsi {
             port::load();
             display::load();
         });
-        registry.on::<yog_api::event::server::life::Stopping, _>(|_, _| {
+        // Kept with the world: written as it's saved.
+        registry.on::<yog_api::event::server::life::Saving, _>(|_, _| {
             editor::save_sessions();
             workbench::save_resources();
             board::save();

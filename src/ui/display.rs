@@ -4,7 +4,7 @@
 
 yog_api::ui_include!("ui/display");
 
-use serde::{Deserialize, Serialize};
+use yog_api::Schema;
 use yog_api::{BlockPos, EventPhase, Registry};
 use yog_kit::prelude::*;
 
@@ -15,7 +15,7 @@ use crate::res::Strings;
 /// Server → client: the Display to edit. Client → server: what it became.
 const CHANNEL: &str = "yog-vlsi:display";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Schema)]
 struct DisplayEdit {
     dimension: String,
     pos: (i32, i32, i32),
@@ -54,9 +54,8 @@ impl DisplayVm {
                 channel: self.first(),
                 ..edit.clone()
             };
-            if let Ok(json) = serde_json::to_string(&out) {
-                yog_api::event::net::send_to_server(CHANNEL, json.into_bytes());
-            }
+            let bytes = yog_api::yog_data::to_bytes(&out);
+            yog_api::event::net::send_to_server(CHANNEL, &bytes);
         }
         close();
     }
@@ -66,14 +65,14 @@ pub fn setup(registry: &mut Registry) {
     let screen = register(registry);
 
     registry.on_client_packet(CHANNEL, move |ev| {
-        if let Ok(edit) = serde_json::from_slice::<DisplayEdit>(&ev.payload) {
+        if let Ok(edit) = yog_api::yog_data::read_bytes::<DisplayEdit>(&ev.payload) {
             screen.update(move |vm| vm.load(edit));
             open();
         }
     });
 
     registry.on_packet(CHANNEL, |ev| {
-        let Ok(edit) = serde_json::from_slice::<DisplayEdit>(&ev.payload) else {
+        let Ok(edit) = yog_api::yog_data::read_bytes::<DisplayEdit>(&ev.payload) else {
             return;
         };
         let (x, y, z) = edit.pos;
@@ -106,9 +105,8 @@ pub fn setup(registry: &mut Registry) {
             size: d.size,
             channel: d.channel,
         };
-        if let Ok(json) = serde_json::to_string(&edit) {
-            yog_api::event::net::send_to_player(&e.player_name, CHANNEL, json.as_bytes());
-        }
+        let bytes = yog_api::yog_data::to_bytes(&edit);
+        yog_api::event::net::send_to_player(&e.player_name, CHANNEL, &bytes);
         false
     });
 }

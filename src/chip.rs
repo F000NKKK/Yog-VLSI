@@ -1,10 +1,8 @@
 //! Microchip data: the metadata a chip item carries in its NBT and the
 //! circuit (block grid + ports) kept in server storage.
 
-use serde::{Deserialize, Serialize};
-use yog_api::Storage;
+use yog_api::Schema;
 
-use crate::MOD_ID;
 use crate::content::Blocks;
 use crate::content::Tier;
 use crate::nbt;
@@ -19,9 +17,6 @@ use crate::vm::{
 const CHIP_TAG: &str = "YogVlsiChip";
 /// NBT tag of a written blueprint's [`CircuitData`].
 const BLUEPRINT_TAG: &str = "YogVlsiBlueprint";
-/// A Blueprint's design longer than this is packed (an NBT string holds 64 KiB).
-const PACK_OVER: usize = 30_000;
-const PACKED: &str = "z:";
 /// Storage key prefix of fabricated chips' circuits.
 const CIRCUIT_KEY: &str = "circuit/";
 
@@ -63,7 +58,7 @@ impl PortMode {
 }
 
 /// A named I/O point inside the chip's virtual world (DESIGN.md §2.2).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Schema)]
 pub struct Port {
     pub label: String,
     pub x: u32,
@@ -73,7 +68,7 @@ pub struct Port {
 }
 
 /// What a fabricated chip item carries in its NBT.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Schema)]
 pub struct ChipMeta {
     /// Key of the circuit in server storage.
     pub id: ChipId,
@@ -84,16 +79,16 @@ pub struct ChipMeta {
 
 impl ChipMeta {
     pub fn to_nbt(&self) -> String {
-        nbt::wrap(CHIP_TAG, &serde_json::to_string(self).unwrap_or_default())
+        nbt::wrap_data(CHIP_TAG, self)
     }
 
     pub fn from_nbt(snbt: &str) -> Option<Self> {
-        serde_json::from_str(&nbt::read(snbt, CHIP_TAG)?).ok()
+        nbt::read_data(snbt, CHIP_TAG)
     }
 }
 
 /// One block of the virtual world.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Schema)]
 pub struct CircuitBlock {
     pub x: u32,
     pub y: u32,
@@ -101,10 +96,10 @@ pub struct CircuitBlock {
     /// Full block state, `minecraft:repeater[delay=2,facing=north,…]`.
     pub state: String,
     /// A container's items: (slot, item id, count).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[data(default)]
     pub items: Vec<(u8, String, u8)>,
     /// A Redstone Port's mode and name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[data(default)]
     pub redstone_port: Option<crate::cables::RedstonePort>,
 }
 
@@ -287,14 +282,14 @@ impl CircuitBlock {
 }
 
 /// A chip's whole circuit.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Schema)]
 pub struct CircuitData {
     /// Edge length of the virtual world (the tier's).
     pub size: u32,
     pub blocks: Vec<CircuitBlock>,
     pub ports: Vec<Port>,
     /// The ALUs in it, with their chips and boards: they run inside it.
-    #[serde(default)]
+    #[data(default)]
     pub alus: Vec<SavedAlu>,
 }
 
@@ -303,7 +298,7 @@ pub const MAX_NESTING: u32 = 4;
 
 /// An ALU in a circuit, as it was in the editor: where, its tier, the chips
 /// in its slots and its board's wires (between its sides and its chips' pins).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Schema)]
 pub struct SavedAlu {
     pub x: u32,
     pub y: u32,
@@ -386,31 +381,27 @@ impl CircuitData {
     }
 
     /// Saves a fabricated chip's circuit (chips can travel between worlds,
-    /// so these live in the global store).
-    pub fn save_for_chip(&self, game_dir: &str, chip: &str) {
-        let mut store = Storage::open(game_dir, MOD_ID);
-        store.set(
-            format!("{CIRCUIT_KEY}{chip}"),
-            serde_json::to_string(self).unwrap_or_default(),
-        );
+    /// so these live in the game's store).
+    pub fn save_for_chip(&self, chip: &str) {
+        let store = yog_api::storage::game();
+        store.set(&format!("{CIRCUIT_KEY}{chip}"), self);
         if let Err(e) = store.flush() {
             yog_api::warn!("[yog-vlsi] saving chip circuit {chip}: {e}");
         }
     }
 
-    pub fn load_for_chip(game_dir: &str, chip: &str) -> Option<Self> {
+    pub fn load_for_chip(chip: &str) -> Option<Self> {
         // A ready-made design's chip (in a ready-made design's ALU).
         if let Some(name) = chip.strip_prefix(crate::designs::CHIP_PREFIX) {
             return crate::designs::named(name).map(|d| d.circuit(d.tier()));
         }
-        let store = Storage::open(game_dir, MOD_ID);
-        serde_json::from_str(store.get_str(&format!("{CIRCUIT_KEY}{chip}"))?).ok()
+        yog_api::storage::game().get(&format!("{CIRCUIT_KEY}{chip}"))
     }
 }
 
 /// A design, written on a Blueprint item (DESIGN.md §2.4): what the
 /// workbench edits in the editor and fabricates chips from.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Schema)]
 pub struct Blueprint {
     pub name: String,
     pub tier: Tier,
@@ -427,37 +418,14 @@ impl Blueprint {
         }
     }
 
-    /// Its NBT: the design as JSON — packed (`z:` and deflated, base64)
-    /// when it's long, an NBT string holding at most 64 KiB.
+    /// Its NBT: the design as Yog Data (`nbt::wrap_data`).
     pub fn to_nbt(&self) -> String {
-        let json = serde_json::to_string(self).unwrap_or_default();
-        let text = if json.len() > PACK_OVER {
-            use base64::Engine as _;
-            format!(
-                "{PACKED}{}",
-                base64::engine::general_purpose::STANDARD
-                    .encode(miniz_oxide::deflate::compress_to_vec(json.as_bytes(), 9))
-            )
-        } else {
-            json
-        };
-        nbt::wrap(BLUEPRINT_TAG, &text)
+        nbt::wrap_data(BLUEPRINT_TAG, self)
     }
 
     /// The design on a Blueprint's NBT; `None` for a blank one.
     pub fn from_nbt(snbt: &str) -> Option<Self> {
-        let text = nbt::read(snbt, BLUEPRINT_TAG)?;
-        match text.strip_prefix(PACKED) {
-            Some(packed) => {
-                use base64::Engine as _;
-                let bytes = base64::engine::general_purpose::STANDARD
-                    .decode(packed)
-                    .ok()?;
-                let json = miniz_oxide::inflate::decompress_to_vec(&bytes).ok()?;
-                serde_json::from_slice(&json).ok()
-            }
-            None => serde_json::from_str(&text).ok(),
-        }
+        nbt::read_data(snbt, BLUEPRINT_TAG)
     }
 }
 
@@ -604,7 +572,8 @@ mod tests {
         let Ok(path) = std::env::var("CHIP") else {
             return;
         };
-        let c: CircuitData = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let c: CircuitData =
+            yog_api::yog_data::from_text(&std::fs::read_to_string(path).unwrap()).unwrap().value;
         let ticks: u32 = std::env::var("TICKS")
             .ok()
             .and_then(|t| t.parse().ok())
@@ -622,7 +591,7 @@ mod tests {
             })
             .collect();
         let started = std::time::Instant::now();
-        let mut vm = c.vm_with(&|id| CircuitData::load_for_chip("", id), 1);
+        let mut vm = c.vm_with(&|id| CircuitData::load_for_chip(id), 1);
         println!("built in {:?}", started.elapsed());
         let port = |l: &str| {
             c.ports
@@ -677,7 +646,7 @@ mod tests {
         if port("T").is_some() {
             println!("{} writes to the Display", writes.len());
             if let Ok(out) = std::env::var("WRITES") {
-                std::fs::write(out, serde_json::to_string(&writes).unwrap()).unwrap();
+                std::fs::write(out, yog_api::yog_data::to_text(&writes)).unwrap();
             }
             return;
         }
@@ -713,10 +682,10 @@ mod tests {
         };
         let nbt = bp.to_nbt();
         assert!(nbt.len() < 60_000, "{}", nbt.len());
-        assert!(nbt.contains(PACKED));
+        assert!(nbt.contains(nbt::PACKED));
         assert_eq!(Blueprint::from_nbt(&nbt), Some(bp));
         let small = Blueprint::new("Small", Tier::Wood);
-        assert!(!small.to_nbt().contains(PACKED));
+        assert!(!small.to_nbt().contains(nbt::PACKED));
         assert_eq!(Blueprint::from_nbt(&small.to_nbt()), Some(small));
     }
 }

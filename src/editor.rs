@@ -25,8 +25,8 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use serde::{Deserialize, Serialize};
-use yog_api::{BlockPos, EventPhase, Registry, Storage};
+use yog_api::Schema;
+use yog_api::{BlockPos, EventPhase, Registry};
 
 use crate::board;
 use crate::cables::{self, RedstonePort};
@@ -63,28 +63,14 @@ const LANE_SPACING: i32 = 320;
 const PLAYER_SLOTS: u32 = 36;
 
 /// Where an edited design lives: a slot of a block container.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Schema)]
 pub struct Source {
     pub dimension: String,
-    #[serde(with = "pos_serde")]
     pub pos: BlockPos,
     pub slot: u32,
 }
 
-mod pos_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use yog_api::BlockPos;
-
-    pub fn serialize<S: Serializer>(p: &BlockPos, s: S) -> Result<S::Ok, S::Error> {
-        (p.x, p.y, p.z).serialize(s)
-    }
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<BlockPos, D::Error> {
-        let (x, y, z) = <(i32, i32, i32)>::deserialize(d)?;
-        Ok(BlockPos { x, y, z })
-    }
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Schema)]
 struct EditorSession {
     name: String,
     tier: Tier,
@@ -101,9 +87,9 @@ struct EditorSession {
 }
 
 /// Where sessions and lanes are kept between runs.
-const STORE_FILE: &str = "yog-vlsi/editor";
-const SESSIONS_KEY: &str = "sessions";
-const LANES_KEY: &str = "lanes";
+/// Where they're kept in the world store.
+const SESSIONS_KEY: &str = "editor_sessions";
+const LANES_KEY: &str = "editor_lanes";
 /// The player's entity data key their inventory is under.
 const INVENTORY_TAG: &str = "Inventory";
 
@@ -123,18 +109,13 @@ fn lane_for(player_name: &str) -> u32 {
     *lanes.entry(player_name.to_string()).or_insert(next)
 }
 
-/// Writes the sessions and lanes to disk: a session survives a crash.
+/// Writes the sessions and lanes to disk now: a session survives a crash.
 fn persist() {
-    let mut store = Storage::open(
-        &yog_api::event::game::world_dir().unwrap_or_default(),
-        STORE_FILE,
-    );
-    if let Ok(json) = serde_json::to_string(&*SESSIONS.lock().unwrap()) {
-        store.set(SESSIONS_KEY, &*json);
-    }
-    if let Ok(json) = serde_json::to_string(&*LANES.lock().unwrap()) {
-        store.set(LANES_KEY, &*json);
-    }
+    let Some(store) = yog_api::storage::world() else {
+        return;
+    };
+    store.set(SESSIONS_KEY, &*SESSIONS.lock().unwrap());
+    store.set(LANES_KEY, &*LANES.lock().unwrap());
     if let Err(e) = store.flush() {
         yog_api::warn!("[yog-vlsi] saving editor sessions: {e}");
     }
@@ -142,17 +123,8 @@ fn persist() {
 
 /// Reads the sessions and lanes back (the server started).
 pub fn load() {
-    let store = Storage::open(
-        &yog_api::event::game::world_dir().unwrap_or_default(),
-        STORE_FILE,
-    );
-    let read = |key: &str| store.get(key).and_then(|v| v.as_str().map(str::to_string));
-    *SESSIONS.lock().unwrap() = read(SESSIONS_KEY)
-        .and_then(|j| serde_json::from_str(&j).ok())
-        .unwrap_or_default();
-    *LANES.lock().unwrap() = read(LANES_KEY)
-        .and_then(|j| serde_json::from_str(&j).ok())
-        .unwrap_or_default();
+    *SESSIONS.lock().unwrap() = crate::saved::load(SESSIONS_KEY);
+    *LANES.lock().unwrap() = crate::saved::load(LANES_KEY);
 }
 
 /// The player's whole inventory, as their entity data has it.

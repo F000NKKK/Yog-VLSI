@@ -67,17 +67,18 @@ fn pin(s: &str) -> Result<NestedPin, String> {
     Ok(match parts[..] {
         ["in", f] => NestedPin::In(face(f)?),
         ["out", f] => NestedPin::Out(face(f)?),
-        ["bus", f, ch] => NestedPin::Bus(
-            face(f)?,
-            ch.parse::<u16>()
+        ["bus", f, ch] => NestedPin::Bus {
+            side: face(f)?,
+            channel: ch
+                .parse::<u16>()
                 .ok()
                 .and_then(|c| c.checked_sub(1))
                 .ok_or(format!("pin {s}: channel"))?,
-        ),
-        [slot, label] => NestedPin::Chip(
-            slot.parse().map_err(|_| format!("pin {s}: slot"))?,
-            label.to_string(),
-        ),
+        },
+        [slot, label] => NestedPin::Chip {
+            slot: slot.parse().map_err(|_| format!("pin {s}: slot"))?,
+            label: label.to_string(),
+        },
         _ => {
             return Err(format!(
                 "pin {s}: in:<face>, out:<face>, bus:<face>:<channel> or <slot>:<port>"
@@ -405,7 +406,7 @@ mod tests {
                 .iter()
                 .map(|p| (p.label.clone(), (p.x, p.y, p.z)))
                 .collect();
-            let vm = c.vm_with(&|id| CircuitData::load_for_chip("", id), 1);
+            let vm = c.vm_with(&|id| CircuitData::load_for_chip(id), 1);
             let mut b = Bench { vm, ports };
             b.run(4);
             b
@@ -661,6 +662,6 @@ mod export {
                 circuit: d.circuit(d.tier()),
             })
             .collect();
-        std::fs::write(out, serde_json::to_string(&all).unwrap()).unwrap();
+        std::fs::write(out, yog_api::yog_data::to_text(&all)).unwrap();
     }
 }

@@ -17,8 +17,8 @@ yog_api::ui_include!("ui/workbench");
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
-use serde::{Deserialize, Serialize};
-use yog_api::{BlockPos, EventPhase, Registry, Storage};
+use yog_api::Schema;
+use yog_api::{BlockPos, EventPhase, Registry};
 use yog_kit::prelude::*;
 
 use crate::chip::{Blueprint, ChipMeta};
@@ -47,7 +47,7 @@ const VIAL_FULL_LOG10: f32 = 6.0;
 const VIAL_HEIGHT: f32 = 16.0;
 
 /// A workbench in the world.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Schema)]
 pub struct BenchId {
     pub dimension: String,
     pub x: i32,
@@ -66,7 +66,7 @@ impl BenchId {
 }
 
 /// What's on the Blueprint slot.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Schema)]
 pub enum BlueprintView {
     None,
     Blank,
@@ -80,7 +80,7 @@ pub enum BlueprintView {
 }
 
 /// What a workbench screen shows — sent to the player who has it open.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Schema)]
 pub struct BenchState {
     pub bench: BenchId,
     pub stored: Amounts,
@@ -89,7 +89,7 @@ pub struct BenchState {
     pub chip_free: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Schema)]
 enum Request {
     /// `design`: a ready-made one to start from ([`designs`]).
     Create {
@@ -310,9 +310,8 @@ impl WorkbenchVm {
 
 /// The game's name of item or block `id`.
 fn send(request: &Request) {
-    if let Ok(json) = serde_json::to_string(request) {
-        yog_api::event::net::send_to_server(REQUEST_CHANNEL, json.into_bytes());
-    }
+    let bytes = yog_api::yog_data::to_bytes(request);
+    yog_api::event::net::send_to_server(REQUEST_CHANNEL, &bytes);
 }
 
 // ── The server side ──────────────────────────────────────────────────────────
@@ -371,10 +370,7 @@ fn blueprint_in(bench: &BenchId) -> (BlueprintView, Option<Blueprint>) {
                     ports: bp.circuit.ports.len(),
                     blocks: bp.circuit.blocks.len(),
                     cost: crate::resources::circuit_cost(&bp.circuit, &|id| {
-                        crate::chip::CircuitData::load_for_chip(
-                            &yog_api::event::game::world_dir().unwrap_or_default(),
-                            id,
-                        )
+                        crate::chip::CircuitData::load_for_chip(id)
                     }),
                 };
                 (view, Some(bp))
@@ -424,9 +420,8 @@ pub fn tick() {
             continue;
         };
         if last.as_ref() != Some(&state) {
-            if let Ok(json) = serde_json::to_string(&state) {
-                yog_api::event::net::send_to_player(&player, STATE_CHANNEL, json.as_bytes());
-            }
+            let bytes = yog_api::yog_data::to_bytes(&state);
+            yog_api::event::net::send_to_player(&player, STATE_CHANNEL, &bytes);
             *last = Some(state);
         }
     }
@@ -497,10 +492,7 @@ fn fabricate(bench: &BenchId) -> String {
         return "§cTake the chip out of the chip slot first.".into();
     }
     let cost = crate::resources::circuit_cost(&bp.circuit, &|id| {
-        crate::chip::CircuitData::load_for_chip(
-            &yog_api::event::game::world_dir().unwrap_or_default(),
-            id,
-        )
+        crate::chip::CircuitData::load_for_chip(id)
     });
     {
         let stores = STORES.lock().unwrap();
@@ -526,10 +518,7 @@ fn fabricate(bench: &BenchId) -> String {
         name: bp.name.clone(),
         ports: bp.circuit.ports.clone(),
     };
-    bp.circuit.save_for_chip(
-        &yog_api::event::game::world_dir().unwrap_or_default(),
-        &meta.id,
-    );
+    bp.circuit.save_for_chip(&meta.id);
     if !yog_api::event::block::set_inventory_slot(
         &bench.dimension,
         bench.pos(),
@@ -560,13 +549,13 @@ pub fn setup(registry: &mut Registry) {
     let screen = register(registry);
 
     registry.on_client_packet(STATE_CHANNEL, move |ev| {
-        if let Ok(state) = serde_json::from_slice::<BenchState>(&ev.payload) {
+        if let Ok(state) = yog_api::yog_data::read_bytes::<BenchState>(&ev.payload) {
             screen.update(move |vm| vm.apply(state));
         }
     });
 
     registry.on_packet(REQUEST_CHANNEL, |ev| {
-        let Ok(request) = serde_json::from_slice::<Request>(&ev.payload) else {
+        let Ok(request) = yog_api::yog_data::read_bytes::<Request>(&ev.payload) else {
             return;
         };
         let reply = run_request(&ev.player, request);
@@ -598,19 +587,11 @@ pub fn setup(registry: &mut Registry) {
     });
 }
 
-const STORE_FILE: &str = "yog-vlsi/workbenches";
-const STORE_KEY: &str = "stores";
+/// Where it's kept in the world store.
+const STORE_KEY: &str = "workbenches";
 
 pub fn load_resources() {
-    let store = Storage::open(
-        &yog_api::event::game::world_dir().unwrap_or_default(),
-        STORE_FILE,
-    );
-    let saved: Vec<(BenchId, Amounts)> = store
-        .get(STORE_KEY)
-        .and_then(|v| v.as_str())
-        .and_then(|j| serde_json::from_str(j).ok())
-        .unwrap_or_default();
+    let saved: Vec<(BenchId, Amounts)> = crate::saved::load(STORE_KEY);
     *STORES.lock().unwrap() = saved.into_iter().collect();
 }
 
@@ -621,14 +602,7 @@ pub fn save_resources() {
         .iter()
         .map(|(k, v)| (k.clone(), *v))
         .collect();
-    if let Ok(json) = serde_json::to_string(&stores) {
-        let mut store = Storage::open(
-            &yog_api::event::game::world_dir().unwrap_or_default(),
-            STORE_FILE,
-        );
-        store.set(STORE_KEY, &*json);
-        let _ = store.flush();
-    }
+    crate::saved::save(STORE_KEY, &stores);
 }
 
 #[cfg(test)]
