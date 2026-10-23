@@ -24,15 +24,22 @@
 //! while it's open and asks for changes with [`Request`]s.
 
 use std::collections::HashMap;
-use yog_api::sync::{LazyLock, Mutex};
 
+use yog_api::BlockPos;
 use yog_api::Schema;
-use yog_api::{BlockPos, EventPhase, Registry};
 
 use crate::cables;
 use crate::chip::{ChipMeta, CircuitData};
 use crate::content::Tier;
-use crate::vm::{NestedPin, PortMode, RedstoneVM};
+use crate::vm::{PortMode, RedstoneVM};
+
+mod protocol;
+mod server;
+#[cfg(test)]
+mod tests;
+
+pub use protocol::{BoardView, BusView, ChipView, Request, SideView, send};
+pub use server::{forget_in, load, nested_wires, restore, save, setup, tick};
 
 /// The six sides, in the order the graph lists them.
 pub const SIDES: [&str; 6] = ["N", "S", "E", "W", "U", "D"];
@@ -45,9 +52,9 @@ pub const VIEW_CHANNEL: &str = "yog-vlsi:board";
 pub const REQUEST_CHANNEL: &str = "yog-vlsi:board_request";
 
 /// How often the chip slots are looked at, in server ticks.
-const SYNC_EVERY: u64 = 10;
+pub(super) const SYNC_EVERY: u64 = 10;
 /// How often watchers are sent what changed, in server ticks.
-const SEND_EVERY: u64 = 4;
+pub(super) const SEND_EVERY: u64 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Schema)]
 pub struct AluId {
@@ -65,7 +72,7 @@ impl AluId {
             z: self.z,
         }
     }
-    fn xyz(&self) -> (i32, i32, i32) {
+    pub(super) fn xyz(&self) -> (i32, i32, i32) {
         (self.x, self.y, self.z)
     }
 }
@@ -104,7 +111,7 @@ pub struct Wire {
 
 /// What's saved of a board.
 #[derive(Debug, Clone, Schema)]
-struct Saved {
+pub(super) struct Saved {
     tier: Tier,
     wires: Vec<Wire>,
     /// Where the player put each chip slot's node.
@@ -118,17 +125,17 @@ struct Saved {
 }
 
 /// Rows a bus node shows until it's pulled open.
-const BUS_ROWS: u16 = 4;
+pub(super) const BUS_ROWS: u16 = 4;
 
 /// A chip sitting in a slot.
-struct Installed {
+pub(super) struct Installed {
     meta: ChipMeta,
     circuit: CircuitData,
     sim: crate::compile::ChipSim,
 }
 
 impl Installed {
-    fn new(meta: ChipMeta, circuit: CircuitData, vm: RedstoneVM) -> Self {
+    pub(super) fn new(meta: ChipMeta, circuit: CircuitData, vm: RedstoneVM) -> Self {
         let ins = circuit
             .ports
             .iter()
@@ -148,9 +155,9 @@ impl Installed {
 
 /// The time all ALUs may take in one server tick: past it their chips go
 /// on next tick, slower — the server isn't.
-const TICK_BUDGET: std::time::Duration = std::time::Duration::from_millis(10);
+pub(super) const TICK_BUDGET: std::time::Duration = std::time::Duration::from_millis(10);
 
-struct Board {
+pub(super) struct Board {
     saved: Saved,
     chips: Vec<Option<Installed>>,
     /// The level on every source pin, and on every driven `Out` side.
@@ -167,7 +174,7 @@ struct Board {
 }
 
 impl Board {
-    fn new(tier: Tier) -> Self {
+    pub(super) fn new(tier: Tier) -> Self {
         Board {
             saved: Saved {
                 tier,
@@ -185,14 +192,14 @@ impl Board {
         }
     }
 
-    fn side_is_output(&self, side: &str) -> bool {
+    pub(super) fn side_is_output(&self, side: &str) -> bool {
         self.saved
             .wires
             .iter()
             .any(|w| w.to.node == Node::Out && w.to.name == side)
     }
 
-    fn active(&self, slot: u8) -> Option<&Installed> {
+    pub(super) fn active(&self, slot: u8) -> Option<&Installed> {
         if slot as usize >= self.saved.tier.max_chips() {
             return None;
         }
@@ -200,7 +207,7 @@ impl Board {
     }
 
     /// The mode of a chip pin (`None`: no such pin on an active chip).
-    fn chip_pin(&self, slot: u8, name: &str) -> Option<PortMode> {
+    pub(super) fn chip_pin(&self, slot: u8, name: &str) -> Option<PortMode> {
         self.active(slot)?
             .meta
             .ports
@@ -210,18 +217,18 @@ impl Board {
     }
 
     /// How many channels of a bus this ALU's tier sees.
-    fn bus_channels(&self) -> u16 {
+    pub(super) fn bus_channels(&self) -> u16 {
         (self.saved.tier.digital_channels() as u16 * 4).min(cables::BUS_CHANNELS)
     }
 
     /// The channel (0-based) a pin of bus `side` names, if the bus is there and the tier sees it.
-    fn bus_channel(&self, side: u8, name: &str) -> Option<u8> {
+    pub(super) fn bus_channel(&self, side: u8, name: &str) -> Option<u8> {
         let n: u16 = name.parse().ok()?;
         (self.is_bus(side as usize) && (1..=self.bus_channels()).contains(&n))
             .then(|| (n - 1) as u8)
     }
 
-    fn bus_rows(&self, side: u8) -> u16 {
+    pub(super) fn bus_rows(&self, side: u8) -> u16 {
         self.saved
             .bus_rows
             .iter()
@@ -230,7 +237,7 @@ impl Board {
             .clamp(1, self.bus_channels())
     }
 
-    fn is_source(&self, pin: &Pin) -> bool {
+    pub(super) fn is_source(&self, pin: &Pin) -> bool {
         match pin.node {
             Node::In => SIDES.contains(&pin.name.as_str()) && !self.side_is_output(&pin.name),
             Node::Out => false,
@@ -241,7 +248,7 @@ impl Board {
         }
     }
 
-    fn is_sink(&self, pin: &Pin) -> bool {
+    pub(super) fn is_sink(&self, pin: &Pin) -> bool {
         match pin.node {
             Node::In => false,
             Node::Out => SIDES.contains(&pin.name.as_str()),
@@ -250,7 +257,7 @@ impl Board {
         }
     }
 
-    fn apply(&mut self, request: Request) -> Result<(), String> {
+    pub(super) fn apply(&mut self, request: Request) -> Result<(), String> {
         match request {
             Request::Connect { from, to, .. } => {
                 if !self.is_source(&from) || !self.is_sink(&to) {
@@ -290,7 +297,7 @@ impl Board {
     }
 
     /// Looks at the chip slots: new chips get a VM, removed ones lose it.
-    fn sync_chips(&mut self, alu: &AluId) {
+    pub(super) fn sync_chips(&mut self, alu: &AluId) {
         for slot in 0..CHIP_SLOTS {
             let meta =
                 yog_api::event::block::inventory_slot(&alu.dimension, alu.pos(), slot as u32)
@@ -312,7 +319,7 @@ impl Board {
     }
 
     /// Which sides a digital cable reaches now.
-    fn sync_cables(&mut self, alu: &AluId) {
+    pub(super) fn sync_cables(&mut self, alu: &AluId) {
         // The first look: cables written into the world while the server was
         // down are joined up.
         if !self.cables_known {
@@ -325,13 +332,13 @@ impl Board {
     }
 
     /// A digital cable reaches side `i`: it's a bus.
-    fn is_bus(&self, i: usize) -> bool {
+    pub(super) fn is_bus(&self, i: usize) -> bool {
         self.cables[i] == Some(cables::DIGITAL)
     }
 
     /// What every source drives now: the inputs coming into the ALU's sides,
     /// the chips' output ports and the bus channels shown or wired.
-    fn sources(&self, alu: &AluId) -> HashMap<Pin, u8> {
+    pub(super) fn sources(&self, alu: &AluId) -> HashMap<Pin, u8> {
         let max = self.saved.tier.max_chips();
         let mut levels = HashMap::new();
         for (i, &side) in SIDES.iter().enumerate() {
@@ -374,7 +381,7 @@ impl Board {
     /// chips, the chips step with it, and what they put out leaves by the
     /// output sides the same tick — a signal crosses an ALU in the chips'
     /// own steps, no tick lost waiting on either side of them.
-    fn tick(&mut self, alu: &AluId, deadline: std::time::Instant) {
+    pub(super) fn tick(&mut self, alu: &AluId, deadline: std::time::Instant) {
         let max = self.saved.tier.max_chips();
         let incoming = |wires: &[Wire], levels: &HashMap<Pin, u8>, to: &Pin| {
             wires
@@ -451,7 +458,7 @@ impl Board {
         self.levels = levels;
     }
 
-    fn view(&self, alu: &AluId) -> BoardView {
+    pub(super) fn view(&self, alu: &AluId) -> BoardView {
         BoardView {
             alu: alu.clone(),
             tier: self.saved.tier,
@@ -513,516 +520,5 @@ impl Board {
                 .collect(),
             levels: self.levels.iter().map(|(p, l)| (p.clone(), *l)).collect(),
         }
-    }
-}
-
-// ── What the screen gets and sends ──────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq, Schema)]
-pub struct ChipView {
-    pub slot: u8,
-    pub name: String,
-    pub tier: Tier,
-    pub pins: Vec<(String, PortMode)>,
-    /// In a slot the ALU's tier powers.
-    pub active: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Schema)]
-pub struct SideView {
-    pub side: String,
-    /// The Redstone Port at the other end of its cable.
-    pub name: Option<String>,
-    pub output: bool,
-}
-
-/// A bus node: the side it's on, how many channels the tier sees, how
-/// many rows it shows.
-#[derive(Debug, Clone, PartialEq, Schema)]
-pub struct BusView {
-    pub index: u8,
-    pub side: String,
-    pub channels: u16,
-    pub rows: u16,
-}
-
-#[derive(Debug, Clone, PartialEq, Schema)]
-pub struct BoardView {
-    pub alu: AluId,
-    pub tier: Tier,
-    pub chips: Vec<ChipView>,
-    pub sides: Vec<SideView>,
-    pub buses: Vec<BusView>,
-    pub wires: Vec<Wire>,
-    /// Where the player put the nodes (chips, the In and Out panels).
-    pub layout: Vec<(Node, (f32, f32))>,
-    pub levels: Vec<(Pin, u8)>,
-}
-
-#[derive(Debug, Clone, Schema)]
-pub enum Request {
-    Connect {
-        alu: AluId,
-        from: Pin,
-        to: Pin,
-    },
-    Disconnect {
-        alu: AluId,
-        to: Pin,
-    },
-    Clear {
-        alu: AluId,
-    },
-    Move {
-        alu: AluId,
-        node: Node,
-        x: f32,
-        y: f32,
-    },
-    /// Pulls a bus node open to `rows` channels (or closes it to them).
-    BusRows {
-        alu: AluId,
-        side: u8,
-        rows: u16,
-    },
-}
-
-impl Request {
-    fn alu(&self) -> &AluId {
-        match self {
-            Request::Connect { alu, .. }
-            | Request::Disconnect { alu, .. }
-            | Request::Clear { alu }
-            | Request::Move { alu, .. }
-            | Request::BusRows { alu, .. } => alu,
-        }
-    }
-}
-
-/// Sends `request` to the server (from the screen).
-pub fn send(request: &Request) {
-    let bytes = yog_api::yog_data::to_bytes(request);
-    yog_api::event::net::send_to_server(REQUEST_CHANNEL, &bytes);
-}
-
-// ── The server side ──────────────────────────────────────────────────────────
-
-static BOARDS: LazyLock<Mutex<HashMap<AluId, Board>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn side_index(name: &str) -> Option<u8> {
-    SIDES.iter().position(|s| *s == name).map(|i| i as u8)
-}
-
-/// A board pin as a nested ALU's (`None` for a bus: no cables inside a chip).
-fn nested_pin(pin: &Pin) -> Option<NestedPin> {
-    Some(match pin.node {
-        Node::In => NestedPin::In(side_index(&pin.name)?),
-        Node::Out => NestedPin::Out(side_index(&pin.name)?),
-        Node::Chip(slot) => NestedPin::Chip {
-            slot,
-            label: pin.name.clone(),
-        },
-        // A bus pin is its channel's number, from 1.
-        Node::Bus(side) => NestedPin::Bus {
-            side,
-            channel: pin.name.parse::<u16>().ok()?.checked_sub(1)?,
-        },
-    })
-}
-
-/// The wires of the ALU at `alu`, as an ALU inside a chip keeps them (a
-/// design is saved with it in it).
-pub fn nested_wires(alu: &AluId) -> Vec<(NestedPin, NestedPin)> {
-    BOARDS
-        .lock()
-        .get(alu)
-        .map(|b| {
-            b.saved
-                .wires
-                .iter()
-                .filter_map(|w| Some((nested_pin(&w.from)?, nested_pin(&w.to)?)))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Gives the ALU at `alu` the board `wires` (a design with an ALU in it
-/// opened in the editor).
-pub fn restore(alu: AluId, tier: Tier, wires: &[(NestedPin, NestedPin)]) {
-    let pin = |p: &NestedPin| match p {
-        NestedPin::In(i) => Pin::new(Node::In, SIDES[*i as usize % 6]),
-        NestedPin::Out(i) => Pin::new(Node::Out, SIDES[*i as usize % 6]),
-        NestedPin::Chip { slot, label } => Pin::new(Node::Chip(*slot), label.as_str()),
-        NestedPin::Bus { side, channel } => Pin::new(Node::Bus(*side), (channel + 1).to_string()),
-    };
-    let mut board = Board::new(tier);
-    board.saved.wires = wires
-        .iter()
-        .map(|(f, t)| Wire {
-            from: pin(f),
-            to: pin(t),
-        })
-        .collect();
-    BOARDS.lock().insert(alu, board);
-}
-
-/// Forgets the boards of the ALUs inside `lo`..`hi` of `dimension` (an
-/// editor field going).
-pub fn forget_in(dimension: &str, lo: BlockPos, hi: BlockPos) {
-    BOARDS.lock().retain(|a, _| {
-        !(a.dimension == dimension
-            && (lo.x..=hi.x).contains(&a.x)
-            && (lo.y..=hi.y).contains(&a.y)
-            && (lo.z..=hi.z).contains(&a.z))
-    });
-}
-/// Who has which ALU open, and what they were last sent.
-type Watching = (AluId, Option<BoardView>);
-static WATCHERS: LazyLock<Mutex<HashMap<String, Watching>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-static TICKS: Mutex<u64> = Mutex::new(0);
-
-pub fn tick() {
-    let n = {
-        let mut t = TICKS.lock();
-        *t += 1;
-        *t
-    };
-    let names = if n % SYNC_EVERY == 0 {
-        Some(cables::port_names())
-    } else {
-        None
-    };
-    let cables_changed = cables::cables_changed();
-    {
-        let mut boards = BOARDS.lock();
-        // Each a share of what's left of the tick's budget, starting each
-        // tick one further along: no ALU always last.
-        let started = std::time::Instant::now();
-        let count = boards.len().max(1);
-        let first = (n as usize) % count;
-        let mut order: Vec<_> = boards.iter_mut().collect();
-        let len = order.len();
-        order.rotate_left(first.min(len));
-        let mut left = count;
-        for (alu, board) in order {
-            let spent = started.elapsed();
-            let share = TICK_BUDGET.saturating_sub(spent) / left as u32;
-            left -= 1;
-            if names.is_some() || cables_changed || !board.cables_known {
-                board.sync_cables(alu);
-            }
-            if let Some(names) = &names {
-                board.sync_chips(alu);
-                board.side_names = SIDES
-                    .iter()
-                    .filter_map(|&side| {
-                        Some((side.to_string(), cables::side_port_name(alu, side, names)?))
-                    })
-                    .collect();
-            }
-            board.tick(alu, std::time::Instant::now() + share);
-        }
-    }
-    if n % SEND_EVERY == 0 {
-        send_views();
-    }
-}
-
-fn send_views() {
-    let boards = BOARDS.lock();
-    let mut watchers = WATCHERS.lock();
-    for (player, (alu, last)) in watchers.iter_mut() {
-        let Some(board) = boards.get(alu) else {
-            continue;
-        };
-        let view = board.view(alu);
-        if last.as_ref() != Some(&view) {
-            let bytes = yog_api::yog_data::to_bytes(&view);
-            yog_api::event::net::send_to_player(player, VIEW_CHANNEL, &bytes);
-            *last = Some(view);
-        }
-    }
-}
-
-/// Where it's kept in the world store.
-const STORE_KEY: &str = "boards";
-
-pub fn load() {
-    let saved: Vec<(AluId, Saved)> = crate::saved::load(STORE_KEY);
-    let mut boards = BOARDS.lock();
-    boards.clear();
-    for (alu, saved) in saved {
-        let mut board = Board::new(saved.tier);
-        board.saved = saved;
-        board.sync_chips(&alu);
-        boards.insert(alu, board);
-    }
-}
-
-pub fn save() {
-    let saved: Vec<(AluId, Saved)> = BOARDS
-        .lock()
-        .iter()
-        .map(|(k, b)| (k.clone(), b.saved.clone()))
-        .collect();
-    crate::saved::save(STORE_KEY, &saved);
-}
-
-pub fn setup(registry: &mut Registry) {
-    // Opening an ALU: it gets a board (if new) and the player watches it.
-    registry.on::<yog_api::event::block::Use, _>(|e, cx| -> bool {
-        let phase = cx.phase();
-        let Some(tier) = Tier::from_alu(&e.block_id) else {
-            return true;
-        };
-        if phase != EventPhase::Pre {
-            return true;
-        }
-        let alu = AluId {
-            dimension: e.dimension.clone(),
-            x: e.pos.x,
-            y: e.pos.y,
-            z: e.pos.z,
-        };
-        {
-            let mut boards = BOARDS.lock();
-            let board = boards
-                .entry(alu.clone())
-                .or_insert_with(|| Board::new(tier));
-            board.saved.tier = tier;
-            board.sync_chips(&alu);
-        }
-        WATCHERS.lock().insert(e.player_name.clone(), (alu, None));
-        true // its inventory opens
-    });
-
-    registry.on::<yog_api::event::block::Break, _>(|e, cx| {
-        let phase = cx.phase();
-        if phase == EventPhase::Post && Tier::from_alu(&e.block_id).is_some() {
-            let alu = AluId {
-                dimension: e.dimension.clone(),
-                x: e.pos.x,
-                y: e.pos.y,
-                z: e.pos.z,
-            };
-            BOARDS.lock().remove(&alu);
-        }
-        true
-    });
-
-    registry.on_packet(REQUEST_CHANNEL, |ev| {
-        let Ok(request) = yog_api::yog_data::read_bytes::<Request>(&ev.payload) else {
-            return;
-        };
-        let alu = request.alu().clone();
-        let result = BOARDS.lock().get_mut(&alu).map(|b| b.apply(request));
-        if let Some(Err(e)) = result {
-            yog_api::event::chat::actionbar(&ev.player, &e);
-        }
-        if let Some((_, last)) = WATCHERS.lock().get_mut(&ev.player) {
-            *last = None;
-        }
-    });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::chip::Port;
-
-    fn chip(slot: u8, ports: &[(&str, PortMode)]) -> (u8, Installed) {
-        let ports: Vec<Port> = ports
-            .iter()
-            .enumerate()
-            .map(|(i, (l, d))| Port {
-                label: l.to_string(),
-                x: i as u32,
-                y: 0,
-                z: 0,
-                dir: *d,
-            })
-            .collect();
-        let circuit = CircuitData {
-            size: 16,
-            blocks: Vec::new(),
-            ports: ports.clone(),
-            alus: Vec::new(),
-        };
-        let meta = ChipMeta {
-            id: format!("c{slot}"),
-            tier: Tier::ALL[0],
-            name: "Chip".into(),
-            ports,
-        };
-        (slot, Installed::new(meta, circuit.clone(), circuit.vm()))
-    }
-
-    fn board() -> Board {
-        let mut b = Board::new(Tier::ALL[0]);
-        for (slot, c) in [
-            chip(0, &[("A", PortMode::Input), ("Q", PortMode::Output)]),
-            chip(1, &[("D", PortMode::Bidirectional)]),
-        ] {
-            b.chips[slot as usize] = Some(c);
-        }
-        b
-    }
-
-    fn connect(b: &mut Board, from: Pin, to: Pin) -> Result<(), String> {
-        let alu = AluId {
-            dimension: String::new(),
-            x: 0,
-            y: 0,
-            z: 0,
-        };
-        b.apply(Request::Connect { alu, from, to })
-    }
-
-    #[test]
-    fn wires_run_from_sources_to_sinks() {
-        let mut b = board();
-        assert!(
-            connect(
-                &mut b,
-                Pin::new(Node::Chip(0), "Q"),
-                Pin::new(Node::Chip(1), "D")
-            )
-            .is_ok()
-        );
-        assert!(
-            connect(
-                &mut b,
-                Pin::new(Node::Chip(1), "D"),
-                Pin::new(Node::Chip(0), "A")
-            )
-            .is_ok(),
-            "bidi is both"
-        );
-        assert!(
-            connect(
-                &mut b,
-                Pin::new(Node::Chip(0), "A"),
-                Pin::new(Node::Out, "N")
-            )
-            .is_err(),
-            "A is an input"
-        );
-        assert!(
-            connect(&mut b, Pin::new(Node::In, "N"), Pin::new(Node::Out, "X")).is_err(),
-            "no side X"
-        );
-        assert_eq!(b.saved.wires.len(), 2);
-    }
-
-    #[test]
-    fn a_sink_takes_one_wire() {
-        let mut b = board();
-        connect(
-            &mut b,
-            Pin::new(Node::In, "N"),
-            Pin::new(Node::Chip(0), "A"),
-        )
-        .unwrap();
-        connect(
-            &mut b,
-            Pin::new(Node::In, "S"),
-            Pin::new(Node::Chip(0), "A"),
-        )
-        .unwrap();
-        assert_eq!(
-            b.saved.wires,
-            [Wire {
-                from: Pin::new(Node::In, "S"),
-                to: Pin::new(Node::Chip(0), "A")
-            }]
-        );
-    }
-
-    #[test]
-    fn a_side_is_an_input_or_an_output() {
-        let mut b = board();
-        connect(
-            &mut b,
-            Pin::new(Node::In, "N"),
-            Pin::new(Node::Chip(0), "A"),
-        )
-        .unwrap();
-        connect(
-            &mut b,
-            Pin::new(Node::Chip(0), "Q"),
-            Pin::new(Node::Out, "N"),
-        )
-        .unwrap();
-        assert_eq!(b.saved.wires.len(), 1, "In:N went dark");
-        assert!(
-            connect(
-                &mut b,
-                Pin::new(Node::In, "N"),
-                Pin::new(Node::Chip(1), "D")
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn chips_past_the_tier_limit_sleep() {
-        let mut b = board();
-        let max = b.saved.tier.max_chips() as u8;
-        let (_, c) = chip(max, &[("Z", PortMode::Output)]);
-        b.chips[max as usize] = Some(c);
-        assert!(
-            connect(
-                &mut b,
-                Pin::new(Node::Chip(max), "Z"),
-                Pin::new(Node::Chip(0), "A")
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn a_bus_has_as_many_channels_as_the_tier_sees_each_both_ways() {
-        let mut b = Board::new(Tier::Wood);
-        let ch = |n: &str| Pin::new(Node::Bus(2), n);
-        assert!(!b.is_source(&ch("1")), "no digital cable on E yet");
-        b.cables[2] = Some(cables::DIGITAL);
-        assert_eq!(b.bus_channels(), 32, "wood: 8 × 4 colors");
-        assert!(b.is_source(&ch("1")) && b.is_sink(&ch("1")));
-        assert!(b.is_sink(&ch("32")) && !b.is_sink(&ch("33")) && !b.is_source(&ch("0")));
-        assert_eq!(
-            b.bus_channel(2, "32"),
-            Some(31),
-            "pins count from 1, Pipes' channels from 0"
-        );
-        assert_eq!(b.bus_rows(2), BUS_ROWS);
-        b.apply(Request::BusRows {
-            alu: AluId {
-                dimension: String::new(),
-                x: 0,
-                y: 0,
-                z: 0,
-            },
-            side: 2,
-            rows: 500,
-        })
-        .unwrap();
-        assert_eq!(b.bus_rows(2), 32, "no more rows than channels");
-        // An In side straight onto a bus channel: a bus takes the sides' signals.
-        let alu = AluId {
-            dimension: String::new(),
-            x: 0,
-            y: 0,
-            z: 0,
-        };
-        assert!(
-            b.apply(Request::Connect {
-                alu,
-                from: Pin::new(Node::In, "N"),
-                to: ch("5")
-            })
-            .is_ok()
-        );
     }
 }
