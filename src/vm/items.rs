@@ -35,7 +35,7 @@ impl RedstoneVM {
         if !any || slots == 0 {
             0
         } else {
-            (1.0 + sum / slots as f32 * 14.0).floor() as u8
+            (1.0 + sum / slots as f32 * f32::from(MAX_POWER - 1)).floor() as u8
         }
     }
 

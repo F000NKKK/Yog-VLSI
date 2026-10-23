@@ -134,7 +134,7 @@ pub fn configure(dim: &str, pos: BlockPos, size: u16, channel: u16) -> Result<()
     if !fits(dim, pos, d.facing, size, Some(old)) {
         return Err(());
     }
-    yog_api::event::world::fill_region(dim, old.0, old.1, "minecraft:air");
+    yog_api::event::world::fill_region(dim, old.0, old.1, yog_api::yog_ids::game::AIR);
     d.size = size;
     stand(dim, pos, d);
     Ok(())
@@ -369,7 +369,7 @@ pub fn register(registry: &mut Registry) {
         // It faces as it was placed; without room for the picture it comes back off.
         let d = Display::new(facing_of(&e.dimension, e.pos));
         if !fits(&e.dimension, e.pos, d.facing, d.size, None) {
-            yog_api::event::block::set_state(&e.dimension, e.pos, "minecraft:air");
+            yog_api::event::block::set_state(&e.dimension, e.pos, yog_api::yog_ids::game::AIR);
             if yog_api::event::player::info(&e.player_name).is_none_or(|p| p.gamemode != "creative")
             {
                 yog_api::event::player::give_item(&e.player_name, Blocks::DISPLAY, 1u32);
@@ -401,7 +401,12 @@ pub fn register(registry: &mut Registry) {
             let key = (e.dimension.clone(), at.x, at.y, at.z);
             if let Some(d) = DISPLAYS.lock().remove(&key) {
                 let b = area(at, d.facing, d.size);
-                yog_api::event::world::fill_region(&e.dimension, b.0, b.1, "minecraft:air");
+                yog_api::event::world::fill_region(
+                    &e.dimension,
+                    b.0,
+                    b.1,
+                    yog_api::yog_ids::game::AIR,
+                );
                 let creative = yog_api::event::player::info(&e.player_name)
                     .is_some_and(|p| p.gamemode == "creative");
                 if part && !creative {

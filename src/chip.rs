@@ -105,7 +105,7 @@ pub struct CircuitBlock {
 
 /// How many slots a container block has (0: not a container).
 pub fn container_slots(id: &str) -> u8 {
-    let path = id.strip_prefix("minecraft:").unwrap_or(id);
+    let path = yog_api::yog_ids::game_path(id).unwrap_or(id);
     match path {
         "chest" | "trapped_chest" | "barrel" => 27,
         p if p.ends_with("shulker_box") => 27,
@@ -163,7 +163,7 @@ impl CircuitBlock {
     pub fn block_type(&self) -> BlockType {
         let powered = self.is("powered", "true");
         let id = self.id();
-        let path = id.strip_prefix("minecraft:").unwrap_or(id);
+        let path = yog_api::yog_ids::game_path(id).unwrap_or(id);
         match path {
             _ if id == Blocks::ANALOG_CABLE => BlockType::Cable,
             _ if id == Blocks::DIGITAL_CABLE => BlockType::Bus,

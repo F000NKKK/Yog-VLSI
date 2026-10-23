@@ -164,7 +164,7 @@ impl WorkbenchVm {
             .map(|(id, units)| {
                 // A tag: its name (Iron Nuggets).
                 let name = match id.strip_prefix('#') {
-                    Some(tag) => yog_api::tag_name("item", tag),
+                    Some(tag) => yog_api::tag_name(yog_api::yog_ids::kind::ITEM, tag),
                     None => crate::resources::item_name(id),
                 };
                 match units {

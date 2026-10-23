@@ -307,7 +307,8 @@ impl Design {
                     let at = (x + ox, y, z + oz);
                     let state = match ch {
                         '.' | ' ' => continue,
-                        '#' => "minecraft:stone".to_string(),
+                        '#' => yog_api::yog_ids::id!(yog_api::yog_ids::ns::MINECRAFT, "stone")
+                            .to_string(),
                         '-' => self.wire_state(x as i32, y as i32, z as i32),
                         'T' => format!(
                             "minecraft:redstone_torch[lit={}]",

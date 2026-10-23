@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use yog_api::sync::{LazyLock, Mutex};
 
 use yog_api::Schema;
+use yog_api::yog_ids::{game, id, ns};
 use yog_api::{BlockPos, EventPhase, Registry};
 
 use crate::board;
@@ -46,11 +47,11 @@ pub const GENERATOR_ID: &str = "yog-vlsi:editor_terrain";
 /// Y of the cube's bottom layer inside every editor lane.
 const EDITOR_Y: i32 = 10;
 /// What the shell is made of: transparent, solid, unbreakable here.
-const WALL: &str = "minecraft:barrier";
+const WALL: &str = id!(ns::MINECRAFT, "barrier");
 /// The shell seen through the barriers: its wool, its grid and its lights.
-const SKIN: &str = "minecraft:light_gray_wool";
-const GRID: &str = "minecraft:cyan_wool";
-const LIGHT: &str = "minecraft:sea_lantern";
+const SKIN: &str = id!(ns::MINECRAFT, "light_gray_wool");
+const GRID: &str = id!(ns::MINECRAFT, "cyan_wool");
+const LIGHT: &str = id!(ns::MINECRAFT, "sea_lantern");
 /// The grid's spacing, from the field's corner.
 const GRID_EVERY: i32 = 8;
 /// Lane 0's corner; each further lane is offset along X.
@@ -156,7 +157,7 @@ fn clear_entities(origin_x: i32, origin_z: i32, size: i32) {
     let min = ((lo.x - 2) as f64, (lo.y - 2) as f64, (lo.z - 2) as f64);
     let max = ((hi.x + 3) as f64, (hi.y + 3) as f64, (hi.z + 3) as f64);
     for uuid in yog_api::event::world::entities_in_box(DIMENSION_ID, min, max) {
-        if yog_api::event::entity::info(&uuid).is_some_and(|e| e.type_id != "minecraft:player") {
+        if yog_api::event::entity::info(&uuid).is_some_and(|e| e.type_id != game::PLAYER) {
             yog_api::event::entity::kill(&uuid);
         }
     }
@@ -253,7 +254,7 @@ fn build_room(origin_x: i32, origin_z: i32, size: i32) {
     for yog_api::PlacedBlock { pos, state } in
         yog_api::event::world::scan_region(DIMENSION_ID, lo, hi)
     {
-        yog_api::event::block::set_state(DIMENSION_ID, pos, "minecraft:air");
+        yog_api::event::block::set_state(DIMENSION_ID, pos, game::AIR);
         let id = yog_api::split_state(&state).0;
         cables::refresh(DIMENSION_ID, pos, id);
         if id == Blocks::REDSTONE_PORT {
@@ -562,10 +563,10 @@ fn remove_room(origin_x: i32, origin_z: i32, size: i32) {
     let (lo, hi) = interior(origin_x, origin_z, size);
     for yog_api::PlacedBlock { pos, .. } in yog_api::event::world::scan_region(DIMENSION_ID, lo, hi)
     {
-        yog_api::event::block::set_state(DIMENSION_ID, pos, "minecraft:air");
+        yog_api::event::block::set_state(DIMENSION_ID, pos, game::AIR);
     }
     for (from, to) in shell(lo, hi).into_iter().chain(skin(lo, hi)) {
-        yog_api::event::world::fill_region(DIMENSION_ID, from, to, "minecraft:air");
+        yog_api::event::world::fill_region(DIMENSION_ID, from, to, game::AIR);
     }
     board::forget_in(DIMENSION_ID, lo, hi);
 }
@@ -595,7 +596,7 @@ fn needs_support(id: &str) -> bool {
         "lantern",
         "vine",
     ];
-    let path = id.strip_prefix("minecraft:").unwrap_or(id);
+    let path = yog_api::yog_ids::game_path(id).unwrap_or(id);
     PARTS.iter().any(|p| path.contains(p))
 }
 
@@ -634,7 +635,7 @@ pub fn register(registry: &mut Registry) {
             .lock()
             .get(&e.player_name)
             .cloned()
-            .unwrap_or_else(|| ("minecraft:overworld".into(), (0.5, 100.0, 0.5)));
+            .unwrap_or_else(|| (game::OVERWORLD.into(), (0.5, 100.0, 0.5)));
         yog_api::event::player::teleport_to_dim(&e.player_name, &dim, (x, y, z));
         yog_api::event::chat::actionbar(
             &e.player_name,

@@ -44,7 +44,7 @@ impl Mod for YogVlsi {
                         .has_ceiling(false)
                         .natural(false)
                         .piglin_safe(false)
-                        .effects("minecraft:the_end")
+                        .effects(yog_api::yog_ids::game::THE_END)
                         .min_y(0)
                         .height(384)
                         .logical_height(384),

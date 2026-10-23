@@ -5,6 +5,7 @@
 use crate::chip::CircuitBlock;
 use crate::content::Cost;
 pub use crate::content::Resource;
+use yog_api::yog_ids::kind;
 
 /// An amount of each [`Resource`], in [`Resource::ALL`] order.
 pub type Amounts = [u64; 6];
@@ -58,12 +59,10 @@ fn fits(pattern: &str, id: &str) -> bool {
 
 /// The game's name for one of the resources' inputs.
 pub fn item_name(id: &str) -> String {
-    let path = id.strip_prefix("minecraft:").unwrap_or(id);
+    let path = yog_api::yog_ids::game_path(id).unwrap_or(id);
     let block = path.ends_with("_block") || path == "cobblestone";
-    yog_api::tr(&format!(
-        "{}.minecraft.{path}",
-        if block { "block" } else { "item" }
-    ))
+    let kind = if block { kind::BLOCK } else { kind::ITEM };
+    yog_api::tr(&yog_api::yog_ids::lang_key(kind, id))
 }
 
 /// `n` short: `999`, `1.2k`, `15k`, `1.5m`, `2b`, `3t`.
