@@ -1446,10 +1446,11 @@ mod tests {
             {
                 for (k, v) in map.iter() {
                     let k = k.to_string();
-                    let v = v
-                        .as_str()
-                        .map(str::to_string)
-                        .or_else(|| v.get(yog_api::yog_ids::word::VALUE).and_then(|v| v.as_str()).map(str::to_string));
+                    let v = v.as_str().map(str::to_string).or_else(|| {
+                        v.get(yog_api::yog_ids::word::VALUE)
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                    });
                     if let Some(v) = v {
                         lang.insert(k, v);
                     }
@@ -1492,8 +1493,12 @@ mod tests {
         let pin = |p: &crate::vm::NestedPin| match p {
             crate::vm::NestedPin::In(i) => Pin::new(Node::In, board::SIDES[*i as usize]),
             crate::vm::NestedPin::Out(i) => Pin::new(Node::Out, board::SIDES[*i as usize]),
-            crate::vm::NestedPin::Chip { slot, label } => Pin::new(Node::Chip(*slot), label.as_str()),
-            crate::vm::NestedPin::Bus { side, channel } => Pin::new(Node::Bus(*side), (channel + 1).to_string()),
+            crate::vm::NestedPin::Chip { slot, label } => {
+                Pin::new(Node::Chip(*slot), label.as_str())
+            }
+            crate::vm::NestedPin::Bus { side, channel } => {
+                Pin::new(Node::Bus(*side), (channel + 1).to_string())
+            }
         };
         let outs: Vec<&str> = alu
             .wires

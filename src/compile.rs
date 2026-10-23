@@ -22,8 +22,8 @@
 //! the table had it and steps on from there. Either way it's the same.
 
 use std::collections::HashMap;
-use yog_api::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
+use yog_api::sync::{Arc, LazyLock, Mutex};
 
 use crate::vm::RedstoneVM;
 

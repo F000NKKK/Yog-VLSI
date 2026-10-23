@@ -462,15 +462,15 @@ pub fn render(ops: &[Op], ticks: f32) -> (u16, u16, Vec<u8>) {
                 let color = rgba(d.color, 1.0);
                 match d.mode {
                     mode::LINES => {
-                        for pair in d.indices.chunks_exact(2) {
-                            if let (Some(a), Some(b)) = (at(pair[0]), at(pair[1])) {
+                        for &[i, j] in d.indices.as_chunks::<2>().0 {
+                            if let (Some(a), Some(b)) = (at(i), at(j)) {
                                 r.line(xy(a), xy(b), color);
                             }
                         }
                     }
                     mode::WIRE => {
-                        for t in d.indices.chunks_exact(3) {
-                            if let (Some(a), Some(b), Some(c)) = (at(t[0]), at(t[1]), at(t[2])) {
+                        for &[i, j, k] in d.indices.as_chunks::<3>().0 {
+                            if let (Some(a), Some(b), Some(c)) = (at(i), at(j), at(k)) {
                                 r.line(xy(a), xy(b), color);
                                 r.line(xy(b), xy(c), color);
                                 r.line(xy(c), xy(a), color);
@@ -483,8 +483,8 @@ pub fn render(ops: &[Op], ticks: f32) -> (u16, u16, Vec<u8>) {
                             let n = (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]).sqrt();
                             l.map(|v| v / n)
                         };
-                        for t in d.indices.chunks_exact(3) {
-                            let (Some(a), Some(b), Some(c)) = (at(t[0]), at(t[1]), at(t[2])) else {
+                        for &[i, j, k] in d.indices.as_chunks::<3>().0 {
+                            let (Some(a), Some(b), Some(c)) = (at(i), at(j), at(k)) else {
                                 continue;
                             };
                             // On screen y grows down: counter-clockwise faces us when this is negative.
@@ -494,9 +494,9 @@ pub fn render(ops: &[Op], ticks: f32) -> (u16, u16, Vec<u8>) {
                                 continue;
                             }
                             let (va, vb, vc) = (
-                                view[t[0] as usize],
-                                view[t[1] as usize],
-                                view[t[2] as usize],
+                                view[i as usize],
+                                view[j as usize],
+                                view[k as usize],
                             );
                             let (u, v) = (
                                 [0, 1, 2].map(|i| vb[i] - va[i]),
@@ -523,6 +523,11 @@ pub fn render(ops: &[Op], ticks: f32) -> (u16, u16, Vec<u8>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An RGB332 color byte from its red (0–7), green (0–7), blue (0–3).
+    const fn rgb332(r: u8, g: u8, b: u8) -> u8 {
+        r << 5 | g << 2 | b
+    }
 
     fn px(img: &(u16, u16, Vec<u8>), x: usize, y: usize) -> [u8; 4] {
         let i = (y * img.0 as usize + x) * 4;
@@ -578,9 +583,9 @@ mod tests {
     #[test]
     fn a_pixel_and_a_line_land_where_asked() {
         let mut g = Gpu::default();
-        g.write_register(reg::BG, 0b000_000_01);
+        g.write_register(reg::BG, rgb332(0, 0, 1));
         g.write_register(reg::CMD, cmd::CLEAR as u8);
-        g.write_register(reg::COLOR, 0b111_000_00);
+        g.write_register(reg::COLOR, rgb332(7, 0, 0));
         g.write_register(reg::X, 10);
         g.write_register(reg::Y, 20);
         g.write_register(reg::CMD, cmd::PIXEL as u8);
@@ -628,7 +633,7 @@ mod tests {
         let mut g = Gpu::default();
         cube(&mut g, 40);
         g.write_register(reg::MODE, mode::FACES as u8);
-        g.write_register(reg::COLOR, 0b111_111_11);
+        g.write_register(reg::COLOR, rgb332(7, 7, 3));
         frame(&mut g);
         let Op::Draw(d) = &g.front[1] else { panic!() };
         assert_eq!((d.vertices.len(), d.indices.len()), (8, 36));
@@ -701,8 +706,10 @@ mod tests {
             if g.version != shown {
                 let (w, h, img) = render(&g.front, 10.0);
                 let rgb: Vec<u8> = img
-                    .chunks_exact(4)
-                    .flat_map(|p| [p[0], p[1], p[2]])
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .flat_map(|&[r, g, b, _]| [r, g, b])
                     .collect();
                 let mut ppm = format!("P6 {w} {h} 255\n").into_bytes();
                 ppm.extend(rgb);
@@ -718,8 +725,8 @@ mod tests {
             return;
         };
         for (name, m, color) in [
-            ("lines", mode::WIRE, 0b000_111_00),
-            ("faces", mode::FACES, 0b111_101_00),
+            ("lines", mode::WIRE, rgb332(0, 7, 0)),
+            ("faces", mode::FACES, rgb332(7, 5, 0)),
         ] {
             let mut g = Gpu::default();
             cube(&mut g, 30);
@@ -730,8 +737,10 @@ mod tests {
             frame(&mut g);
             let (w, h, img) = render(&g.front, 0.0);
             let rgb: Vec<u8> = img
-                .chunks_exact(4)
-                .flat_map(|p| [p[0], p[1], p[2]])
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|&[r, g, b, _]| [r, g, b])
                 .collect();
             let mut ppm = format!("P6 {w} {h} 255\n").into_bytes();
             ppm.extend(rgb);

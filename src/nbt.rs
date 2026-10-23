@@ -31,7 +31,9 @@ pub fn wrap_data<T: Schema>(tag: &str, value: &T) -> String {
 pub fn read_data<T: Schema>(snbt: &str, tag: &str) -> Option<T> {
     let text = read(snbt, tag)?;
     let bytes = match text.strip_prefix(PACKED) {
-        Some(packed) => miniz_oxide::inflate::decompress_to_vec(&BASE64.decode(packed).ok()?).ok()?,
+        Some(packed) => {
+            miniz_oxide::inflate::decompress_to_vec(&BASE64.decode(packed).ok()?).ok()?
+        }
         None => BASE64.decode(&text).ok()?,
     };
     yog_api::yog_data::read_bytes(&bytes).ok()
@@ -178,7 +180,10 @@ mod tests {
     #[test]
     fn round_trips_data_short_and_long() {
         let short = vec!["a \"q\" \\ b".to_owned()];
-        assert_eq!(read_data::<Vec<String>>(&wrap_data("Tag", &short), "Tag"), Some(short));
+        assert_eq!(
+            read_data::<Vec<String>>(&wrap_data("Tag", &short), "Tag"),
+            Some(short)
+        );
         let long: Vec<String> = (0..5000).map(|i| format!("wire {i}")).collect();
         let snbt = wrap_data("Tag", &long);
         assert!(snbt.contains(PACKED));

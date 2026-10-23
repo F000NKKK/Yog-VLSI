@@ -572,8 +572,9 @@ mod tests {
         let Ok(path) = std::env::var("CHIP") else {
             return;
         };
-        let c: CircuitData =
-            yog_api::yog_data::from_text(&std::fs::read_to_string(path).unwrap()).unwrap().value;
+        let c: CircuitData = yog_api::yog_data::from_text(&std::fs::read_to_string(path).unwrap())
+            .unwrap()
+            .value;
         let ticks: u32 = std::env::var("TICKS")
             .ok()
             .and_then(|t| t.parse().ok())

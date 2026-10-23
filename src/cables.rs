@@ -116,9 +116,7 @@ pub fn refresh(dim: &str, pos: BlockPos, block: &str) {
 
 /// Forgets the Redstone Port that stood at `pos`.
 pub fn forget_port(dim: &str, pos: BlockPos) {
-    PORTS
-        .lock()
-        .remove(&(dim.to_string(), pos.x, pos.y, pos.z));
+    PORTS.lock().remove(&(dim.to_string(), pos.x, pos.y, pos.z));
 }
 
 /// Sets a Redstone Port's mode and name.

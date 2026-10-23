@@ -619,7 +619,10 @@ fn nested_pin(pin: &Pin) -> Option<NestedPin> {
     Some(match pin.node {
         Node::In => NestedPin::In(side_index(&pin.name)?),
         Node::Out => NestedPin::Out(side_index(&pin.name)?),
-        Node::Chip(slot) => NestedPin::Chip { slot, label: pin.name.clone() },
+        Node::Chip(slot) => NestedPin::Chip {
+            slot,
+            label: pin.name.clone(),
+        },
         // A bus pin is its channel's number, from 1.
         Node::Bus(side) => NestedPin::Bus {
             side,
@@ -791,9 +794,7 @@ pub fn setup(registry: &mut Registry) {
             board.saved.tier = tier;
             board.sync_chips(&alu);
         }
-        WATCHERS
-            .lock()
-            .insert(e.player_name.clone(), (alu, None));
+        WATCHERS.lock().insert(e.player_name.clone(), (alu, None));
         true // its inventory opens
     });
 
@@ -816,10 +817,7 @@ pub fn setup(registry: &mut Registry) {
             return;
         };
         let alu = request.alu().clone();
-        let result = BOARDS
-            .lock()
-            .get_mut(&alu)
-            .map(|b| b.apply(request));
+        let result = BOARDS.lock().get_mut(&alu).map(|b| b.apply(request));
         if let Some(Err(e)) = result {
             yog_api::event::chat::actionbar(&ev.player, &e);
         }

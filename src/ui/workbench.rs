@@ -384,11 +384,7 @@ fn blueprint_in(bench: &BenchId) -> (BlueprintView, Option<Blueprint>) {
 fn state_of(bench: &BenchId) -> BenchState {
     BenchState {
         bench: bench.clone(),
-        stored: STORES
-            .lock()
-            .get(bench)
-            .copied()
-            .unwrap_or_default(),
+        stored: STORES.lock().get(bench).copied().unwrap_or_default(),
         blueprint: blueprint_in(bench).0,
         chip_free: yog_api::event::block::inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT)
             .is_none(),
@@ -576,9 +572,7 @@ pub fn setup(registry: &mut Registry) {
                 y: e.pos.y,
                 z: e.pos.z,
             };
-            WATCHERS
-                .lock()
-                .insert(e.player_name.clone(), (bench, None));
+            WATCHERS.lock().insert(e.player_name.clone(), (bench, None));
         }
         true // the inventory opens
     });
@@ -593,11 +587,8 @@ pub fn load_resources() {
 }
 
 pub fn save_resources() {
-    let stores: Vec<(BenchId, Amounts)> = STORES
-        .lock()
-        .iter()
-        .map(|(k, v)| (k.clone(), *v))
-        .collect();
+    let stores: Vec<(BenchId, Amounts)> =
+        STORES.lock().iter().map(|(k, v)| (k.clone(), *v)).collect();
     crate::saved::save(STORE_KEY, &stores);
 }
 

@@ -226,17 +226,14 @@ fn stand(dim: &str, pos: BlockPos, d: &Display) {
 
 /// The Display whose box holds `pos`.
 pub fn owner(dim: &str, pos: BlockPos) -> Option<BlockPos> {
-    DISPLAYS
-        .lock()
-        .iter()
-        .find_map(|((d, x, y, z), disp)| {
-            let at = BlockPos {
-                x: *x,
-                y: *y,
-                z: *z,
-            };
-            (d == dim && inside(area(at, disp.facing, disp.size), pos)).then_some(at)
-        })
+    DISPLAYS.lock().iter().find_map(|((d, x, y, z), disp)| {
+        let at = BlockPos {
+            x: *x,
+            y: *y,
+            z: *z,
+        };
+        (d == dim && inside(area(at, disp.facing, disp.size), pos)).then_some(at)
+    })
 }
 
 /// The bus's writes into the GPUs, after the ALUs stepped; then what they
@@ -420,11 +417,7 @@ pub fn register(registry: &mut Registry) {
                 };
                 let bytes = yog_api::yog_data::to_bytes(&gone);
                 for player in yog_api::event::player::online() {
-                    yog_api::event::net::send_to_player(
-                        &player,
-                        FRAME_CHANNEL,
-                        &bytes,
-                    );
+                    yog_api::event::net::send_to_player(&player, FRAME_CHANNEL, &bytes);
                 }
             }
             SENT.lock().retain(|(_, k), _| *k != key);
@@ -442,8 +435,8 @@ pub fn register(registry: &mut Registry) {
 /// Drawing what the server sends on the Displays' faces.
 mod client {
     use std::collections::HashMap;
-    use yog_api::sync::{LazyLock, Mutex};
     use std::time::{Duration, Instant};
+    use yog_api::sync::{LazyLock, Mutex};
 
     use yog_api::gfx_core::{DataType, DrawMode};
     use yog_api::gfx_gl::{Attrib, Buffer, ShaderProgram, Texture, VertexArray};
@@ -482,8 +475,10 @@ mod client {
         vbo: Buffer,
     }
 
-    static SHOWN: LazyLock<Mutex<HashMap<(i32, i32, i32), Shown>>> =
-        LazyLock::new(Default::default);
+    /// What each display shows, by its block position.
+    type ShownAt = HashMap<(i32, i32, i32), Shown>;
+
+    static SHOWN: LazyLock<Mutex<ShownAt>> = LazyLock::new(Default::default);
     static GL: Mutex<Option<Gl>> = Mutex::new(None);
 
     const VERT: &str = "#version 330 core
