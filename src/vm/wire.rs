@@ -1,6 +1,8 @@
 //! Wire: its shape, the power it takes and passes on, and the power
 //! solid blocks take from it and from components.
 
+use super::MAX_POWER;
+
 use super::{BlockType, Facing, PortMode, RedstoneVM};
 
 impl RedstoneVM {
@@ -194,7 +196,7 @@ impl RedstoneVM {
             let level = match cell.block {
                 BlockType::RedstoneLamp => {
                     if self.received(i, true) > 0 {
-                        15
+                        MAX_POWER
                     } else {
                         0
                     }

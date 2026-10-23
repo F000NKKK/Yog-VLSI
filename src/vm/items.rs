@@ -1,5 +1,7 @@
 //! Containers and their items: hoppers, droppers, what comparators read.
 
+use super::MAX_POWER;
+
 use super::{BlockType, Cell, Facing, RedstoneVM, Slot, max_stack};
 
 impl RedstoneVM {
@@ -49,7 +51,7 @@ impl RedstoneVM {
             return self.fill(b);
         }
         if back.is_solid()
-            && power < 15
+            && power < MAX_POWER
             && let Some(b2) = self.at(b, facing)
             && self.get(b2).holds_items()
         {
@@ -85,8 +87,13 @@ impl RedstoneVM {
                 None => true,
             };
             if ok {
-                let s = &mut self.inventories.get_mut(&from).unwrap()[slot];
-                s.1 -= 1;
+                if let Some(s) = self
+                    .inventories
+                    .get_mut(&from)
+                    .and_then(|v| v.get_mut(slot))
+                {
+                    s.1 -= 1;
+                }
                 return true;
             }
         }
@@ -187,7 +194,7 @@ impl RedstoneVM {
             if on && !input {
                 cell.power = 0;
             } else if !on {
-                cell.power = 15;
+                cell.power = MAX_POWER;
                 if !input {
                     // A short pulse still comes out `delay` steps long.
                     cell.timer = delay;

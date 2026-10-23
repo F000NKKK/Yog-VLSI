@@ -105,49 +105,48 @@ impl BlockType {
     /// A number for the block: the same for equal blocks, different for
     /// different ones — what a fingerprint takes (cheaper than hashing it).
     pub(super) fn code(self) -> u64 {
-        use BlockType::*;
         let f = |d: Facing| d.index() as u64;
         let b = |v: bool| v as u64;
         match self {
-            Air => 0,
-            Solid => 1,
-            Transparent => 2,
-            RedstoneWire => 3,
-            RedstoneTorch { lit, attach } => 4 | b(lit) << 8 | f(attach) << 9,
-            Repeater {
+            Self::Air => 0,
+            Self::Solid => 1,
+            Self::Transparent => 2,
+            Self::RedstoneWire => 3,
+            Self::RedstoneTorch { lit, attach } => 4 | b(lit) << 8 | f(attach) << 9,
+            Self::Repeater {
                 delay_ticks,
                 facing,
             } => 5 | u64::from(delay_ticks) << 8 | f(facing) << 16,
-            Comparator { mode, facing } => 6 | (mode as u64) << 8 | f(facing) << 9,
-            RedstoneLamp => 7,
-            RedstoneBlock => 8,
-            Lever { on, attach } => 9 | b(on) << 8 | f(attach) << 9,
-            Button { pressed, attach } => 10 | b(pressed) << 8 | f(attach) << 9,
-            PressurePlate { power } => 11 | u64::from(power) << 8,
-            Observer { facing } => 12 | f(facing) << 8,
-            TargetBlock { power } => 13 | u64::from(power) << 8,
-            Source { power } => 14 | u64::from(power) << 8,
-            Slime => 15,
-            Honey => 16,
-            Immovable => 17,
-            Piston {
+            Self::Comparator { mode, facing } => 6 | (mode as u64) << 8 | f(facing) << 9,
+            Self::RedstoneLamp => 7,
+            Self::RedstoneBlock => 8,
+            Self::Lever { on, attach } => 9 | b(on) << 8 | f(attach) << 9,
+            Self::Button { pressed, attach } => 10 | b(pressed) << 8 | f(attach) << 9,
+            Self::PressurePlate { power } => 11 | u64::from(power) << 8,
+            Self::Observer { facing } => 12 | f(facing) << 8,
+            Self::TargetBlock { power } => 13 | u64::from(power) << 8,
+            Self::Source { power } => 14 | u64::from(power) << 8,
+            Self::Slime => 15,
+            Self::Honey => 16,
+            Self::Immovable => 17,
+            Self::Piston {
                 facing,
                 sticky,
                 extended,
             } => 18 | f(facing) << 8 | b(sticky) << 12 | b(extended) << 13,
-            PistonHead { facing, sticky } => 19 | f(facing) << 8 | b(sticky) << 12,
-            Container {
+            Self::PistonHead { facing, sticky } => 19 | f(facing) << 8 | b(sticky) << 12,
+            Self::Container {
                 slots,
                 solid,
                 partner,
             } => 20 | u64::from(slots) << 8 | b(solid) << 16 | partner.map_or(7, f) << 17,
-            Hopper { facing } => 21 | f(facing) << 8,
-            Dropper { facing, triggered } => 22 | f(facing) << 8 | b(triggered) << 12,
-            Port(mode) => 23 | (mode as u64) << 8,
-            Alu => 24,
-            Cable => 25,
-            RedstonePort { output } => 26 | b(output) << 8,
-            Bus => 27,
+            Self::Hopper { facing } => 21 | f(facing) << 8,
+            Self::Dropper { facing, triggered } => 22 | f(facing) << 8 | b(triggered) << 12,
+            Self::Port(mode) => 23 | (mode as u64) << 8,
+            Self::Alu => 24,
+            Self::Cable => 25,
+            Self::RedstonePort { output } => 26 | b(output) << 8,
+            Self::Bus => 27,
         }
     }
 }

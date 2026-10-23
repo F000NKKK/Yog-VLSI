@@ -56,6 +56,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+/// A cell's faces (N S E W U D).
+pub(crate) const FACES: usize = Facing::ALL.len();
+
+/// The strongest redstone power level.
+pub const MAX_POWER: u8 = 15;
+
 /// A map keyed by cell index, hashed fast.
 type CellMap<V> = HashMap<u32, V, std::hash::BuildHasherDefault<Fnv>>;
 /// Any other hot map, hashed fast.
@@ -151,7 +157,7 @@ type Slot = (u16, u8);
 
 /// How many of an item stack in one slot.
 fn max_stack(item: &str) -> u8 {
-    let path = item.strip_prefix("minecraft:").unwrap_or(item);
+    let path = yog_api::yog_ids::split(item).1;
     const SIXTEEN: [&str; 7] = [
         "ender_pearl",
         "snowball",

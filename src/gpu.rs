@@ -493,11 +493,8 @@ pub fn render(ops: &[Op], ticks: f32) -> (u16, u16, Vec<u8>) {
                             if facing >= 0.0 {
                                 continue;
                             }
-                            let (va, vb, vc) = (
-                                view[i as usize],
-                                view[j as usize],
-                                view[k as usize],
-                            );
+                            let (va, vb, vc) =
+                                (view[i as usize], view[j as usize], view[k as usize]);
                             let (u, v) = (
                                 [0, 1, 2].map(|i| vb[i] - va[i]),
                                 [0, 1, 2].map(|i| vc[i] - va[i]),

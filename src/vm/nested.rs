@@ -1,7 +1,7 @@
 //! Nested ALUs: a board of chips inside a cell, run as part of the
 //! circuit around it.
 
-use super::{CellMap, FastMap, FastSet, PortMode, RedstoneVM};
+use super::{CellMap, FACES, FastMap, FastSet, PortMode, RedstoneVM};
 use std::collections::HashMap;
 use yog_api::Schema;
 
@@ -76,7 +76,7 @@ pub(super) struct Buses {
     /// Each bus cell's run.
     pub(super) run: CellMap<usize>,
     /// Each ALU's faces' runs.
-    pub(super) alu_runs: CellMap<[Option<usize>; 6]>,
+    pub(super) alu_runs: CellMap<[Option<usize>; FACES]>,
     /// Each run's channels' levels.
     pub(super) levels: Vec<Vec<u8>>,
     /// Each run's channels' drivers (ALU, its face) and readers.
@@ -122,9 +122,9 @@ pub struct NestedAlu {
     pub(super) changed: Vec<(u8, u16)>,
     /// What it last ran on, and what came out: run again on the same, its
     /// chips settled, nothing would change.
-    pub(super) last: Option<([u8; 6], [bool; 6])>,
+    pub(super) last: Option<([u8; FACES], [bool; FACES])>,
     pub(super) last_reads: Vec<u8>,
-    pub(super) out: [u8; 6],
+    pub(super) out: [u8; FACES],
     /// Its chips settled on what they get now.
     pub(super) stable: bool,
 }
@@ -136,7 +136,7 @@ pub(super) struct Board {
     pub(super) chip_outs: Vec<Vec<usize>>,
     /// Where each chip's inputs come from (`None`: nothing wired).
     pub(super) chip_ins: Vec<Vec<Option<usize>>>,
-    pub(super) faces_out: [Option<usize>; 6],
+    pub(super) faces_out: [Option<usize>; FACES],
     /// Each bus channel it drives and where from.
     pub(super) drives: Vec<((u8, u16), Option<usize>)>,
     pub(super) size: usize,
@@ -160,10 +160,145 @@ impl NestedAlu {
         reads.dedup();
         let sinks = wires.iter().map(|(_, t)| t.clone()).collect();
         let reads_faces = wires.iter().any(|(f, _)| matches!(f, NestedPin::In(_)));
+        let board = Board::new(&chips, &wires, &reads);
+        let levels = vec![0; board.size];
+        let n_chips = chips.len();
+        NestedAlu {
+            chips,
+            wires,
+            drives: FastMap::default(),
+            reads,
+            sinks,
+            reads_faces,
+            board,
+            pending: vec![true; n_chips],
+            primed: false,
+            levels,
+            scratch: Vec::new(),
+            read_now: Vec::new(),
+            changed: Vec::new(),
+            last: None,
+            last_reads: Vec::new(),
+            out: [0; FACES],
+            stable: false,
+        }
+    }
 
+    /// One run: the faces' power and buses in, the chips settle, the
+    /// faces' levels out (and what it drives onto the buses, in `drives`).
+    pub(super) fn run(&mut self, inputs: [u8; FACES], buses: [bool; FACES]) -> [u8; FACES] {
+        if self.stable && self.last == Some((inputs, buses)) && self.last_reads == self.read_now {
+            return self.out;
+        }
+        if !self.primed {
+            for (c, outs) in self.chips.iter().zip(&self.board.chip_outs) {
+                for (k, &i) in outs.iter().enumerate() {
+                    self.levels[i] = c.sim.output_at(k);
+                }
+            }
+            self.primed = true;
+        }
+        for (f, &l) in inputs.iter().enumerate() {
+            self.set_level(f, l);
+        }
+        for k in 0..self.read_now.len() {
+            self.set_level(FACES + k, self.read_now[k]);
+        }
+        // What the chips that stepped put out now.
+        for ci in self.step_chips() {
+            for k in 0..self.board.chip_outs[ci].len() {
+                let level = self.chips[ci].sim.output_at(k);
+                self.set_level(self.board.chip_outs[ci][k], level);
+            }
+        }
+        self.drive_buses(buses);
+        // Settled: no chip left to look at.
+        self.stable = !self.pending.iter().any(|&p| p);
+        self.out = std::array::from_fn(|f| level_of(&self.levels, self.board.faces_out[f]));
+        self.last = Some((inputs, buses));
+        self.last_reads.clone_from(&self.read_now);
+        self.out
+    }
+
+    /// A slot's new level: the chips reading it look again.
+    fn set_level(&mut self, slot: usize, level: u8) {
+        if self.levels[slot] != level {
+            self.levels[slot] = level;
+            for &ci in &self.board.readers[slot] {
+                self.pending[ci] = true;
+            }
+        }
+    }
+
+    /// Step only the chips whose inputs changed or that haven't settled —
+    /// reading what the others put out as it was. The chips that stepped.
+    fn step_chips(&mut self) -> Vec<usize> {
+        let Self {
+            chips,
+            board,
+            levels,
+            pending,
+            scratch: ins,
+            ..
+        } = self;
+        let mut stepped = Vec::new();
+        for (ci, (c, srcs)) in chips.iter_mut().zip(&board.chip_ins).enumerate() {
+            if !pending[ci] {
+                continue;
+            }
+            pending[ci] = false;
+            ins.clear();
+            ins.extend(srcs.iter().map(|&s| level_of(levels, s)));
+            if c.settled_on.as_deref() == Some(&ins[..]) {
+                continue;
+            }
+            for (k, &level) in ins.iter().enumerate() {
+                c.sim.set_input_at(k, level);
+            }
+            // Out of steps this tick: it waits for the next, as it would in the world.
+            if c.left == 0 {
+                pending[ci] = true;
+                continue;
+            }
+            let used = c.sim.settle(c.left);
+            let settled = used < c.left;
+            c.left -= used;
+            c.settled_on = settled.then(|| ins.clone());
+            if !settled {
+                pending[ci] = true;
+            }
+            stepped.push(ci);
+        }
+        stepped
+    }
+
+    /// Onto a bus only where there is one; what changed, noted.
+    fn drive_buses(&mut self, buses: [bool; FACES]) {
+        for &((f, ch), src) in &self.board.drives {
+            let now = buses[f as usize % FACES].then(|| level_of(&self.levels, src));
+            let was = self.drives.get(&(f, ch)).copied();
+            if now != was {
+                match now {
+                    Some(l) => self.drives.insert((f, ch), l),
+                    None => self.drives.remove(&(f, ch)),
+                };
+                self.changed.push((f, ch));
+            }
+        }
+    }
+}
+
+/// A slot's level; 0 for an unwired one.
+fn level_of(levels: &[u8], src: Option<usize>) -> u8 {
+    src.map_or(0, |i| levels[i])
+}
+
+impl Board {
+    /// The board of `chips` wired by `wires`, `reads` its bus channels in.
+    fn new(chips: &[NestedChip], wires: &[(NestedPin, NestedPin)], reads: &[(u8, u16)]) -> Self {
         // Number the sources: faces, read channels, chip outputs.
         let mut at: HashMap<NestedPin, usize> = HashMap::new();
-        for f in 0..6u8 {
+        for f in 0..FACES as u8 {
             at.insert(NestedPin::In(f), f as usize);
         }
         for (k, &(f, ch)) in reads.iter().enumerate() {
@@ -172,14 +307,14 @@ impl NestedAlu {
                     side: f,
                     channel: ch,
                 },
-                6 + k,
+                FACES + k,
             );
         }
         let mut board = Board {
-            size: 6 + reads.len(),
+            size: FACES + reads.len(),
             ..Default::default()
         };
-        for c in &chips {
+        for c in chips {
             let outs = c
                 .ports
                 .iter()
@@ -202,8 +337,19 @@ impl NestedAlu {
             .iter()
             .filter_map(|(f, t)| Some((t, *at.get(f)?)))
             .collect();
-        for c in &chips {
-            board.chip_ins.push(
+        board.wire(chips, wires, &from);
+        board
+    }
+
+    /// Where each chip input, face out and bus channel driven reads from.
+    fn wire(
+        &mut self,
+        chips: &[NestedChip],
+        wires: &[(NestedPin, NestedPin)],
+        from: &HashMap<&NestedPin, usize>,
+    ) {
+        for c in chips {
+            self.chip_ins.push(
                 c.ports
                     .iter()
                     .filter(|p| p.mode.inputs())
@@ -217,16 +363,16 @@ impl NestedAlu {
                     .collect(),
             );
         }
-        board.faces_out = std::array::from_fn(|f| from.get(&NestedPin::Out(f as u8)).copied());
-        board.readers = vec![Vec::new(); board.size];
-        for (ci, srcs) in board.chip_ins.iter().enumerate() {
+        self.faces_out = std::array::from_fn(|f| from.get(&NestedPin::Out(f as u8)).copied());
+        self.readers = vec![Vec::new(); self.size];
+        for (ci, srcs) in self.chip_ins.iter().enumerate() {
             for &src in srcs.iter().flatten() {
-                if !board.readers[src].contains(&ci) {
-                    board.readers[src].push(ci);
+                if !self.readers[src].contains(&ci) {
+                    self.readers[src].push(ci);
                 }
             }
         }
-        board.drives = wires
+        self.drives = wires
             .iter()
             .filter_map(|(_, t)| match *t {
                 NestedPin::Bus {
@@ -236,117 +382,5 @@ impl NestedAlu {
                 _ => None,
             })
             .collect();
-        let levels = vec![0; board.size];
-        let n_chips = chips.len();
-        NestedAlu {
-            chips,
-            wires,
-            drives: FastMap::default(),
-            reads,
-            sinks,
-            reads_faces,
-            board,
-            pending: vec![true; n_chips],
-            primed: false,
-            levels,
-            scratch: Vec::new(),
-            read_now: Vec::new(),
-            changed: Vec::new(),
-            last: None,
-            last_reads: Vec::new(),
-            out: [0; 6],
-            stable: false,
-        }
-    }
-
-    /// One run: the faces' power and buses in, the chips settle, the
-    /// faces' levels out (and what it drives onto the buses, in `drives`).
-    pub(super) fn run(&mut self, inputs: [u8; 6], buses: [bool; 6]) -> [u8; 6] {
-        if self.stable && self.last == Some((inputs, buses)) && self.last_reads == self.read_now {
-            return self.out;
-        }
-        let b = &self.board;
-        let lv = &mut self.levels;
-        let pending = &mut self.pending;
-        let get = |lv: &[u8], src: Option<usize>| src.map_or(0, |i| lv[i]);
-        // A slot's new level: the chips reading it look again.
-        let set = |lv: &mut [u8], pending: &mut [bool], slot: usize, level: u8| {
-            if lv[slot] != level {
-                lv[slot] = level;
-                for &ci in &b.readers[slot] {
-                    pending[ci] = true;
-                }
-            }
-        };
-        if !self.primed {
-            for (c, outs) in self.chips.iter().zip(&b.chip_outs) {
-                for (k, &i) in outs.iter().enumerate() {
-                    lv[i] = c.sim.output_at(k);
-                }
-            }
-            self.primed = true;
-        }
-        for (f, &l) in inputs.iter().enumerate() {
-            set(lv, pending, f, l);
-        }
-        for (k, &l) in self.read_now.iter().enumerate() {
-            set(lv, pending, 6 + k, l);
-        }
-        // Only the chips whose inputs changed or that haven't settled —
-        // reading what the others put out as it was.
-        let ins = &mut self.scratch;
-        let mut stepped = Vec::new();
-        for (ci, (c, srcs)) in self.chips.iter_mut().zip(&b.chip_ins).enumerate() {
-            if !pending[ci] {
-                continue;
-            }
-            pending[ci] = false;
-            ins.clear();
-            ins.extend(srcs.iter().map(|&s| get(lv, s)));
-            if c.settled_on.as_deref() == Some(&ins[..]) {
-                continue;
-            }
-            for (k, &level) in ins.iter().enumerate() {
-                c.sim.set_input_at(k, level);
-            }
-            // Out of steps this tick: it waits for the next, as it would in the world.
-            if c.left == 0 {
-                pending[ci] = true;
-                continue;
-            }
-            let used = c.sim.settle(c.left);
-            let settled = used < c.left;
-            c.left -= used;
-            c.settled_on = settled.then(|| ins.clone());
-            if !settled {
-                pending[ci] = true;
-            }
-            stepped.push(ci);
-        }
-        // What the chips that stepped put out now.
-        for ci in stepped {
-            let c = &self.chips[ci];
-            for (k, &i) in b.chip_outs[ci].iter().enumerate() {
-                set(lv, pending, i, c.sim.output_at(k));
-            }
-        }
-        // Onto a bus only where there is one; what changed, noted.
-        for &((f, ch), src) in &b.drives {
-            let now = buses[f as usize % 6].then(|| get(lv, src));
-            let was = self.drives.get(&(f, ch)).copied();
-            if now != was {
-                match now {
-                    Some(l) => self.drives.insert((f, ch), l),
-                    None => self.drives.remove(&(f, ch)),
-                };
-                self.changed.push((f, ch));
-            }
-        }
-        // Settled: no chip left to look at.
-        self.stable = !self.pending.iter().any(|&p| p);
-        self.out = std::array::from_fn(|f| get(lv, b.faces_out[f]));
-        self.last = Some((inputs, buses));
-        self.last_reads.clone_from(&self.read_now);
-        self.out
     }
 }

@@ -1,9 +1,17 @@
 //! Components: what each decides its next output from, cables and the
 //! buses between nested ALUs.
 
+use super::FACES;
+
+use super::MAX_POWER;
+use super::cell::pack_faces;
+
 use super::nested::Buses;
 use super::{BlockType, Cell, ComparatorMode, Facing, FastMap, FastSet, NestedPin, RedstoneVM};
 use std::collections::VecDeque;
+
+/// Steps a dropper waits after being powered before it drops.
+const DROPPER_DELAY: u8 = 2;
 
 impl RedstoneVM {
     /// The power a comparator's side reads: only wire, redstone blocks and
@@ -13,7 +21,7 @@ impl RedstoneVM {
         let c = self.get(n);
         match c.block {
             BlockType::RedstoneWire => c.power,
-            BlockType::RedstoneBlock => 15,
+            BlockType::RedstoneBlock => MAX_POWER,
             BlockType::Repeater { .. } | BlockType::Comparator { .. } => c.emits(d.opposite()).0,
             _ => 0,
         }
@@ -67,56 +75,8 @@ impl RedstoneVM {
             return;
         }
         let mut b = Buses::default();
-        for k in 0..self.active.len() {
-            let start = self.active[k];
-            if self.get(start).block != BlockType::Bus || b.run.contains_key(&start) {
-                continue;
-            }
-            let run = b.levels.len();
-            b.levels.push(Vec::new());
-            b.drivers.push(FastMap::default());
-            b.readers.push(FastMap::default());
-            b.run.insert(start, run);
-            let mut queue = VecDeque::from([start]);
-            while let Some(i) = queue.pop_front() {
-                for d in Facing::ALL {
-                    let Some(n) = self.at(i, d) else { continue };
-                    match self.get(n).block {
-                        BlockType::Bus if !b.run.contains_key(&n) => {
-                            b.run.insert(n, run);
-                            queue.push_back(n);
-                        }
-                        // The face of that ALU this cable touches.
-                        BlockType::Alu => {
-                            b.alu_runs.entry(n).or_insert([None; 6])[d.opposite().index()] =
-                                Some(run)
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-        for (&i, alu) in &self.nested {
-            let Some(runs) = b.alu_runs.get(&i) else {
-                continue;
-            };
-            for &(f, ch) in &alu.reads {
-                if let Some(r) = runs[f as usize % 6] {
-                    b.readers[r].entry(ch).or_default().push(i);
-                }
-            }
-            for (f, ch) in alu.sinks.iter().filter_map(|p| match *p {
-                NestedPin::Bus {
-                    side: f,
-                    channel: ch,
-                } => Some((f, ch)),
-                _ => None,
-            }) {
-                if let Some(r) = runs[f as usize % 6] {
-                    b.drivers[r].entry(ch).or_default().push((i, f));
-                }
-            }
-        }
+        self.trace_buses(&mut b);
+        self.wire_alus(&mut b);
         // What beside a cell changes only when an ALU or a port does.
         let calm = |vm: &RedstoneVM, i: u32| {
             Facing::ALL.into_iter().all(|f| {
@@ -191,87 +151,173 @@ impl RedstoneVM {
         }
     }
 
+    /// Each bus run (connected bus cells) and the ALU faces it touches.
+    fn trace_buses(&self, b: &mut Buses) {
+        for k in 0..self.active.len() {
+            let start = self.active[k];
+            if self.get(start).block != BlockType::Bus || b.run.contains_key(&start) {
+                continue;
+            }
+            let run = b.levels.len();
+            b.levels.push(Vec::new());
+            b.drivers.push(FastMap::default());
+            b.readers.push(FastMap::default());
+            b.run.insert(start, run);
+            let mut queue = VecDeque::from([start]);
+            while let Some(i) = queue.pop_front() {
+                for d in Facing::ALL {
+                    let Some(n) = self.at(i, d) else { continue };
+                    match self.get(n).block {
+                        BlockType::Bus if !b.run.contains_key(&n) => {
+                            b.run.insert(n, run);
+                            queue.push_back(n);
+                        }
+                        // The face of that ALU this cable touches.
+                        BlockType::Alu => {
+                            b.alu_runs.entry(n).or_insert([None; FACES])[d.opposite().index()] =
+                                Some(run)
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// Who reads and who drives each channel of each run.
+    fn wire_alus(&self, b: &mut Buses) {
+        for (&i, alu) in &self.nested {
+            let Some(runs) = b.alu_runs.get(&i) else {
+                continue;
+            };
+            for &(f, ch) in &alu.reads {
+                if let Some(r) = runs[f as usize % FACES] {
+                    b.readers[r].entry(ch).or_default().push(i);
+                }
+            }
+            for (f, ch) in alu.sinks.iter().filter_map(|p| match *p {
+                NestedPin::Bus {
+                    side: f,
+                    channel: ch,
+                } => Some((f, ch)),
+                _ => None,
+            }) {
+                if let Some(r) = runs[f as usize % FACES] {
+                    b.drivers[r].entry(ch).or_default().push((i, f));
+                }
+            }
+        }
+    }
+
     /// 5. Every component decides its next output.
     pub(super) fn settle_components(&mut self) {
         self.cable_networks();
         let mut pistons = Vec::new();
-        let changes: Vec<(u32, Cell)> = self
-            .components
-            .iter()
-            .filter_map(|&i| {
-                let cell = *self.get(i);
-                let next = match cell.block {
-                    BlockType::RedstoneTorch { attach, .. } => {
-                        let lit = self.input_from(i, attach, true) == 0;
-                        Cell {
-                            block: BlockType::RedstoneTorch { lit, attach },
-                            power: if lit { 15 } else { 0 },
-                            ..cell
-                        }
-                    }
-                    BlockType::Repeater {
-                        delay_ticks,
-                        facing,
-                    } => self.next_repeater(i, cell, delay_ticks.max(1), facing),
-                    BlockType::Comparator { mode, facing } => {
-                        let back = self.comparator_back(i, facing);
-                        let side = facing
-                            .sides()
-                            .into_iter()
-                            .map(|d| self.side_input(i, d))
-                            .max()
-                            .unwrap_or(0);
-                        let power = match mode {
-                            ComparatorMode::Compare if back >= side => back,
-                            ComparatorMode::Compare => 0,
-                            ComparatorMode::Subtract => back.saturating_sub(side),
-                        };
-                        Cell { power, ..cell }
-                    }
-                    BlockType::Observer { facing } => {
-                        let looks = self.next(i, facing).looks();
-                        let changed = looks != cell.watched && self.tick > 1;
-                        Cell {
-                            power: if changed && cell.power == 0 { 15 } else { 0 },
-                            watched: looks,
-                            ..cell
-                        }
-                    }
-                    BlockType::Piston {
-                        facing, extended, ..
-                    } => {
-                        if self.piston_powered(i, facing) != extended {
-                            pistons.push(i);
-                        }
-                        return None;
-                    }
-                    BlockType::Dropper { facing, triggered } => {
-                        let powered = self.piston_powered(i, facing) || self.received(i, true) > 0;
-                        let mut next = Cell {
-                            block: BlockType::Dropper {
-                                facing,
-                                triggered: powered,
-                            },
-                            ..cell
-                        };
-                        if powered && !triggered {
-                            next.timer = 2;
-                        }
-                        next
-                    }
-                    _ => return None,
-                };
-                (next.block != cell.block
+        let mut changes: Vec<(u32, Cell)> = Vec::new();
+        for k in 0..self.components.len() {
+            let i = self.components[k];
+            let cell = *self.get(i);
+            if let Some(next) = self.decided(i, cell, &mut pistons)
+                && (next.block != cell.block
                     || next.power != cell.power
                     || next.timer != cell.timer
                     || next.watched != cell.watched)
-                    .then_some((i, next))
-            })
-            .collect();
+            {
+                changes.push((i, next));
+            }
+        }
         // Nested ALUs: their faces' power in, their chips run, their faces' levels out.
-        let mut changes = changes;
         let mut touched = Vec::new();
-        // Only those a read channel changed for, still settling, or reading their faces.
+        for i in self.alus_to_run() {
+            let cell = *self.get(i);
+            if cell.block != BlockType::Alu {
+                continue;
+            }
+            if let Some(next) = self.run_alu(i, cell) {
+                changes.push((i, next));
+                self.alu_changes += 1;
+                touched.push(i);
+            }
+        }
+        for (i, next) in changes {
+            *self.get_mut(i) = next;
+        }
+        for i in touched {
+            self.touch_around(i);
+        }
+        self.move_pistons(&pistons);
+    }
+
+    /// What component `i` (now `cell`) puts out next; none for what isn't
+    /// one, or a piston (noted in `pistons` when it has to move).
+    fn decided(&self, i: u32, cell: Cell, pistons: &mut Vec<u32>) -> Option<Cell> {
+        Some(match cell.block {
+            BlockType::RedstoneTorch { attach, .. } => {
+                let lit = self.input_from(i, attach, true) == 0;
+                Cell {
+                    block: BlockType::RedstoneTorch { lit, attach },
+                    power: if lit { MAX_POWER } else { 0 },
+                    ..cell
+                }
+            }
+            BlockType::Repeater {
+                delay_ticks,
+                facing,
+            } => self.next_repeater(i, cell, delay_ticks.max(1), facing),
+            BlockType::Comparator { mode, facing } => {
+                let back = self.comparator_back(i, facing);
+                let side = facing
+                    .sides()
+                    .into_iter()
+                    .map(|d| self.side_input(i, d))
+                    .max()
+                    .unwrap_or(0);
+                let power = match mode {
+                    ComparatorMode::Compare if back >= side => back,
+                    ComparatorMode::Compare => 0,
+                    ComparatorMode::Subtract => back.saturating_sub(side),
+                };
+                Cell { power, ..cell }
+            }
+            BlockType::Observer { facing } => {
+                let looks = self.next(i, facing).looks();
+                let changed = looks != cell.watched && self.tick > 1;
+                let pulse = changed && cell.power == 0;
+                Cell {
+                    power: if pulse { MAX_POWER } else { 0 },
+                    watched: looks,
+                    ..cell
+                }
+            }
+            BlockType::Piston {
+                facing, extended, ..
+            } => {
+                if self.piston_powered(i, facing) != extended {
+                    pistons.push(i);
+                }
+                return None;
+            }
+            BlockType::Dropper { facing, triggered } => {
+                let powered = self.piston_powered(i, facing) || self.received(i, true) > 0;
+                let mut next = Cell {
+                    block: BlockType::Dropper {
+                        facing,
+                        triggered: powered,
+                    },
+                    ..cell
+                };
+                if powered && !triggered {
+                    next.timer = DROPPER_DELAY;
+                }
+                next
+            }
+            _ => return None,
+        })
+    }
+
+    /// The nested ALUs to run: those a read channel changed for, those
+    /// still settling, and those that read their faces.
+    fn alus_to_run(&mut self) -> Vec<u32> {
         self.ensure_buses();
         let mut run: Vec<u32> = std::mem::take(&mut self.dirty).into_iter().collect();
         run.extend(self.unstable.iter().copied());
@@ -285,79 +331,65 @@ impl RedstoneVM {
         );
         run.sort_unstable();
         run.dedup();
-        for i in run {
-            if self.get(i).block != BlockType::Alu {
-                continue;
-            }
-            let Some(alu) = self.nested.get(&i) else {
-                continue;
-            };
-            let runs = self
-                .buses
-                .as_ref()
-                .and_then(|b| b.alu_runs.get(&i))
-                .copied()
-                .unwrap_or([None; 6]);
-            // From a cable, its level; else the redstone into that face.
-            let inputs = if alu.reads_faces {
-                Facing::ALL.map(|f| match self.next(i, f).block {
-                    BlockType::Cable => self.next(i, f).power,
-                    _ => self.input_from(i, f, true),
-                })
-            } else {
-                [0; 6]
-            };
-            let levels = self.buses.as_ref().map(|b| &b.levels);
-            let alu = self.nested.get_mut(&i).expect("there");
-            // The channels its board reads, into its own buffer.
-            alu.read_now.clear();
-            alu.read_now.extend(alu.reads.iter().map(|&(f, ch)| {
-                runs[f as usize % 6]
-                    .and_then(|r| levels.and_then(|l| l[r].get(ch as usize)).copied())
-                    .unwrap_or(0)
-            }));
-            let outputs = alu.run(inputs, runs.map(|r| r.is_some()));
-            let changed = std::mem::take(&mut alu.changed);
-            for &(f, ch) in &changed {
-                if let Some(r) = runs[f as usize % 6] {
-                    self.update_channel(r, ch);
-                }
-            }
-            if let Some(alu) = self.nested.get_mut(&i) {
-                alu.changed = changed;
-                alu.changed.clear();
-            }
-            if self.nested.get(&i).is_some_and(|a| a.stable) {
-                self.unstable.remove(&i);
-            } else {
-                self.unstable.insert(i);
-            }
-            let packed = outputs
-                .iter()
-                .enumerate()
-                .fold(0u32, |p, (k, &l)| p | u32::from(l.min(15)) << (4 * k));
-            let cell = *self.get(i);
-            if cell.watched != packed {
-                let power = outputs.iter().copied().max().unwrap_or(0);
-                changes.push((
-                    i,
-                    Cell {
-                        watched: packed,
-                        power,
-                        ..cell
-                    },
-                ));
-                self.alu_changes += 1;
-                touched.push(i);
+        run
+    }
+
+    /// Run the nested ALU at `i` (now `cell`): its faces' power and bus
+    /// channels in, its chips run. Its cell next, if its faces changed.
+    fn run_alu(&mut self, i: u32, cell: Cell) -> Option<Cell> {
+        let alu = self.nested.get(&i)?;
+        let runs = self
+            .buses
+            .as_ref()
+            .and_then(|b| b.alu_runs.get(&i))
+            .copied()
+            .unwrap_or([None; FACES]);
+        // From a cable, its level; else the redstone into that face.
+        let inputs = if alu.reads_faces {
+            Facing::ALL.map(|f| match self.next(i, f).block {
+                BlockType::Cable => self.next(i, f).power,
+                _ => self.input_from(i, f, true),
+            })
+        } else {
+            [0; FACES]
+        };
+        let levels = self.buses.as_ref().map(|b| &b.levels);
+        let alu = self.nested.get_mut(&i)?;
+        // The channels its board reads, into its own buffer.
+        alu.read_now.clear();
+        alu.read_now.extend(alu.reads.iter().map(|&(f, ch)| {
+            runs[f as usize % FACES]
+                .and_then(|r| levels.and_then(|l| l[r].get(ch as usize)).copied())
+                .unwrap_or(0)
+        }));
+        let outputs = alu.run(inputs, runs.map(|r| r.is_some()));
+        let mut changed = std::mem::take(&mut alu.changed);
+        for &(f, ch) in &changed {
+            if let Some(r) = runs[f as usize % FACES] {
+                self.update_channel(r, ch);
             }
         }
-        for (i, next) in changes {
-            *self.get_mut(i) = next;
+        changed.clear();
+        let stable = self.nested.get_mut(&i).is_some_and(|alu| {
+            alu.changed = changed;
+            alu.stable
+        });
+        if stable {
+            self.unstable.remove(&i);
+        } else {
+            self.unstable.insert(i);
         }
-        for i in touched {
-            self.touch_around(i);
-        }
-        for i in pistons {
+        let packed = pack_faces(&outputs);
+        (cell.watched != packed).then(|| Cell {
+            watched: packed,
+            power: outputs.iter().copied().max().unwrap_or(0),
+            ..cell
+        })
+    }
+
+    /// Extend or retract each piston of `pistons`.
+    fn move_pistons(&mut self, pistons: &[u32]) {
+        for &i in pistons {
             if let BlockType::Piston {
                 facing,
                 sticky,

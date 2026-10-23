@@ -1,9 +1,15 @@
 //! The grid: cells by index, placing blocks, items and nested ALUs, and
 //! the ports a chip talks to the world through.
 
+use super::MAX_POWER;
+
 use super::cell::AIR;
 use super::{BlockType, Cell, CellMap, Facing, NestedAlu, PortMode, RedstoneVM};
 use std::collections::HashMap;
+
+/// The random seed every VM starts from (the golden ratio's fraction):
+/// a circuit runs the same every time.
+const RNG_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
 impl RedstoneVM {
     /// A world `size` cells on each side (rounded up to a power of two;
@@ -27,7 +33,7 @@ impl RedstoneVM {
             inventories: HashMap::new(),
             nested: CellMap::default(),
             items: Vec::new(),
-            rng: 0x9E37_79B9_7F4A_7C15,
+            rng: RNG_SEED,
             quiet: false,
             buses: None,
             dirty: std::collections::BTreeSet::new(),
@@ -92,10 +98,10 @@ impl RedstoneVM {
     /// Mutable access to a cell that holds a block (its layer exists).
     #[inline]
     pub(super) fn get_mut(&mut self, i: u32) -> &mut Cell {
-        let offset = (i & (self.layer_len() - 1)) as usize;
+        let len = self.layer_len();
+        let offset = (i & (len - 1)) as usize;
         let cells = self.layers[(i >> (2 * self.shift)) as usize]
-            .as_mut()
-            .expect("only non-air cells are written");
+            .get_or_insert_with(|| vec![AIR; len as usize].into_boxed_slice());
         &mut cells[offset]
     }
 
@@ -276,9 +282,9 @@ impl RedstoneVM {
         if matches!(
             self.get(i).block,
             BlockType::Port(PortMode::Input | PortMode::Bidirectional)
-        ) && self.get(i).port_in != power.min(15)
+        ) && self.get(i).port_in != power.min(MAX_POWER)
         {
-            self.get_mut(i).port_in = power.min(15);
+            self.get_mut(i).port_in = power.min(MAX_POWER);
             self.quiet = false;
             self.touch_around(i);
         }

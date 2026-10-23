@@ -33,7 +33,7 @@ pub const MAX_TRANSITIONS: usize = 4096;
 pub const MAX_TIME: Duration = Duration::from_millis(200);
 /// Steps a transition may take: more, and it's a clock.
 const MAX_STEPS: u32 = 1024;
-const ON: u8 = 15;
+const ON: u8 = crate::vm::MAX_POWER;
 
 /// One transition: where it ends, its steps, the outputs after each.
 struct Move {
