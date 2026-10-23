@@ -24,7 +24,7 @@
 //! while it's open and asks for changes with [`Request`]s.
 
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use yog_api::sync::{LazyLock, Mutex};
 
 use yog_api::Schema;
 use yog_api::{BlockPos, EventPhase, Registry};
@@ -633,7 +633,6 @@ fn nested_pin(pin: &Pin) -> Option<NestedPin> {
 pub fn nested_wires(alu: &AluId) -> Vec<(NestedPin, NestedPin)> {
     BOARDS
         .lock()
-        .unwrap()
         .get(alu)
         .map(|b| {
             b.saved
@@ -662,13 +661,13 @@ pub fn restore(alu: AluId, tier: Tier, wires: &[(NestedPin, NestedPin)]) {
             to: pin(t),
         })
         .collect();
-    BOARDS.lock().unwrap().insert(alu, board);
+    BOARDS.lock().insert(alu, board);
 }
 
 /// Forgets the boards of the ALUs inside `lo`..`hi` of `dimension` (an
 /// editor field going).
 pub fn forget_in(dimension: &str, lo: BlockPos, hi: BlockPos) {
-    BOARDS.lock().unwrap().retain(|a, _| {
+    BOARDS.lock().retain(|a, _| {
         !(a.dimension == dimension
             && (lo.x..=hi.x).contains(&a.x)
             && (lo.y..=hi.y).contains(&a.y)
@@ -683,7 +682,7 @@ static TICKS: Mutex<u64> = Mutex::new(0);
 
 pub fn tick() {
     let n = {
-        let mut t = TICKS.lock().unwrap();
+        let mut t = TICKS.lock();
         *t += 1;
         *t
     };
@@ -694,7 +693,7 @@ pub fn tick() {
     };
     let cables_changed = cables::cables_changed();
     {
-        let mut boards = BOARDS.lock().unwrap();
+        let mut boards = BOARDS.lock();
         // Each a share of what's left of the tick's budget, starting each
         // tick one further along: no ALU always last.
         let started = std::time::Instant::now();
@@ -729,8 +728,8 @@ pub fn tick() {
 }
 
 fn send_views() {
-    let boards = BOARDS.lock().unwrap();
-    let mut watchers = WATCHERS.lock().unwrap();
+    let boards = BOARDS.lock();
+    let mut watchers = WATCHERS.lock();
     for (player, (alu, last)) in watchers.iter_mut() {
         let Some(board) = boards.get(alu) else {
             continue;
@@ -749,7 +748,7 @@ const STORE_KEY: &str = "boards";
 
 pub fn load() {
     let saved: Vec<(AluId, Saved)> = crate::saved::load(STORE_KEY);
-    let mut boards = BOARDS.lock().unwrap();
+    let mut boards = BOARDS.lock();
     boards.clear();
     for (alu, saved) in saved {
         let mut board = Board::new(saved.tier);
@@ -762,7 +761,6 @@ pub fn load() {
 pub fn save() {
     let saved: Vec<(AluId, Saved)> = BOARDS
         .lock()
-        .unwrap()
         .iter()
         .map(|(k, b)| (k.clone(), b.saved.clone()))
         .collect();
@@ -786,7 +784,7 @@ pub fn setup(registry: &mut Registry) {
             z: e.pos.z,
         };
         {
-            let mut boards = BOARDS.lock().unwrap();
+            let mut boards = BOARDS.lock();
             let board = boards
                 .entry(alu.clone())
                 .or_insert_with(|| Board::new(tier));
@@ -795,7 +793,6 @@ pub fn setup(registry: &mut Registry) {
         }
         WATCHERS
             .lock()
-            .unwrap()
             .insert(e.player_name.clone(), (alu, None));
         true // its inventory opens
     });
@@ -809,7 +806,7 @@ pub fn setup(registry: &mut Registry) {
                 y: e.pos.y,
                 z: e.pos.z,
             };
-            BOARDS.lock().unwrap().remove(&alu);
+            BOARDS.lock().remove(&alu);
         }
         true
     });
@@ -821,13 +818,12 @@ pub fn setup(registry: &mut Registry) {
         let alu = request.alu().clone();
         let result = BOARDS
             .lock()
-            .unwrap()
             .get_mut(&alu)
             .map(|b| b.apply(request));
         if let Some(Err(e)) = result {
             yog_api::event::chat::actionbar(&ev.player, &e);
         }
-        if let Some((_, last)) = WATCHERS.lock().unwrap().get_mut(&ev.player) {
+        if let Some((_, last)) = WATCHERS.lock().get_mut(&ev.player) {
             *last = None;
         }
     });

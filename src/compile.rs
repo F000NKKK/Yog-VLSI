@@ -22,7 +22,7 @@
 //! the table had it and steps on from there. Either way it's the same.
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex};
+use yog_api::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::vm::RedstoneVM;
@@ -165,7 +165,7 @@ fn table_for(
     ins: &[(u32, u32, u32)],
     outs: &[(u32, u32, u32)],
 ) -> Option<Arc<Table>> {
-    let mut tables = TABLES.lock().unwrap();
+    let mut tables = TABLES.lock();
     match tables.get(key) {
         Some(Slot::Ready(t)) => return Some(t.clone()),
         Some(_) => return None,
@@ -194,7 +194,7 @@ fn table_for(
             Slot::Ready(t) => Some(t.clone()),
             _ => None,
         };
-        TABLES.lock().unwrap().insert(key, slot);
+        TABLES.lock().insert(key, slot);
         ready
     };
     // Tests have it at once; the game on a worker thread, stepping meanwhile.

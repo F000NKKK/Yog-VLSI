@@ -23,7 +23,7 @@
 //! containers in it hold.
 
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use yog_api::sync::{LazyLock, Mutex};
 
 use yog_api::Schema;
 use yog_api::{BlockPos, EventPhase, Registry};
@@ -104,7 +104,7 @@ static SESSIONS: LazyLock<Mutex<HashMap<String, EditorSession>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn lane_for(player_name: &str) -> u32 {
-    let mut lanes = LANES.lock().unwrap();
+    let mut lanes = LANES.lock();
     let next = lanes.len() as u32;
     *lanes.entry(player_name.to_string()).or_insert(next)
 }
@@ -114,8 +114,8 @@ fn persist() {
     let Some(store) = yog_api::storage::world() else {
         return;
     };
-    store.set(SESSIONS_KEY, &*SESSIONS.lock().unwrap());
-    store.set(LANES_KEY, &*LANES.lock().unwrap());
+    store.set(SESSIONS_KEY, &*SESSIONS.lock());
+    store.set(LANES_KEY, &*LANES.lock());
     if let Err(e) = store.flush() {
         yog_api::warn!("[yog-vlsi] saving editor sessions: {e}");
     }
@@ -123,8 +123,8 @@ fn persist() {
 
 /// Reads the sessions and lanes back (the server started).
 pub fn load() {
-    *SESSIONS.lock().unwrap() = crate::saved::load(SESSIONS_KEY);
-    *LANES.lock().unwrap() = crate::saved::load(LANES_KEY);
+    *SESSIONS.lock() = crate::saved::load(SESSIONS_KEY);
+    *LANES.lock() = crate::saved::load(LANES_KEY);
 }
 
 /// The player's whole inventory, as their entity data has it.
@@ -364,7 +364,7 @@ pub fn enter(
         return Err("§cCouldn't enter the editor dimension — see the game log.".into());
     }
     yog_api::event::player::set_gamemode(player_name, "creative");
-    SESSIONS.lock().unwrap().insert(
+    SESSIONS.lock().insert(
         player_name.to_string(),
         EditorSession {
             name: blueprint.name.clone(),
@@ -396,7 +396,7 @@ pub fn enter(
 /// `/vlsi save`: writes the design back onto its Blueprint, takes the
 /// player back and removes their editing field. Returns a status message.
 pub fn save(player_name: &str) -> String {
-    let Some(session) = SESSIONS.lock().unwrap().remove(player_name) else {
+    let Some(session) = SESSIONS.lock().remove(player_name) else {
         return "§cYou are not editing a VLSI circuit right now.".into();
     };
     let message = finish(player_name, session);
@@ -621,18 +621,17 @@ pub fn register(registry: &mut Registry) {
             return true;
         }
         if e.dimension != DIMENSION_ID {
-            LAST_OUTSIDE.lock().unwrap().insert(
+            LAST_OUTSIDE.lock().insert(
                 e.player_name.clone(),
                 (e.dimension.clone(), (e.x, e.y, e.z)),
             );
             return true;
         }
-        if SESSIONS.lock().unwrap().contains_key(&e.player_name) {
+        if SESSIONS.lock().contains_key(&e.player_name) {
             return true;
         }
         let (dim, (x, y, z)) = LAST_OUTSIDE
             .lock()
-            .unwrap()
             .get(&e.player_name)
             .cloned()
             .unwrap_or_else(|| ("minecraft:overworld".into(), (0.5, 100.0, 0.5)));

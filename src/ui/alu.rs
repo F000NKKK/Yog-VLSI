@@ -19,7 +19,7 @@
 yog_api::ui_include!("ui/alu");
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex, Once};
+use yog_api::sync::{Arc, LazyLock, Mutex, Once};
 
 use yog_api::gfx_draw2d::{Draw2D, TextStyle};
 use yog_api::ui::{Color, Pointer, Rect, Surface, Vec2};
@@ -60,7 +60,7 @@ impl AluVm {
         if let Some(v) = &self.view {
             board::send(&Request::Clear { alu: v.alu.clone() });
         }
-        if let Some(v) = GRAPH.lock().unwrap().view.as_mut() {
+        if let Some(v) = GRAPH.lock().view.as_mut() {
             v.wires.clear();
         }
     }
@@ -1031,20 +1031,20 @@ struct GraphSurface;
 
 impl Surface for GraphSurface {
     fn paint(&self, gfx: &GfxContext, rect: Rect) {
-        let mut g = GRAPH.lock().unwrap();
+        let mut g = GRAPH.lock();
         draw(&gfx.draw2d(), &mut g, rect);
     }
 
     /// The wheel zooms the view about the pointer.
     fn scroll(&self, dy: f32, _size: (f32, f32)) -> bool {
-        let mut g = GRAPH.lock().unwrap();
+        let mut g = GRAPH.lock();
         let factor = if dy > 0.0 { 1.15 } else { 1.0 / 1.15 };
         g.camera = g.camera.zoomed(factor, g.pointer);
         true
     }
 
     fn pointer(&self, ev: Pointer, _size: (f32, f32)) -> bool {
-        let mut g = GRAPH.lock().unwrap();
+        let mut g = GRAPH.lock();
         let Some(view) = g.view.clone() else {
             return false;
         };
@@ -1199,7 +1199,7 @@ pub fn setup(registry: &mut Registry) {
             return;
         };
         {
-            let mut g = GRAPH.lock().unwrap();
+            let mut g = GRAPH.lock();
             // The server has the moves it was sent.
             g.moved
                 .retain(|node, p| !view.layout.iter().any(|(n, q)| n == node && q == p));

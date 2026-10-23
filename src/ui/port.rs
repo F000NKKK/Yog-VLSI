@@ -13,7 +13,7 @@
 yog_api::ui_include!("ui/port");
 
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use yog_api::sync::{LazyLock, Mutex};
 
 use yog_api::Schema;
 use yog_api::{BlockPos, EventPhase, Registry};
@@ -62,12 +62,12 @@ pub fn block_for_dir(dir: PortMode) -> &'static str {
 
 /// The name of the port at `pos`, if it has one.
 pub fn read_label(dimension: &str, pos: BlockPos) -> Option<String> {
-    LABELS.lock().unwrap().get(&key(dimension, pos)).cloned()
+    LABELS.lock().get(&key(dimension, pos)).cloned()
 }
 
 /// Names the port at `pos` (an empty name forgets it).
 pub fn write_label(dimension: &str, pos: BlockPos, label: &str) {
-    let mut labels = LABELS.lock().unwrap();
+    let mut labels = LABELS.lock();
     if label.trim().is_empty() {
         labels.remove(&key(dimension, pos));
     } else {
@@ -164,13 +164,12 @@ const STORE_KEY: &str = "port_labels";
 
 pub fn load() {
     let saved: Vec<((String, i32, i32, i32), String)> = crate::saved::load(STORE_KEY);
-    *LABELS.lock().unwrap() = saved.into_iter().collect();
+    *LABELS.lock() = saved.into_iter().collect();
 }
 
 pub fn save() {
     let labels: Vec<_> = LABELS
         .lock()
-        .unwrap()
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();

@@ -15,7 +15,7 @@
 yog_api::ui_include!("ui/workbench");
 
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use yog_api::sync::{LazyLock, Mutex};
 
 use yog_api::Schema;
 use yog_api::{BlockPos, EventPhase, Registry};
@@ -348,7 +348,7 @@ fn absorb(bench: &BenchId) {
         }
     }
     if gained.iter().any(|g| *g > 0) {
-        let mut stores = STORES.lock().unwrap();
+        let mut stores = STORES.lock();
         let store = stores.entry(bench.clone()).or_default();
         for (s, g) in store.iter_mut().zip(gained) {
             *s = s.saturating_add(g);
@@ -386,7 +386,6 @@ fn state_of(bench: &BenchId) -> BenchState {
         bench: bench.clone(),
         stored: STORES
             .lock()
-            .unwrap()
             .get(bench)
             .copied()
             .unwrap_or_default(),
@@ -399,7 +398,7 @@ fn state_of(bench: &BenchId) -> BenchState {
 /// Every few ticks: swallow resources, and tell watchers what changed.
 pub fn tick() {
     let n = {
-        let mut t = TICKS.lock().unwrap();
+        let mut t = TICKS.lock();
         *t += 1;
         *t
     };
@@ -408,14 +407,13 @@ pub fn tick() {
     }
     let watchers: Vec<(String, BenchId)> = WATCHERS
         .lock()
-        .unwrap()
         .iter()
         .map(|(p, (b, _))| (p.clone(), b.clone()))
         .collect();
     for (player, bench) in watchers {
         absorb(&bench);
         let state = state_of(&bench);
-        let mut w = WATCHERS.lock().unwrap();
+        let mut w = WATCHERS.lock();
         let Some((_, last)) = w.get_mut(&player) else {
             continue;
         };
@@ -495,7 +493,7 @@ fn fabricate(bench: &BenchId) -> String {
         crate::chip::CircuitData::load_for_chip(id)
     });
     {
-        let stores = STORES.lock().unwrap();
+        let stores = STORES.lock();
         let stored = stores.get(bench).copied().unwrap_or_default();
         let missing: Vec<String> = Resource::ALL
             .iter()
@@ -529,7 +527,7 @@ fn fabricate(bench: &BenchId) -> String {
     ) {
         return "§cCouldn't put the chip in the chip slot.".into();
     }
-    let mut stores = STORES.lock().unwrap();
+    let mut stores = STORES.lock();
     let store = stores.entry(bench.clone()).or_default();
     for (s, c) in store.iter_mut().zip(cost) {
         *s -= c;
@@ -563,7 +561,7 @@ pub fn setup(registry: &mut Registry) {
             yog_api::event::chat::actionbar(&ev.player, &reply);
         }
         // Whatever changed shows on the next look.
-        if let Some((_, last)) = WATCHERS.lock().unwrap().get_mut(&ev.player) {
+        if let Some((_, last)) = WATCHERS.lock().get_mut(&ev.player) {
             *last = None;
         }
     });
@@ -580,7 +578,6 @@ pub fn setup(registry: &mut Registry) {
             };
             WATCHERS
                 .lock()
-                .unwrap()
                 .insert(e.player_name.clone(), (bench, None));
         }
         true // the inventory opens
@@ -592,13 +589,12 @@ const STORE_KEY: &str = "workbenches";
 
 pub fn load_resources() {
     let saved: Vec<(BenchId, Amounts)> = crate::saved::load(STORE_KEY);
-    *STORES.lock().unwrap() = saved.into_iter().collect();
+    *STORES.lock() = saved.into_iter().collect();
 }
 
 pub fn save_resources() {
     let stores: Vec<(BenchId, Amounts)> = STORES
         .lock()
-        .unwrap()
         .iter()
         .map(|(k, v)| (k.clone(), *v))
         .collect();

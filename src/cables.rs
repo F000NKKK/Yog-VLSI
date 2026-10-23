@@ -15,8 +15,8 @@
 //! next to it, so each side is its own connection.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{LazyLock, Mutex};
+use yog_api::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use yog_api::sync::{LazyLock, Mutex};
 
 use yog_api::Schema;
 use yog_api::{BlockPos, EventPhase, Registry, warn};
@@ -98,7 +98,6 @@ pub fn cables_changed() -> bool {
 pub fn redstone_port(dimension: &str, pos: BlockPos) -> RedstonePort {
     PORTS
         .lock()
-        .unwrap()
         .get(&(dimension.to_string(), pos.x, pos.y, pos.z))
         .cloned()
         .unwrap_or_else(RedstonePort::new)
@@ -119,7 +118,6 @@ pub fn refresh(dim: &str, pos: BlockPos, block: &str) {
 pub fn forget_port(dim: &str, pos: BlockPos) {
     PORTS
         .lock()
-        .unwrap()
         .remove(&(dim.to_string(), pos.x, pos.y, pos.z));
 }
 
@@ -131,7 +129,6 @@ pub fn set_redstone_port(dimension: &str, pos: BlockPos, port: RedstonePort) {
     // Off the channel it was on.
     let before = PORTS
         .lock()
-        .unwrap()
         .insert((dimension.to_string(), pos.x, pos.y, pos.z), port);
     if let Some(old) = before {
         let (cap, ch) = old.link();
@@ -159,7 +156,6 @@ fn network_at(dim: &str, pos: BlockPos) -> Option<u64> {
 pub fn port_names() -> HashMap<(String, u64), String> {
     let ports: Vec<(Key, String)> = PORTS
         .lock()
-        .unwrap()
         .iter()
         .filter(|(_, p)| !p.name.is_empty())
         .map(|(k, p)| (k.clone(), p.name.clone()))
@@ -393,7 +389,6 @@ fn register_networks() {
 fn ports(check: bool) -> Vec<(Key, RedstonePort)> {
     let all: Vec<(Key, RedstonePort)> = PORTS
         .lock()
-        .unwrap()
         .iter()
         .map(|(k, p)| (k.clone(), p.clone()))
         .collect();
@@ -412,7 +407,7 @@ fn ports(check: bool) -> Vec<(Key, RedstonePort)> {
             )
             .is_some_and(|s| s.starts_with(Blocks::REDSTONE_PORT));
             if !there {
-                PORTS.lock().unwrap().remove(&(dim.clone(), *x, *y, *z));
+                PORTS.lock().remove(&(dim.clone(), *x, *y, *z));
             }
             there
         })
@@ -427,7 +422,7 @@ pub fn tick_inputs() {
         .is_multiple_of(PORT_CHECK_EVERY);
     for ((dim, x, y, z), port) in ports(check) {
         let pos = BlockPos { x, y, z };
-        if PORTS_SEEN.lock().unwrap().insert((dim.clone(), x, y, z)) {
+        if PORTS_SEEN.lock().insert((dim.clone(), x, y, z)) {
             refresh_around(&dim, pos);
         }
         let (cap, ch) = port.link();
@@ -477,13 +472,12 @@ const STORE_KEY: &str = "redstone_ports";
 pub fn load() {
     register_networks();
     let saved: Vec<(Key, RedstonePort)> = crate::saved::load(STORE_KEY);
-    *PORTS.lock().unwrap() = saved.into_iter().collect();
+    *PORTS.lock() = saved.into_iter().collect();
 }
 
 pub fn save() {
     let ports: Vec<(Key, RedstonePort)> = PORTS
         .lock()
-        .unwrap()
         .iter()
         .map(|(k, p)| (k.clone(), p.clone()))
         .collect();
@@ -496,7 +490,7 @@ pub fn register(registry: &mut Registry) {
     registry.on::<yog_api::event::block::Place, _>(|e, cx| {
         let phase = cx.phase();
         if phase == EventPhase::Pre && e.block_id == Blocks::REDSTONE_PORT {
-            PORTS.lock().unwrap().insert(
+            PORTS.lock().insert(
                 (e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z),
                 RedstonePort::new(),
             );
@@ -512,7 +506,6 @@ pub fn register(registry: &mut Registry) {
             if e.block_id == Blocks::REDSTONE_PORT {
                 PORTS
                     .lock()
-                    .unwrap()
                     .remove(&(e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z));
             } else if is_cable(&e.block_id) {
                 CABLES_CHANGED.store(true, Ordering::Relaxed);

@@ -18,7 +18,7 @@
 //! near it, who draw it on its front face (`client`).
 
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use yog_api::sync::{LazyLock, Mutex};
 
 use yog_api::Schema;
 use yog_api::{BlockPos, EventPhase, Registry};
@@ -114,7 +114,6 @@ pub struct Frame {
 pub fn get(dim: &str, pos: BlockPos) -> Option<Display> {
     DISPLAYS
         .lock()
-        .unwrap()
         .get(&(dim.to_string(), pos.x, pos.y, pos.z))
         .cloned()
 }
@@ -122,7 +121,7 @@ pub fn get(dim: &str, pos: BlockPos) -> Option<Display> {
 /// Sets a Display's size and first channel; a size that doesn't fit is
 /// refused (`Err`), the channel set all the same.
 pub fn configure(dim: &str, pos: BlockPos, size: u16, channel: u16) -> Result<(), ()> {
-    let mut displays = DISPLAYS.lock().unwrap();
+    let mut displays = DISPLAYS.lock();
     let Some(d) = displays.get_mut(&(dim.to_string(), pos.x, pos.y, pos.z)) else {
         return Ok(());
     };
@@ -229,7 +228,6 @@ fn stand(dim: &str, pos: BlockPos, d: &Display) {
 pub fn owner(dim: &str, pos: BlockPos) -> Option<BlockPos> {
     DISPLAYS
         .lock()
-        .unwrap()
         .iter()
         .find_map(|((d, x, y, z), disp)| {
             let at = BlockPos {
@@ -245,12 +243,12 @@ pub fn owner(dim: &str, pos: BlockPos) -> Option<BlockPos> {
 /// show out to the players near them.
 pub fn tick() {
     let n = {
-        let mut t = TICKS.lock().unwrap();
+        let mut t = TICKS.lock();
         *t += 1;
         *t
     };
     {
-        let mut displays = DISPLAYS.lock().unwrap();
+        let mut displays = DISPLAYS.lock();
         for ((dim, x, y, z), d) in displays.iter_mut() {
             let pos = BlockPos {
                 x: *x,
@@ -282,11 +280,11 @@ pub fn tick() {
 
 /// What the players near each Display haven't got of it.
 fn send(n: u64) {
-    let displays = DISPLAYS.lock().unwrap();
+    let displays = DISPLAYS.lock();
     if displays.is_empty() {
         return;
     }
-    let mut sent = SENT.lock().unwrap();
+    let mut sent = SENT.lock();
     for player in yog_api::event::player::online() {
         let Some(info) = yog_api::event::player::info(&player)
             .and_then(|p| yog_api::event::entity::info(&p.uuid))
@@ -347,14 +345,13 @@ const STORE_KEY: &str = "displays";
 
 pub fn load() {
     let saved: Vec<(Key, Display)> = crate::saved::load(STORE_KEY);
-    *DISPLAYS.lock().unwrap() = saved.into_iter().collect();
-    *TICKS.lock().unwrap() = 0;
+    *DISPLAYS.lock() = saved.into_iter().collect();
+    *TICKS.lock() = 0;
 }
 
 pub fn save() {
     let saved: Vec<(Key, Display)> = DISPLAYS
         .lock()
-        .unwrap()
         .iter()
         .map(|(k, d)| (k.clone(), d.clone()))
         .collect();
@@ -389,7 +386,6 @@ pub fn register(registry: &mut Registry) {
         stand(&e.dimension, e.pos, &d);
         DISPLAYS
             .lock()
-            .unwrap()
             .insert((e.dimension.clone(), e.pos.x, e.pos.y, e.pos.z), d);
         true
     });
@@ -406,7 +402,7 @@ pub fn register(registry: &mut Registry) {
             };
             let Some(at) = at else { return true };
             let key = (e.dimension.clone(), at.x, at.y, at.z);
-            if let Some(d) = DISPLAYS.lock().unwrap().remove(&key) {
+            if let Some(d) = DISPLAYS.lock().remove(&key) {
                 let b = area(at, d.facing, d.size);
                 yog_api::event::world::fill_region(&e.dimension, b.0, b.1, "minecraft:air");
                 let creative = yog_api::event::player::info(&e.player_name)
@@ -431,13 +427,13 @@ pub fn register(registry: &mut Registry) {
                     );
                 }
             }
-            SENT.lock().unwrap().retain(|(_, k), _| *k != key);
+            SENT.lock().retain(|(_, k), _| *k != key);
         }
         true
     });
     registry.on::<yog_api::event::player::session::Leave, _>(|e, cx| {
         let _phase = cx.phase();
-        SENT.lock().unwrap().retain(|(p, _), _| *p != e.player_name);
+        SENT.lock().retain(|(p, _), _| *p != e.player_name);
         true
     });
     client::register(registry);
@@ -446,7 +442,7 @@ pub fn register(registry: &mut Registry) {
 /// Drawing what the server sends on the Displays' faces.
 mod client {
     use std::collections::HashMap;
-    use std::sync::{LazyLock, Mutex};
+    use yog_api::sync::{LazyLock, Mutex};
     use std::time::{Duration, Instant};
 
     use yog_api::gfx_core::{DataType, DrawMode};
@@ -508,7 +504,7 @@ void main() {
 }";
 
     fn received(frame: Frame) {
-        let mut shown = SHOWN.lock().unwrap();
+        let mut shown = SHOWN.lock();
         let key = frame.pos;
         if frame.size == 0 {
             shown.remove(&key);
@@ -567,7 +563,7 @@ void main() {
     }
 
     fn render(gfx: &GfxContext) {
-        let mut shown = SHOWN.lock().unwrap();
+        let mut shown = SHOWN.lock();
         let now = Instant::now();
         shown.retain(|_, s| {
             let keep = now - s.heard < FORGET_AFTER;
@@ -579,7 +575,7 @@ void main() {
         if shown.is_empty() {
             return;
         }
-        let mut gl = GL.lock().unwrap();
+        let mut gl = GL.lock();
         if gl.is_none() {
             let Ok(program) = gfx.create_shader(VERT, FRAG) else {
                 return;

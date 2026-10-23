@@ -3,7 +3,7 @@
 //! `designs/` (the format is in `designs/README.md`), drawn layer by layer.
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use yog_api::sync::LazyLock;
 
 use crate::chip::{ChipMeta, CircuitBlock, CircuitData, Port, SavedAlu};
 use crate::content::Tier;
