@@ -9,8 +9,8 @@ use crate::nbt;
 use crate::port;
 use crate::res::Strings;
 use crate::vm::{
-    BlockType, ComparatorMode, Facing, NestedAlu, NestedChip, NestedPin, NestedPort, PortMode,
-    RedstoneVM,
+    BlockType, ComparatorMode, Facing, MAX_POWER, NestedAlu, NestedChip, NestedPin, NestedPort,
+    PortMode, RedstoneVM,
 };
 
 /// NBT tag of a fabricated chip's [`ChipMeta`].
@@ -161,23 +161,39 @@ impl CircuitBlock {
     /// are, full blocks as conductors, everything else as air-like blocks
     /// that cut no wire and carry no power.
     pub fn block_type(&self) -> BlockType {
-        let powered = self.is("powered", "true");
         let id = self.id();
         let path = yog_api::yog_ids::game_path(id).unwrap_or(id);
-        match path {
-            _ if id == Blocks::ANALOG_CABLE => BlockType::Cable,
-            _ if id == Blocks::DIGITAL_CABLE => BlockType::Bus,
-            _ if id == Blocks::REDSTONE_PORT => BlockType::RedstonePort {
+        self.own_block(id)
+            .or_else(|| self.redstone_part(path))
+            .or_else(|| self.moving_part(path))
+            .or_else(|| self.container(id, path))
+            .unwrap_or_else(|| shape(id, path))
+    }
+
+    /// This mod's blocks: cables and ports.
+    fn own_block(&self, id: &str) -> Option<BlockType> {
+        Some(match id {
+            Blocks::ANALOG_CABLE => BlockType::Cable,
+            Blocks::DIGITAL_CABLE => BlockType::Bus,
+            Blocks::REDSTONE_PORT => BlockType::RedstonePort {
                 output: self.redstone_port.as_ref().is_some_and(|p| p.output),
             },
-            "air" | "cave_air" | "void_air" => BlockType::Air,
+            _ => return None,
+        })
+    }
+
+    /// Wire, torches, repeaters, comparators, lamps and what gives power.
+    fn redstone_part(&self, path: &str) -> Option<BlockType> {
+        let powered = self.is("powered", "true");
+        let lit = !self.is("lit", "false");
+        Some(match path {
             "redstone_wire" => BlockType::RedstoneWire,
             "redstone_torch" => BlockType::RedstoneTorch {
-                lit: !self.is("lit", "false"),
+                lit,
                 attach: Facing::Down,
             },
             "redstone_wall_torch" => BlockType::RedstoneTorch {
-                lit: !self.is("lit", "false"),
+                lit,
                 attach: self.facing().opposite(),
             },
             "repeater" => BlockType::Repeater {
@@ -206,11 +222,28 @@ impl CircuitBlock {
                 power: self.power_prop(),
             },
             p if p.ends_with("_pressure_plate") => BlockType::PressurePlate {
-                power: if powered { 15 } else { 0 },
+                power: if powered { MAX_POWER } else { 0 },
             },
             "observer" => BlockType::Observer {
                 facing: self.facing(),
             },
+            "target" => BlockType::TargetBlock {
+                power: self.power_prop(),
+            },
+            "detector_rail" => BlockType::Source {
+                power: if powered { MAX_POWER } else { 0 },
+            },
+            "daylight_detector" => BlockType::Source {
+                power: self.power_prop(),
+            },
+            _ => return None,
+        })
+    }
+
+    /// Pistons and what they push, drag or can't move.
+    fn moving_part(&self, path: &str) -> Option<BlockType> {
+        Some(match path {
+            "air" | "cave_air" | "void_air" | "moving_piston" => BlockType::Air,
             "piston" | "sticky_piston" => BlockType::Piston {
                 facing: self.facing(),
                 sticky: path == "sticky_piston",
@@ -220,7 +253,6 @@ impl CircuitBlock {
                 facing: self.facing(),
                 sticky: self.is("type", "sticky"),
             },
-            "moving_piston" => BlockType::Air,
             "slime_block" => BlockType::Slime,
             "honey_block" => BlockType::Honey,
             "obsidian"
@@ -232,6 +264,13 @@ impl CircuitBlock {
             | "enchanting_table"
             | "ender_chest"
             | "end_portal_frame" => BlockType::Immovable,
+            _ => return None,
+        })
+    }
+
+    /// Hoppers, droppers and containers (a double chest's other half).
+    fn container(&self, id: &str, path: &str) -> Option<BlockType> {
+        Some(match path {
             "hopper" => BlockType::Hopper {
                 facing: self.facing(),
             },
@@ -240,7 +279,7 @@ impl CircuitBlock {
                 triggered: self.is("triggered", "true"),
             },
             "chest" | "trapped_chest" => BlockType::Container {
-                slots: 27,
+                slots: container_slots(id),
                 solid: false,
                 partner: match self.prop("type") {
                     Some("left") => Some(self.facing().clockwise()),
@@ -253,31 +292,23 @@ impl CircuitBlock {
                 solid: !p.ends_with("shulker_box") && p != "brewing_stand",
                 partner: None,
             },
-            "target" => BlockType::TargetBlock {
-                power: self.power_prop(),
-            },
-            "detector_rail" => BlockType::Source {
-                power: if powered { 15 } else { 0 },
-            },
-            "daylight_detector" => BlockType::Source {
-                power: self.power_prop(),
-            },
-            p if p.contains("glass")
-                || p.contains("slab")
-                || p.contains("stairs")
-                || p.contains("leaves")
-                || p.contains("fence")
-                || p.contains("wall")
-                || p.contains("door")
-                || p.contains("rail")
-                || p.contains("carpet")
-                || p == "barrier" =>
-            {
-                BlockType::Transparent
-            }
-            _ if Tier::from_alu(id).is_some() => BlockType::Alu,
-            _ => port::dir_for_block(id).map_or(BlockType::Solid, BlockType::Port),
-        }
+            _ => return None,
+        })
+    }
+}
+
+/// The rest by shape: see-through and partial blocks carry no power, an
+/// ALU and a chip's port are themselves, full blocks conduct.
+fn shape(id: &str, path: &str) -> BlockType {
+    const SEE_THROUGH: [&str; 9] = [
+        "glass", "slab", "stairs", "leaves", "fence", "wall", "door", "rail", "carpet",
+    ];
+    if SEE_THROUGH.iter().any(|p| path.contains(p)) {
+        BlockType::Transparent
+    } else if Tier::from_alu(id).is_some() {
+        BlockType::Alu
+    } else {
+        port::dir_for_block(id).map_or(BlockType::Solid, BlockType::Port)
     }
 }
 

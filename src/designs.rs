@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use yog_api::sync::LazyLock;
+use yog_api::yog_ids::{id, ns};
 
 use crate::chip::{ChipMeta, CircuitBlock, CircuitData, Port, SavedAlu};
 use crate::content::Tier;
@@ -90,7 +91,11 @@ fn pin(s: &str) -> Result<NestedPin, String> {
 static ALL: LazyLock<Vec<Design>> = LazyLock::new(|| {
     FILES
         .iter()
-        .map(|f| Design::parse(f).unwrap_or_else(|e| panic!("design: {e}")))
+        .filter_map(|f| {
+            Design::parse(f)
+                .inspect_err(|e| yog_api::error!("[yog-vlsi] design: {e}"))
+                .ok()
+        })
         .collect()
 });
 
@@ -115,6 +120,31 @@ fn dir(c: char) -> Option<(i32, i32, &'static str)> {
     })
 }
 
+/// A word's first char.
+fn ch(w: Option<&str>) -> Result<char, String> {
+    w.and_then(|w| w.chars().next())
+        .ok_or_else(|| "no char".to_string())
+}
+
+/// A word as a number.
+fn num(s: Option<&str>) -> Result<u32, String> {
+    s.and_then(|s| s.parse::<u32>().ok())
+        .ok_or_else(|| format!("bad number {s:?}"))
+}
+
+/// The blocks a design draws.
+const STONE: &str = id!(ns::MINECRAFT, "stone");
+const WIRE: &str = id!(ns::MINECRAFT, "redstone_wire");
+const TORCH: &str = id!(ns::MINECRAFT, "redstone_torch");
+const WALL_TORCH: &str = id!(ns::MINECRAFT, "redstone_wall_torch");
+const REPEATER: &str = id!(ns::MINECRAFT, "repeater");
+const COMPARATOR: &str = id!(ns::MINECRAFT, "comparator");
+/// The facing a char without an arrow gets.
+const NORTH: &str = "north";
+
+/// A repeater's longest delay, in redstone ticks.
+const MAX_DELAY: u32 = 4;
+
 fn opposite(facing: &str) -> &'static str {
     match facing {
         "north" => "south",
@@ -134,71 +164,12 @@ impl Design {
             unlit: Vec::new(),
             alus: HashMap::new(),
         };
-        let ch = |w: Option<&str>| {
-            w.and_then(|w| w.chars().next())
-                .ok_or_else(|| format!("{text:?}: no char"))
-        };
-        let num = |s: Option<&str>| {
-            s.and_then(|s| s.parse::<u32>().ok())
-                .ok_or_else(|| format!("bad number in {text:?}"))
-        };
         for line in text
             .lines()
             .map(str::trim_end)
             .filter(|l| !l.is_empty() && !l.starts_with("//"))
         {
-            let mut words = line.split_whitespace();
-            match words.next() {
-                Some("name") => d.name = line["name".len()..].trim().to_string(),
-                Some("port") => {
-                    let ch = words
-                        .next()
-                        .and_then(|w| w.chars().next())
-                        .ok_or("port: no char")?;
-                    let label = words.next().ok_or("port: no label")?.to_string();
-                    let mode = match words.next() {
-                        Some("in") => PortMode::Input,
-                        Some("out") => PortMode::Output,
-                        Some("bidi") => PortMode::Bidirectional,
-                        m => return Err(format!("port {label}: mode {m:?}")),
-                    };
-                    d.ports.insert(ch, (label, mode));
-                }
-                Some("delay") => {
-                    let at = (num(words.next())?, num(words.next())?, num(words.next())?);
-                    d.delays.insert(at, num(words.next())?.clamp(1, 4) as u8);
-                }
-                Some("unlit") => {
-                    d.unlit
-                        .push((num(words.next())?, num(words.next())?, num(words.next())?))
-                }
-                Some("alu") => {
-                    let c = ch(words.next())?;
-                    let tier = words
-                        .next()
-                        .and_then(Tier::from_id)
-                        .ok_or(format!("alu {c}: tier"))?;
-                    d.alus.entry(c).or_default().tier = Some(tier);
-                }
-                Some("chip") => {
-                    let c = ch(words.next())?;
-                    let slot = num(words.next())? as u8;
-                    let name = words.collect::<Vec<_>>().join(" ");
-                    d.alus.entry(c).or_default().chips.push((slot, name));
-                }
-                Some("wire") => {
-                    let c = ch(words.next())?;
-                    let from = pin(words.next().ok_or("wire: from")?)?;
-                    let to = pin(words.next().ok_or("wire: to")?)?;
-                    d.alus.entry(c).or_default().wires.push((from, to));
-                }
-                Some("layer") => d.layers.push(Vec::new()),
-                _ => d
-                    .layers
-                    .last_mut()
-                    .ok_or("a row before any layer")?
-                    .push(line.chars().collect()),
-            }
+            d.line(line)?;
         }
         if d.name.is_empty() {
             return Err("no name".into());
@@ -207,6 +178,70 @@ impl Design {
             return Err(format!("{}: alu {c} has no tier", d.name));
         }
         Ok(d)
+    }
+
+    /// One line of a design's text: a setting, or a row of the last layer.
+    fn line(&mut self, line: &str) -> Result<(), String> {
+        let mut words = line.split_whitespace();
+        match words.next() {
+            Some("name") => self.name = line["name".len()..].trim().to_string(),
+            Some("port") => {
+                let c = ch(words.next())?;
+                let label = words.next().ok_or("port: no label")?.to_string();
+                let mode = match words.next() {
+                    Some("in") => PortMode::Input,
+                    Some("out") => PortMode::Output,
+                    Some("bidi") => PortMode::Bidirectional,
+                    m => return Err(format!("port {label}: mode {m:?}")),
+                };
+                self.ports.insert(c, (label, mode));
+            }
+            Some("delay") => {
+                let at = (num(words.next())?, num(words.next())?, num(words.next())?);
+                let ticks = num(words.next())?.clamp(1, MAX_DELAY);
+                self.delays.insert(at, ticks as u8);
+            }
+            Some("unlit") => {
+                self.unlit
+                    .push((num(words.next())?, num(words.next())?, num(words.next())?))
+            }
+            Some(k @ ("alu" | "chip" | "wire")) => self.alu_line(k, words)?,
+            Some("layer") => self.layers.push(Vec::new()),
+            _ => self
+                .layers
+                .last_mut()
+                .ok_or("a row before any layer")?
+                .push(line.chars().collect()),
+        }
+        Ok(())
+    }
+
+    /// An `alu`, `chip` or `wire` line: an ALU's tier, a chip in a slot of
+    /// it, a wire on its board.
+    fn alu_line<'a>(
+        &mut self,
+        keyword: &str,
+        mut words: impl Iterator<Item = &'a str>,
+    ) -> Result<(), String> {
+        let c = ch(words.next())?;
+        let alu = self.alus.entry(c).or_default();
+        match keyword {
+            "alu" => {
+                let tier = words.next().and_then(Tier::from_id);
+                alu.tier = Some(tier.ok_or(format!("alu {c}: tier"))?);
+            }
+            "chip" => {
+                let slot = num(words.next())? as u8;
+                let name = words.collect::<Vec<_>>().join(" ");
+                alu.chips.push((slot, name));
+            }
+            _ => {
+                let from = pin(words.next().ok_or("wire: from")?)?;
+                let to = pin(words.next().ok_or("wire: to")?)?;
+                alu.wires.push((from, to));
+            }
+        }
+        Ok(())
     }
 
     /// The char at `(x, y, z)` (`.` off the drawing).
@@ -264,7 +299,7 @@ impl Design {
             sides[(one + 2) % 4].1 = "side";
         }
         let props: Vec<String> = sides.iter().map(|(n, h)| format!("{n}={h}")).collect();
-        format!("minecraft:redstone_wire[{},power=0]", props.join(","))
+        format!("{WIRE}[{},power=0]", props.join(","))
     }
 
     /// The smallest tier its drawing fits.
@@ -303,86 +338,101 @@ impl Design {
         for (y, layer) in self.layers.iter().enumerate() {
             for (z, row) in layer.iter().enumerate() {
                 for (x, &ch) in row.iter().enumerate() {
-                    let (x, y, z) = (x as u32, y as u32, z as u32);
-                    let at = (x + ox, y, z + oz);
-                    let state = match ch {
-                        '.' | ' ' => continue,
-                        '#' => yog_api::yog_ids::id!(yog_api::yog_ids::ns::MINECRAFT, "stone")
-                            .to_string(),
-                        '-' => self.wire_state(x as i32, y as i32, z as i32),
-                        'T' => format!(
-                            "minecraft:redstone_torch[lit={}]",
-                            !self.unlit.contains(&(x, y, z))
-                        ),
-                        '^' | '>' | 'v' | '<' => format!(
-                            "minecraft:redstone_wall_torch[facing={},lit={}]",
-                            dir(ch).map_or("north", |d| d.2),
-                            !self.unlit.contains(&(x, y, z))
-                        ),
-                        '↑' | '→' | '↓' | '←' => format!(
-                            "minecraft:repeater[delay={},facing={},locked=false,powered=false]",
-                            self.delays.get(&(x, y, z)).copied().unwrap_or(1),
-                            opposite(dir(ch).map_or("north", |d| d.2))
-                        ),
-                        '△' | '▷' | '▽' | '◁' => format!(
-                            "minecraft:comparator[facing={},mode=subtract,powered=false]",
-                            opposite(dir(ch).map_or("north", |d| d.2))
-                        ),
-                        a if self.alus.contains_key(&a) => {
-                            let alu = &self.alus[&a];
-                            let t = alu.tier.unwrap_or(Tier::Wood);
-                            let chips = alu
-                                .chips
-                                .iter()
-                                .filter_map(|(slot, name)| {
-                                    let d = named(name)?;
-                                    let inner = d.circuit(d.tier());
-                                    Some((
-                                        *slot,
-                                        ChipMeta {
-                                            id: format!("{CHIP_PREFIX}{name}"),
-                                            tier: d.tier(),
-                                            name: name.clone(),
-                                            ports: inner.ports,
-                                        },
-                                    ))
-                                })
-                                .collect();
-                            c.alus.push(SavedAlu {
-                                x: at.0,
-                                y: at.1,
-                                z: at.2,
-                                tier: t,
-                                chips,
-                                wires: alu.wires.clone(),
-                            });
-                            t.alu().to_string()
-                        }
-                        p => {
-                            if let Some((label, mode)) = self.ports.get(&p) {
-                                c.ports.push(Port {
-                                    label: label.clone(),
-                                    x: at.0,
-                                    y: at.1,
-                                    z: at.2,
-                                    dir: *mode,
-                                });
-                            }
-                            continue;
-                        }
-                    };
-                    c.blocks.push(CircuitBlock {
-                        x: at.0,
-                        y: at.1,
-                        z: at.2,
-                        state,
-                        items: Vec::new(),
-                        redstone_port: None,
-                    });
+                    let cell = (x as u32, y as u32, z as u32);
+                    let at = (cell.0 + ox, cell.1, cell.2 + oz);
+                    self.place(&mut c, ch, cell, at);
                 }
             }
         }
         c
+    }
+
+    /// Char `ch` of the drawing's `cell`, into circuit `c` at `at`: a
+    /// block, an ALU, or a port.
+    fn place(&self, c: &mut CircuitData, ch: char, cell: (u32, u32, u32), at: (u32, u32, u32)) {
+        if ch == '.' || ch == ' ' {
+            return;
+        }
+        let state = match self.state(ch, cell) {
+            Some(state) => state,
+            None if self.alus.contains_key(&ch) => self.alu(c, ch, at),
+            None => {
+                if let Some((label, mode)) = self.ports.get(&ch) {
+                    c.ports.push(Port {
+                        label: label.clone(),
+                        x: at.0,
+                        y: at.1,
+                        z: at.2,
+                        dir: *mode,
+                    });
+                }
+                return;
+            }
+        };
+        c.blocks.push(CircuitBlock {
+            x: at.0,
+            y: at.1,
+            z: at.2,
+            state,
+            items: Vec::new(),
+            redstone_port: None,
+        });
+    }
+
+    /// The block state char `ch` draws at `cell`; none for what isn't a block.
+    fn state(&self, ch: char, (x, y, z): (u32, u32, u32)) -> Option<String> {
+        let lit = !self.unlit.contains(&(x, y, z));
+        let facing = || dir(ch).map_or(NORTH, |d| d.2);
+        Some(match ch {
+            '#' => STONE.to_string(),
+            '-' => self.wire_state(x as i32, y as i32, z as i32),
+            'T' => format!("{TORCH}[lit={lit}]"),
+            '^' | '>' | 'v' | '<' => format!("{WALL_TORCH}[facing={},lit={lit}]", facing()),
+            '↑' | '→' | '↓' | '←' => format!(
+                "{REPEATER}[delay={},facing={},locked=false,powered=false]",
+                self.delays.get(&(x, y, z)).copied().unwrap_or(1),
+                opposite(facing())
+            ),
+            '△' | '▷' | '▽' | '◁' => format!(
+                "{COMPARATOR}[facing={},mode=subtract,powered=false]",
+                opposite(facing())
+            ),
+            _ => return None,
+        })
+    }
+
+    /// ALU `a` of the drawing, into circuit `c` at `at`: its block's id.
+    fn alu(&self, c: &mut CircuitData, a: char, at: (u32, u32, u32)) -> String {
+        let Some(alu) = self.alus.get(&a) else {
+            return String::new();
+        };
+        let t = alu.tier.unwrap_or(Tier::Wood);
+        let chips = alu
+            .chips
+            .iter()
+            .filter_map(|(slot, name)| {
+                let d = named(name)?;
+                let inner = d.circuit(d.tier());
+                Some((
+                    *slot,
+                    ChipMeta {
+                        id: format!("{CHIP_PREFIX}{name}"),
+                        tier: d.tier(),
+                        name: name.clone(),
+                        ports: inner.ports,
+                    },
+                ))
+            })
+            .collect();
+        c.alus.push(SavedAlu {
+            x: at.0,
+            y: at.1,
+            z: at.2,
+            tier: t,
+            chips,
+            wires: alu.wires.clone(),
+        });
+        t.alu().to_string()
     }
 }
 
