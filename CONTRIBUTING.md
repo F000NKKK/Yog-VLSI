@@ -27,8 +27,8 @@ code, so we can agree on the approach first.
 
    ```bash
    yog check                # generate the build and type-check
-   cargo test --manifest-path .yog-build/Cargo.toml
-   yog build                # package artifacts/yog-vlsi.yog
+   cargo test --manifest-path obj/Cargo.toml
+   yog build                # package bin/yog-vlsi.yog
    ```
 
 4. Open a pull request that explains what changed and why.

@@ -114,7 +114,7 @@ that a modpack can change.
 2. Put yog-vlsi.yog into the yog-mods folder of your game directory.
 
 To build it yourself, run `yog build` in this folder; the package appears in
-artifacts. The mod is edited in [Yog IDLE](https://github.com/F000NKKK/Yog-IDLE),
+bin/. The mod is edited in [Yog IDLE](https://github.com/F000NKKK/Yog-IDLE),
 which shows its screens, blocks, recipes and tables visually.
 
 ## 🤝 Contributing

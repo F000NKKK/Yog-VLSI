@@ -4,6 +4,6 @@
     "*.rs": "${capture}.designer.rs"
   },
   "rust-analyzer.linkedProjects": [
-    ".yog-build/Cargo.toml"
+    "obj/Cargo.toml"
   ]
 }

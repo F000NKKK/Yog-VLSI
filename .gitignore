@@ -1,6 +1,5 @@
-.yog-build/
-target/
-artifacts/
+obj/
+bin/
 .yog-idle/
 *.designer.rs
 __pycache__/

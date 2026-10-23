@@ -1,6 +1,6 @@
 """Renders the ALU board drawings recorded by `render_boards` (alu.rs) to PNG.
 
-    OUT=dir cargo test --lib render_boards -- --ignored   (in .yog-build)
+    OUT=dir cargo test --lib render_boards -- --ignored   (in obj)
     python3 render_board.py dir/*.jsonl
 """
 import json, sys
