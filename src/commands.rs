@@ -8,20 +8,13 @@
 use yog_api::Registry;
 
 use crate::chip::ChipMeta;
+use crate::res::Strings;
 
 // ── Registration ────────────────────────────────────────────────────────────
 
 pub fn register(registry: &mut Registry) {
     // ── /vlsi ──────────────────────────────────────────────────────────────
-    registry.on_command("vlsi", |_ctx| {
-        Some(
-            "§6Yog VLSI §7— Very Large Scale Integration\n\
-             §7Designs live on Blueprints: put one in a VLSI Workbench.\n\
-             §7/vlsi save                 §f— save the circuit you're editing and return\n\
-             §7/vlsi info                 §f— show the held chip"
-                .into(),
-        )
-    });
+    registry.on_command("vlsi", |_ctx| Some(Strings::command_help()));
 
     // ── /vlsi info ─────────────────────────────────────────────────────────
     registry.on_typed_command("vlsi", "word", |ctx| {
@@ -30,37 +23,27 @@ pub fn register(registry: &mut Registry) {
         }
         let nbt = match yog_api::event::player::held_item_nbt(&ctx.source) {
             Some(n) => n,
-            None => return Some("§cNo NBT on held item.".into()),
+            None => return Some(Strings::command_no_nbt()),
         };
         match ChipMeta::from_nbt(&nbt) {
             Some(meta) => {
                 let ports = if meta.ports.is_empty() {
-                    "§7(none)".into()
+                    Strings::command_no_ports()
                 } else {
                     meta.ports
                         .iter()
-                        .map(|p| {
-                            format!(
-                                "  §e{}§7: {} ({}, {}, {})",
-                                p.label,
-                                p.dir.label(),
-                                p.x,
-                                p.y,
-                                p.z
-                            )
-                        })
+                        .map(|p| Strings::command_port(&p.label, p.dir.label(), p.x, p.y, p.z))
                         .collect::<Vec<_>>()
                         .join("\n")
                 };
-                Some(format!(
-                    "§6Chip: §f{}\n§7ID: §f{}\n§7Tier: §e{}\n§7Ports:\n{}",
-                    meta.name,
-                    meta.id,
+                Some(Strings::command_chip(
+                    &meta.name,
+                    &meta.id,
                     meta.tier.name(),
-                    ports
+                    ports,
                 ))
             }
-            None => Some("§cNo VLSI chip data.".into()),
+            None => Some(Strings::command_no_chip()),
         }
     });
 }

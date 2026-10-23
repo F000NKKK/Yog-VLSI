@@ -37,6 +37,7 @@ use crate::chip::{
 use crate::content::Tier;
 use crate::content::{Blocks, Items};
 use crate::port;
+use crate::res::Strings;
 
 /// Id of the pocket dimension the editor runs in — declared via
 /// `Registry::register_dimension` in `lib.rs`.
@@ -362,7 +363,7 @@ pub fn enter(
         DIMENSION_ID,
         (cx, (EDITOR_Y + 1) as f64, cz),
     ) {
-        return Err("§cCouldn't enter the editor dimension — see the game log.".into());
+        return Err(Strings::editor_no_dimension());
     }
     yog_api::event::player::set_gamemode(player_name, "creative");
     SESSIONS.lock().insert(
@@ -383,13 +384,7 @@ pub fn enter(
     persist();
     yog_api::event::chat::actionbar(
         player_name,
-        format!(
-            "§6Editing '{}' — {} tier, {}×{}. §7/vlsi save when done.",
-            blueprint.name,
-            blueprint.tier.name(),
-            size,
-            size
-        ),
+        Strings::editor_editing(&blueprint.name, blueprint.tier.name(), size, size),
     );
     Ok(())
 }
@@ -398,7 +393,7 @@ pub fn enter(
 /// player back and removes their editing field. Returns a status message.
 pub fn save(player_name: &str) -> String {
     let Some(session) = SESSIONS.lock().remove(player_name) else {
-        return "§cYou are not editing a VLSI circuit right now.".into();
+        return Strings::editor_not_editing();
     };
     let message = finish(player_name, session);
     persist();
@@ -492,10 +487,9 @@ fn scan(session: &EditorSession) -> Blueprint {
 /// go back to. Then the field goes, and they go back.
 fn finish(player_name: &str, session: EditorSession) -> String {
     let blueprint = scan(&session);
-    let summary = format!(
-        "{} ports, {} blocks",
+    let summary = Strings::editor_summary(
         blueprint.circuit.ports.len(),
-        blueprint.circuit.blocks.len()
+        blueprint.circuit.blocks.len(),
     );
     let nbt = blueprint.to_nbt();
     let src = &session.source;
@@ -520,7 +514,7 @@ fn finish(player_name: &str, session: EditorSession) -> String {
             1,
             &nbt,
         ) {
-        format!("§aSaved '{}' to its Blueprint — {summary}.", blueprint.name)
+        Strings::editor_saved(&blueprint.name, &summary)
     } else {
         let taken: Vec<u32> = yog_api::event::player::inventory(player_name)
             .into_iter()
@@ -530,10 +524,7 @@ fn finish(player_name: &str, session: EditorSession) -> String {
         if free.is_some_and(|slot| {
             yog_api::event::player::set_slot_item(player_name, slot, Items::BLUEPRINT, 1, &nbt)
         }) {
-            format!(
-                "§aSaved '{}' to a new Blueprint in your inventory — {summary}.",
-                blueprint.name
-            )
+            Strings::editor_saved_new(&blueprint.name, &summary)
         } else {
             yog_api::event::item::spawn_item(
                 &session.return_dim,
@@ -543,10 +534,7 @@ fn finish(player_name: &str, session: EditorSession) -> String {
                 1,
                 &nbt,
             );
-            format!(
-                "§eSaved '{}' to a Blueprint dropped where you're back — {summary}.",
-                blueprint.name
-            )
+            Strings::editor_saved_dropped(&blueprint.name, &summary)
         }
     };
 
@@ -637,10 +625,7 @@ pub fn register(registry: &mut Registry) {
             .cloned()
             .unwrap_or_else(|| (game::OVERWORLD.into(), (0.5, 100.0, 0.5)));
         yog_api::event::player::teleport_to_dim(&e.player_name, &dim, (x, y, z));
-        yog_api::event::chat::actionbar(
-            &e.player_name,
-            "§cThe circuit editor is only open from a VLSI Workbench.",
-        );
+        yog_api::event::chat::actionbar(&e.player_name, Strings::editor_workbench_only());
         false
     });
 

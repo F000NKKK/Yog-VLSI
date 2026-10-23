@@ -431,12 +431,12 @@ fn run_request(player: &str, request: Request) -> String {
             design,
         } => {
             if !matches!(blueprint_in(&bench).0, BlueprintView::Blank) {
-                return "§cPut a blank Blueprint in the workbench.".into();
+                return Strings::workbench_need_blank();
             }
             let mut bp = Blueprint::new(name.clone(), tier);
             if let Some(design) = design {
                 let Some(d) = designs::named(&design) else {
-                    return format!("§cNo design '{design}'.");
+                    return Strings::workbench_no_design(&design);
                 };
                 bp.circuit = d.circuit(tier);
             }
@@ -448,13 +448,13 @@ fn run_request(player: &str, request: Request) -> String {
                 1,
                 bp.to_nbt(),
             ) {
-                return "§cCouldn't write the Blueprint.".into();
+                return Strings::workbench_write_failed();
             }
-            format!("§aCreated '{name}' ({} tier).", tier.name())
+            Strings::workbench_created(&name, tier.name())
         }
         Request::Edit { bench } => {
             let Some(bp) = blueprint_in(&bench).1 else {
-                return "§cPut a written Blueprint in the workbench.".into();
+                return Strings::workbench_need_written();
             };
             let back = yog_api::event::player::info(player)
                 .and_then(|i| yog_api::event::entity::position(i.uuid))
@@ -480,10 +480,10 @@ fn run_request(player: &str, request: Request) -> String {
 
 fn fabricate(bench: &BenchId) -> String {
     let Some(bp) = blueprint_in(bench).1 else {
-        return "§cPut a written Blueprint in the workbench.".into();
+        return Strings::workbench_need_written();
     };
     if yog_api::event::block::inventory_slot(&bench.dimension, bench.pos(), CHIP_SLOT).is_some() {
-        return "§cTake the chip out of the chip slot first.".into();
+        return Strings::workbench_take_chip();
     }
     let cost = crate::resources::circuit_cost(&bp.circuit, &|id| {
         crate::chip::CircuitData::load_for_chip(id)
@@ -503,7 +503,7 @@ fn fabricate(bench: &BenchId) -> String {
             })
             .collect();
         if !missing.is_empty() {
-            return format!("§cNot enough: {}.", missing.join(", "));
+            return Strings::workbench_not_enough(missing.join(", "));
         }
     }
     let meta = ChipMeta {
@@ -521,19 +521,14 @@ fn fabricate(bench: &BenchId) -> String {
         1u32,
         meta.to_nbt(),
     ) {
-        return "§cCouldn't put the chip in the chip slot.".into();
+        return Strings::workbench_chip_failed();
     }
     let mut stores = STORES.lock();
     let store = stores.entry(bench.clone()).or_default();
     for (s, c) in store.iter_mut().zip(cost) {
         *s -= c;
     }
-    format!(
-        "§aFabricated '{}' ({} tier, {} ports).",
-        meta.name,
-        bp.tier.name(),
-        meta.ports.len()
-    )
+    Strings::workbench_fabricated(&meta.name, bp.tier.name(), meta.ports.len())
 }
 
 /// The block, its screen, and the server side.

@@ -261,7 +261,7 @@ impl Board {
         match request {
             Request::Connect { from, to, .. } => {
                 if !self.is_source(&from) || !self.is_sink(&to) {
-                    return Err("§cA wire runs from an output pin to an input pin.".into());
+                    return Err(crate::res::Strings::board_wire_direction());
                 }
                 // A sink takes one wire; a side that becomes an output stops
                 // being an input.

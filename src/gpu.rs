@@ -260,9 +260,10 @@ impl Gpu {
                     ],
                     scale: self.r(reg::SCALE),
                     vertices: used.iter().map(|&v| self.vertices[v as usize]).collect(),
+                    // Every index is among `used`, made of them.
                     indices: indices
                         .iter()
-                        .map(|i| used.binary_search(i).unwrap() as u16)
+                        .filter_map(|i| used.binary_search(i).ok().map(|k| k as u16))
                         .collect(),
                 })
             }
@@ -301,12 +302,22 @@ impl Gpu {
     }
 }
 
+/// RGB332: where red and green sit in the byte, and the largest red or
+/// green (3 bits) and blue (2 bits).
+const RED_SHIFT: u8 = 5;
+const GREEN_SHIFT: u8 = 2;
+const RG_MAX: u8 = 7;
+const B_MAX: u8 = 3;
+
 /// An RGB332 color as RGBA bytes, `light` (0–1) times as bright.
 fn rgba(c: u8, light: f32) -> [u8; 4] {
-    let r = (c >> 5) as f32 * 255.0 / 7.0;
-    let g = ((c >> 2) & 7) as f32 * 255.0 / 7.0;
-    let b = (c & 3) as f32 * 255.0 / 3.0;
-    [(r * light) as u8, (g * light) as u8, (b * light) as u8, 255]
+    let full = |v: u8, max: u8| (f32::from(v) * f32::from(u8::MAX) / f32::from(max) * light) as u8;
+    [
+        full(c >> RED_SHIFT, RG_MAX),
+        full((c >> GREEN_SHIFT) & RG_MAX, RG_MAX),
+        full(c & B_MAX, B_MAX),
+        u8::MAX,
+    ]
 }
 
 /// A screen being drawn: colors and depths.
@@ -401,14 +412,26 @@ impl Raster {
     }
 }
 
+/// A whole turn, and the scale drawn at its size, in their registers' units.
+const TURN: f32 = 256.0;
+const SCALE_ONE: f32 = 16.0;
+/// How far back the eye stands from a default-sized screen.
+const EYE: f32 = 600.0;
+/// Where the light falls from (up, right, toward the viewer), and the
+/// light a face turned away still gets.
+const LIGHT: [f32; 3] = [-0.4, 0.6, 0.7];
+const AMBIENT: f32 = 0.3;
+/// The shortest normal a face is lit by (a degenerate one isn't).
+const MIN_NORMAL: f32 = 1e-6;
+
 /// A draw's vertices turned (`turn` in 256ths of a turn) and scaled: x
 /// right, y up, z toward the viewer.
 fn transform(d: &Draw, turn: [f32; 3]) -> Vec<[f32; 3]> {
-    let a = |t: f32| t * std::f32::consts::TAU / 256.0;
+    let a = |t: f32| t * std::f32::consts::TAU / TURN;
     let (sy, cy) = a(turn[0]).sin_cos();
     let (sp, cp) = a(turn[1]).sin_cos();
     let (sr, cr) = a(turn[2]).sin_cos();
-    let s = d.scale as f32 / 16.0;
+    let s = d.scale as f32 / SCALE_ONE;
     d.vertices
         .iter()
         .map(|v| {
@@ -434,13 +457,6 @@ pub fn render(ops: &[Op], ticks: f32) -> (u16, u16, Vec<u8>) {
         .unwrap_or((DEFAULT_SIZE, DEFAULT_SIZE));
     let (w, h) = (w.clamp(1, MAX_SIZE), h.clamp(1, MAX_SIZE));
     let mut r = Raster::new(w, h, 0);
-    // The eye stands back as far for any size: a picture looks the same.
-    let eye = 600.0 * w.max(h) as f32 / DEFAULT_SIZE as f32;
-    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
-    let project = |v: [f32; 3]| {
-        let f = eye / (eye - v[2]).max(1.0);
-        [cx + v[0] * f, cy - v[1] * f, v[2]]
-    };
     for op in ops {
         match op {
             Op::Clear { color, .. } => {
@@ -453,68 +469,92 @@ pub fn render(ops: &[Op], ticks: f32) -> (u16, u16, Vec<u8>) {
                 (to.0 as i32, to.1 as i32),
                 rgba(*color, 1.0),
             ),
-            Op::Draw(d) => {
-                let turn = [0, 1, 2].map(|i| d.turn[i] as f32 + d.spin[i] as f32 * ticks);
-                let view = transform(d, turn);
-                let screen: Vec<[f32; 3]> = view.iter().map(|&v| project(v)).collect();
-                let at = |i: u16| screen.get(i as usize).copied();
-                let xy = |p: [f32; 3]| (p[0].round() as i32, p[1].round() as i32);
-                let color = rgba(d.color, 1.0);
-                match d.mode {
-                    mode::LINES => {
-                        for &[i, j] in d.indices.as_chunks::<2>().0 {
-                            if let (Some(a), Some(b)) = (at(i), at(j)) {
-                                r.line(xy(a), xy(b), color);
-                            }
-                        }
-                    }
-                    mode::WIRE => {
-                        for &[i, j, k] in d.indices.as_chunks::<3>().0 {
-                            if let (Some(a), Some(b), Some(c)) = (at(i), at(j), at(k)) {
-                                r.line(xy(a), xy(b), color);
-                                r.line(xy(b), xy(c), color);
-                                r.line(xy(c), xy(a), color);
-                            }
-                        }
-                    }
-                    mode::FACES => {
-                        let light = {
-                            let l = [-0.4f32, 0.6, 0.7];
-                            let n = (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]).sqrt();
-                            l.map(|v| v / n)
-                        };
-                        for &[i, j, k] in d.indices.as_chunks::<3>().0 {
-                            let (Some(a), Some(b), Some(c)) = (at(i), at(j), at(k)) else {
-                                continue;
-                            };
-                            // On screen y grows down: counter-clockwise faces us when this is negative.
-                            let facing =
-                                (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-                            if facing >= 0.0 {
-                                continue;
-                            }
-                            let (va, vb, vc) =
-                                (view[i as usize], view[j as usize], view[k as usize]);
-                            let (u, v) = (
-                                [0, 1, 2].map(|i| vb[i] - va[i]),
-                                [0, 1, 2].map(|i| vc[i] - va[i]),
-                            );
-                            let n = [
-                                u[1] * v[2] - u[2] * v[1],
-                                u[2] * v[0] - u[0] * v[2],
-                                u[0] * v[1] - u[1] * v[0],
-                            ];
-                            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
-                            let lit = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) / len;
-                            r.triangle([a, b, c], rgba(d.color, 0.3 + 0.7 * lit.max(0.0)));
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            Op::Draw(d) => r.mesh(d, ticks),
         }
     }
     (w, h, r.px.into_iter().flatten().collect())
+}
+
+/// The direction the light falls from, of length 1.
+fn light() -> [f32; 3] {
+    let n = LIGHT.iter().map(|v| v * v).sum::<f32>().sqrt();
+    LIGHT.map(|v| v / n)
+}
+
+impl Raster {
+    /// A draw `ticks` after it was shown: turned by its spin, seen from the
+    /// eye, drawn as its mode says.
+    fn mesh(&mut self, d: &Draw, ticks: f32) {
+        // The eye stands back as far for any size: a picture looks the same.
+        let eye = EYE * self.w.max(self.h) as f32 / f32::from(DEFAULT_SIZE);
+        let (cx, cy) = (self.w as f32 / 2.0, self.h as f32 / 2.0);
+        let turn = [0, 1, 2].map(|i| d.turn[i] as f32 + d.spin[i] as f32 * ticks);
+        let view = transform(d, turn);
+        let screen: Vec<[f32; 3]> = view
+            .iter()
+            .map(|v| {
+                let f = eye / (eye - v[2]).max(1.0);
+                [cx + v[0] * f, cy - v[1] * f, v[2]]
+            })
+            .collect();
+        let at = |i: u16| screen.get(i as usize).copied();
+        let xy = |p: [f32; 3]| (p[0].round() as i32, p[1].round() as i32);
+        let color = rgba(d.color, 1.0);
+        match d.mode {
+            mode::LINES => {
+                for &[i, j] in d.indices.as_chunks::<2>().0 {
+                    if let (Some(a), Some(b)) = (at(i), at(j)) {
+                        self.line(xy(a), xy(b), color);
+                    }
+                }
+            }
+            mode::WIRE => {
+                for &[i, j, k] in d.indices.as_chunks::<3>().0 {
+                    if let (Some(a), Some(b), Some(c)) = (at(i), at(j), at(k)) {
+                        self.line(xy(a), xy(b), color);
+                        self.line(xy(b), xy(c), color);
+                        self.line(xy(c), xy(a), color);
+                    }
+                }
+            }
+            mode::FACES => self.faces(d, &view, &screen),
+            _ => {}
+        }
+    }
+
+    /// A draw's triangles that face the eye, lit by how they face the light.
+    fn faces(&mut self, d: &Draw, view: &[[f32; 3]], screen: &[[f32; 3]]) {
+        let light = light();
+        let at = |i: u16| {
+            Some((
+                screen.get(i as usize).copied()?,
+                view.get(i as usize).copied()?,
+            ))
+        };
+        for &[i, j, k] in d.indices.as_chunks::<3>().0 {
+            let (Some((a, va)), Some((b, vb)), Some((c, vc))) = (at(i), at(j), at(k)) else {
+                continue;
+            };
+            // On screen y grows down: counter-clockwise faces us when this is negative.
+            let facing = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+            if facing >= 0.0 {
+                continue;
+            }
+            let (u, v) = (
+                [0, 1, 2].map(|i| vb[i] - va[i]),
+                [0, 1, 2].map(|i| vc[i] - va[i]),
+            );
+            let n = [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ];
+            let len = n.iter().map(|x| x * x).sum::<f32>().sqrt().max(MIN_NORMAL);
+            let lit = n.iter().zip(light).map(|(n, l)| n * l).sum::<f32>() / len;
+            let shade = AMBIENT + (1.0 - AMBIENT) * lit.max(0.0);
+            self.triangle([a, b, c], rgba(d.color, shade));
+        }
+    }
 }
 
 #[cfg(test)]
