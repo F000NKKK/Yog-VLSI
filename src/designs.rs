@@ -693,10 +693,7 @@ mod tests {
             );
         }
     }
-}
 
-#[cfg(test)]
-mod export {
     /// Every ready-made design as a Blueprint's JSON (`OUT`), at its tier —
     /// for tools that put them in a save or a README.
     #[test]

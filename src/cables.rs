@@ -299,7 +299,56 @@ pub fn side_output(dim: &str, alu: (i32, i32, i32), side: &str, cable: Option<&s
 /// Tells Yog Pipes about the cables and the Redstone Port — once every mod
 /// has loaded.
 fn register_networks() {
-    let signal = |name: &str, prefix: &str, channels: u16| CapabilityDef {
+    let steps: [Result<(), String>; 7] = [
+        pipes(yog_pipes::register_capability(signal(
+            ANALOG,
+            ANALOG_WORD,
+            1,
+        ))),
+        pipes(yog_pipes::register_capability(signal(
+            DIGITAL,
+            DIGITAL_WORD,
+            BUS_CHANNELS,
+        ))),
+        pipes(yog_pipes::attach(cable(
+            Blocks::ANALOG_CABLE,
+            ANALOG,
+            ANALOG_WORD,
+        ))),
+        pipes(yog_pipes::attach(cable(
+            Blocks::DIGITAL_CABLE,
+            DIGITAL,
+            DIGITAL_WORD,
+        ))),
+        pipes(yog_pipes::register_endpoint(listener(
+            DIGITAL,
+            Blocks::REDSTONE_PORT,
+        ))),
+        // A Display reads its registers' writes off the bus (`display.rs`).
+        pipes(yog_pipes::register_endpoint(listener(
+            DIGITAL,
+            Blocks::DISPLAY,
+        ))),
+        pipes(yog_pipes::register_endpoint(listener(
+            ANALOG,
+            Blocks::REDSTONE_PORT,
+        ))),
+    ];
+    for r in steps {
+        if let Err(e) = r {
+            warn!("[yog-vlsi] Yog Pipes: {e}");
+        }
+    }
+}
+
+/// A cable's word: its capability's state prefix and its link group.
+const ANALOG_WORD: &str = "analog";
+const DIGITAL_WORD: &str = "digital";
+
+/// A signal network named `name` of `channels` channels, its block states
+/// prefixed `prefix`: one capability to a block, nearest first, no loss.
+fn signal(name: &str, prefix: &str, channels: u16) -> CapabilityDef {
+    CapabilityDef {
         name: name.to_string(),
         kinds: Vec::new(),
         exclusive: true,
@@ -311,74 +360,34 @@ fn register_networks() {
             channels,
             attenuation: 0,
         },
-    };
-    let steps: [Result<(), String>; 7] = [
-        pipes(yog_pipes::register_capability(signal(ANALOG, "analog", 1))),
-        pipes(yog_pipes::register_capability(signal(
-            DIGITAL,
-            "digital",
-            BUS_CHANNELS,
-        ))),
-        pipes(yog_pipes::attach(AttachDef {
-            block: Blocks::ANALOG_CABLE.to_string(),
-            capability: ANALOG.to_string(),
-            groups: vec!["analog".into()],
-            params: HashMap::new(),
-        })),
-        pipes(yog_pipes::attach(AttachDef {
-            block: Blocks::DIGITAL_CABLE.to_string(),
-            capability: DIGITAL.to_string(),
-            groups: vec!["digital".into()],
-            params: HashMap::new(),
-        })),
-        pipes(yog_pipes::register_endpoint(EndpointDef {
-            capability: DIGITAL.to_string(),
-            target: EndpointTarget::Block(Blocks::REDSTONE_PORT.to_string()),
-            kinds: Vec::new(),
-            can_insert: false,
-            can_extract: false,
-            listens_signals: true,
-            listens_messages: false,
-            groups: Vec::new(),
-            priority: 0,
-            max_packet: 0,
-            pressure: 0,
-            handler: None,
-        })),
-        // A Display reads its registers' writes off the bus (`display.rs`).
-        pipes(yog_pipes::register_endpoint(EndpointDef {
-            capability: DIGITAL.to_string(),
-            target: EndpointTarget::Block(Blocks::DISPLAY.to_string()),
-            kinds: Vec::new(),
-            can_insert: false,
-            can_extract: false,
-            listens_signals: true,
-            listens_messages: false,
-            groups: Vec::new(),
-            priority: 0,
-            max_packet: 0,
-            pressure: 0,
-            handler: None,
-        })),
-        pipes(yog_pipes::register_endpoint(EndpointDef {
-            capability: ANALOG.to_string(),
-            target: EndpointTarget::Block(Blocks::REDSTONE_PORT.to_string()),
-            kinds: Vec::new(),
-            can_insert: false,
-            can_extract: false,
-            listens_signals: true,
-            listens_messages: false,
-            groups: Vec::new(),
-            priority: 0,
-            max_packet: 0,
-            pressure: 0,
-            handler: None,
-        })),
-    ];
-    for r in steps {
-        if let Err(e) = r {
-            warn!("[yog-vlsi] Yog Pipes: {e}");
-        }
+    }
+}
+
+/// `block` as a cable of `capability`, linking only to its own `group`.
+fn cable(block: &str, capability: &str, group: &str) -> AttachDef {
+    AttachDef {
+        block: block.to_string(),
+        capability: capability.to_string(),
+        groups: vec![group.into()],
+        params: HashMap::new(),
+    }
+}
+
+/// `block` as an endpoint of `capability` that hears its signals.
+fn listener(capability: &str, block: &str) -> EndpointDef {
+    EndpointDef {
+        capability: capability.to_string(),
+        target: EndpointTarget::Block(block.to_string()),
+        kinds: Vec::new(),
+        can_insert: false,
+        can_extract: false,
+        listens_signals: true,
+        listens_messages: false,
+        groups: Vec::new(),
+        priority: 0,
+        max_packet: 0,
+        pressure: 0,
+        handler: None,
     }
 }
 

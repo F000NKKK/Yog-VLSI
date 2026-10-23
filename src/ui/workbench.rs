@@ -26,7 +26,7 @@ use crate::content::Items;
 use crate::content::Tier;
 use crate::designs;
 use crate::editor;
-use crate::res::Strings;
+use crate::res::{Colors, Strings};
 use crate::resources::{Amounts, Resource};
 
 pub const WORKBENCH_ID: &str = crate::content::Blocks::VLSI_WORKBENCH;
@@ -215,9 +215,9 @@ impl WorkbenchVm {
                         r.shown(have),
                     ),
                     color: if have >= need {
-                        0xFF_404040
+                        Colors::WORKBENCH_COST_MET
                     } else {
-                        0xFF_B02020
+                        Colors::WORKBENCH_COST_SHORT
                     },
                 }
             })
@@ -225,7 +225,7 @@ impl WorkbenchVm {
         if rows.is_empty() {
             return vec![CostRow {
                 text: Strings::screen_workbench_free(),
-                color: 0xFF_404040,
+                color: Colors::WORKBENCH_COST_MET,
             }];
         }
         rows

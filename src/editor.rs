@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use yog_api::sync::{LazyLock, Mutex};
 
 use yog_api::Schema;
-use yog_api::yog_ids::{game, id, ns};
+use yog_api::yog_ids::{game, gamemode, id, ns};
 use yog_api::{BlockPos, EventPhase, Registry};
 
 use crate::board;
@@ -53,6 +53,9 @@ const WALL: &str = id!(ns::MINECRAFT, "barrier");
 const SKIN: &str = id!(ns::MINECRAFT, "light_gray_wool");
 const GRID: &str = id!(ns::MINECRAFT, "cyan_wool");
 const LIGHT: &str = id!(ns::MINECRAFT, "sea_lantern");
+/// Where someone found in the editor without a session is sent: the
+/// overworld's spawn column, above the ground.
+const FALLBACK_RETURN: (f64, f64, f64) = (0.5, 100.0, 0.5);
 /// The grid's spacing, from the field's corner.
 const GRID_EVERY: i32 = 8;
 /// Lane 0's corner; each further lane is offset along X.
@@ -278,19 +281,62 @@ pub fn enter(
     let origin_z = BASE_Z;
     let size = blueprint.tier.world_size();
     build_room(origin_x, origin_z, size as i32);
-
     let at = |x: u32, y: u32, z: u32| BlockPos {
         x: origin_x + x as i32,
         y: EDITOR_Y + y as i32,
         z: origin_z + z as i32,
     };
+    place_blocks(&blueprint.circuit, &at);
+    place_ports_and_alus(&blueprint.circuit, &at);
+
+    let (cx, cz) = (
+        (origin_x + size as i32 / 2) as f64,
+        (origin_z + size as i32 / 2) as f64,
+    );
+    // What they come in with, theirs again on the way out.
+    let inventory = inventory_of(player_name);
+    let gamemode = yog_api::event::player::info(player_name).map_or_else(
+        || gamemode::SURVIVAL.to_string(),
+        |i| i.gamemode.to_string(),
+    );
+    if !yog_api::event::player::teleport_to_dim(
+        player_name,
+        DIMENSION_ID,
+        (cx, (EDITOR_Y + 1) as f64, cz),
+    ) {
+        return Err(Strings::editor_no_dimension());
+    }
+    yog_api::event::player::set_gamemode(player_name, gamemode::CREATIVE);
+    SESSIONS.lock().insert(
+        player_name.to_string(),
+        EditorSession {
+            name: blueprint.name.clone(),
+            tier: blueprint.tier,
+            origin_x,
+            origin_z,
+            size,
+            source,
+            return_dim: return_dim.to_string(),
+            return_pos,
+            inventory,
+            gamemode,
+        },
+    );
+    persist();
+    yog_api::event::chat::actionbar(
+        player_name,
+        Strings::editor_editing(&blueprint.name, blueprint.tier.name(), size, size),
+    );
+    Ok(())
+}
+
+/// A circuit's blocks into the field (`at`: a cell's place), their items
+/// and ports' settings with them.
+fn place_blocks(circuit: &CircuitData, at: &dyn Fn(u32, u32, u32) -> BlockPos) {
     // What stands on or hangs from another block goes in after it: placed
     // first, the next block set beside it would knock it off.
-    let (hanging, standing): (Vec<_>, Vec<_>) = blueprint
-        .circuit
-        .blocks
-        .iter()
-        .partition(|b| needs_support(b.id()));
+    let (hanging, standing): (Vec<_>, Vec<_>) =
+        circuit.blocks.iter().partition(|b| needs_support(b.id()));
     for block in standing.into_iter().chain(hanging) {
         let pos = at(block.x, block.y, block.z);
         yog_api::event::block::set_state(DIMENSION_ID, pos, &block.state);
@@ -314,19 +360,20 @@ pub fn enter(
         }
     }
     // Cables and ports placed, Yog Pipes joins them up.
-    for block in &blueprint.circuit.blocks {
+    for block in &circuit.blocks {
         cables::refresh(DIMENSION_ID, at(block.x, block.y, block.z), block.id());
     }
-    for p in &blueprint.circuit.ports {
-        yog_api::event::block::set_state(
-            DIMENSION_ID,
-            at(p.x, p.y, p.z),
-            port::block_for_dir(p.dir),
-        );
-        port::write_label(DIMENSION_ID, at(p.x, p.y, p.z), &p.label);
+}
+
+/// A circuit's ports, and its ALUs as they were: their chips in their
+/// slots, their boards.
+fn place_ports_and_alus(circuit: &CircuitData, at: &dyn Fn(u32, u32, u32) -> BlockPos) {
+    for p in &circuit.ports {
+        let pos = at(p.x, p.y, p.z);
+        yog_api::event::block::set_state(DIMENSION_ID, pos, port::block_for_dir(p.dir));
+        port::write_label(DIMENSION_ID, pos, &p.label);
     }
-    // Its ALUs as they were: their chips in their slots, their boards.
-    for a in &blueprint.circuit.alus {
+    for a in &circuit.alus {
         let pos = at(a.x, a.y, a.z);
         for (slot, meta) in &a.chips {
             yog_api::event::block::set_inventory_slot(
@@ -338,55 +385,14 @@ pub fn enter(
                 meta.to_nbt(),
             );
         }
-        board::restore(
-            board::AluId {
-                dimension: DIMENSION_ID.to_string(),
-                x: pos.x,
-                y: pos.y,
-                z: pos.z,
-            },
-            a.tier,
-            &a.wires,
-        );
+        let alu = board::AluId {
+            dimension: DIMENSION_ID.to_string(),
+            x: pos.x,
+            y: pos.y,
+            z: pos.z,
+        };
+        board::restore(alu, a.tier, &a.wires);
     }
-
-    let (cx, cz) = (
-        (origin_x + size as i32 / 2) as f64,
-        (origin_z + size as i32 / 2) as f64,
-    );
-    // What they come in with, theirs again on the way out.
-    let inventory = inventory_of(player_name);
-    let gamemode = yog_api::event::player::info(player_name)
-        .map_or_else(|| "survival".to_string(), |i| i.gamemode.to_string());
-    if !yog_api::event::player::teleport_to_dim(
-        player_name,
-        DIMENSION_ID,
-        (cx, (EDITOR_Y + 1) as f64, cz),
-    ) {
-        return Err(Strings::editor_no_dimension());
-    }
-    yog_api::event::player::set_gamemode(player_name, "creative");
-    SESSIONS.lock().insert(
-        player_name.to_string(),
-        EditorSession {
-            name: blueprint.name.clone(),
-            tier: blueprint.tier,
-            origin_x,
-            origin_z,
-            size,
-            source,
-            return_dim: return_dim.to_string(),
-            return_pos,
-            inventory,
-            gamemode,
-        },
-    );
-    persist();
-    yog_api::event::chat::actionbar(
-        player_name,
-        Strings::editor_editing(&blueprint.name, blueprint.tier.name(), size, size),
-    );
-    Ok(())
 }
 
 /// `/vlsi save`: writes the design back onto its Blueprint, takes the
@@ -623,7 +629,7 @@ pub fn register(registry: &mut Registry) {
             .lock()
             .get(&e.player_name)
             .cloned()
-            .unwrap_or_else(|| (game::OVERWORLD.into(), (0.5, 100.0, 0.5)));
+            .unwrap_or_else(|| (game::OVERWORLD.into(), FALLBACK_RETURN));
         yog_api::event::player::teleport_to_dim(&e.player_name, &dim, (x, y, z));
         yog_api::event::chat::actionbar(&e.player_name, Strings::editor_workbench_only());
         false
