@@ -7,6 +7,10 @@ authors     = ["F000NK", "Yog Team"]
 license     = "AGPL-3.0-only"
 edition     = "2024"
 
+[network]
+# The boards' screens ask the server for what to show and send it edits.
+to_server = true
+
 [dependencies]
 base64     = "0.22"
 miniz_oxide = "0.8"
