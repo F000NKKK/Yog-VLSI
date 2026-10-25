@@ -8,7 +8,7 @@
 
 [![Yog Mod Loader](https://img.shields.io/badge/Yog-Mod%20Loader-8a5cf6.svg)](https://github.com/F000NKKK/Yog-Mod-Loader)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1%20%7C%201.21.1-success)
+![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1%20%7C%201.21.1%20%7C%2026.2-success)
 ![Loaders](https://img.shields.io/badge/Fabric%20%7C%20Forge%20%7C%20NeoForge-supported-success)
 
 **English** · [Русский](README.ru.md)
@@ -110,7 +110,7 @@ that a modpack can change.
 ## 📦 Install
 
 1. Install the [Yog loader](https://github.com/F000NKKK/Yog-Mod-Loader) for
-   Fabric, Forge or NeoForge.
+   Fabric, Forge or NeoForge (Minecraft 1.20.1, 1.21.1 or 26.2).
 2. Put yog-vlsi.yog into the yog-mods folder of your game directory.
 
 To build it yourself, run `yog build` in this folder; the package appears in
