@@ -15,8 +15,8 @@ to_server = true
 base64     = "0.22"
 miniz_oxide = "0.8"
 uuid       = { version = "1", features = ["v4"] }
-yog-api    = "0.104.1"
-yog-kit    = "0.15.0"
+yog-api    = "0.105.0"
+yog-kit    = "0.16.0"
 
 [dependencies.exports]
-yog-pipes = "0.12.0"
+yog-pipes = "0.13.0"
