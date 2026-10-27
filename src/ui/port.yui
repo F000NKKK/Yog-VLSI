@@ -16,24 +16,24 @@
                  h="14"
                  max_length="24"
                  text="{x:Bind label, Mode=TwoWay}"
-                 placeholder="@Strings.screen.port.name_placeholder" />
+                 placeholder="@res:Strings.screen.port.name_placeholder" />
         <Row w="100%" gap="2">
             <ToggleButton x:Name="input"
                           style="@Mode"
-                          text="@Strings.port_short_input"
-                          tooltip="@Strings.port_mode_input"
+                          text="@res:Strings.port_short_input"
+                          tooltip="@res:Strings.port_mode_input"
                           checked="{x:Bind mode == PortMode::Input}"
                           command="{x:Bind set_mode(PortMode::Input)}" />
             <ToggleButton x:Name="output"
                           style="@Mode"
-                          text="@Strings.port_short_output"
-                          tooltip="@Strings.port_mode_output"
+                          text="@res:Strings.port_short_output"
+                          tooltip="@res:Strings.port_mode_output"
                           checked="{x:Bind mode == PortMode::Output}"
                           command="{x:Bind set_mode(PortMode::Output)}" />
             <ToggleButton x:Name="bidi"
                           style="@Mode"
-                          text="@Strings.port_short_bidi"
-                          tooltip="@Strings.port_mode_bidi"
+                          text="@res:Strings.port_short_bidi"
+                          tooltip="@res:Strings.port_mode_bidi"
                           visible="{x:Bind chip_port()}"
                           checked="{x:Bind mode == PortMode::Bidirectional}"
                           command="{x:Bind set_mode(PortMode::Bidirectional)}" />
@@ -44,7 +44,7 @@
                  max_length="3"
                  visible="{x:Bind !chip_port()}"
                  text="{x:Bind channel, Mode=TwoWay}"
-                 placeholder="@Strings.screen.port.channel_placeholder" />
-        <Button x:Name="done" w="60" h="20" halign="right" text="@Strings.screen.port.done" command="{x:Bind done()}" />
+                 placeholder="@res:Strings.screen.port.channel_placeholder" />
+        <Button x:Name="done" w="60" h="20" halign="right" text="@res:Strings.screen.port.done" command="{x:Bind done()}" />
     </Column>
 </Screen>

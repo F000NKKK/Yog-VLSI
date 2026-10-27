@@ -1,8 +1,8 @@
 [mod]
 id          = "yog-vlsi"
-name        = "@Strings.mod_name"
+name        = "@res:Strings.mod_name"
 version     = "0.3.0"
-description = "@Strings.mod_description"
+description = "@res:Strings.mod_description"
 authors     = ["F000NK", "Yog Team"]
 license     = "AGPL-3.0-only"
 edition     = "2024"

@@ -1,2 +1,2 @@
-YOGD	name/@Strings.block.alu_woodtooltip9@Strings.block.alu_wood.desc	tags	alusblockhardness
+SDAT	name7@res:Strings.block.alu_woodtooltipA@res:Strings.block.alu_wood.desc	tags	alusblockhardness
 resistancesoundmetallight	toolpickaxerequires_toolinventoryyog-vlsi:aluconnect_groupsanalogdigitalmodelparentcube_bottom_toptexturestopI@texture:yog-vlsi:block/alu_top_woodbottom2	sideK@texture:yog-vlsi:block/alu_side_wood

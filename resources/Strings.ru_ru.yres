@@ -1,4 +1,4 @@
-YOGDmod_nameYog VLSImod_description�Very Large Scale Integration — проектируйте и производите редстоун-микросхемы с симуляцией на Rust-VM. Многоуровневый верстак, блок АЛУ и связывание чипов.item_group)block.vlsi_workbench'VLSI Верстак3block.vlsi_workbench.desc�§7Проектируйте и производите редстоун-микрочипы.
+SDATmod_nameYog VLSImod_description�Very Large Scale Integration — проектируйте и производите редстоун-микросхемы с симуляцией на Rust-VM. Многоуровневый верстак, блок АЛУ и связывание чипов.item_group)block.vlsi_workbench'VLSI Верстак3block.vlsi_workbench.desc�§7Проектируйте и производите редстоун-микрочипы.
 §7ПКМ открывает интерфейс проектирования.
 §7Вставляйте чистые чипы, чертежи или ресурсы.block.alu_wood7Деревянное АЛУ'block.alu_wood.desc�§7Вставляйте запрограммированные чипы. ПКМ открывает редактор связей.
 §7Макс. чипов: 2 | Цифровых каналов на сторону: 8block.alu_stone/Каменное АЛУ)block.alu_stone.desc�§7Вставляйте запрограммированные чипы. ПКМ открывает редактор связей.

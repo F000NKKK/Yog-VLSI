@@ -23,18 +23,18 @@
     <Grid w="100%" h="100%" rows="14,*,Auto" padding="4 8 8 8">
         <Row gap="4" align="center">
             <Label flex="1" text="{x:Bind title()}" no_wrap="true" ellipsis="true" />
-            <Label x:Name="help" style="@Info" tooltip="@Strings.screen.alu.help" />
+            <Label x:Name="help" style="@Info" tooltip="@res:Strings.screen.alu.help" />
             <Button x:Name="clear"
                     w="96"
                     h="14"
-                    text="@Strings.screen.alu.clear_links"
+                    text="@res:Strings.screen.alu.clear_links"
                     enabled="{x:Bind has_wires()}"
                     command="{x:Bind clear()}" />
         </Row>
         <Surface x:Name="graph" Grid.Row="1" w="100%" h="100%" source="yog-vlsi:alu_graph" />
         <Row Grid.Row="2" margin="4 0 0 0" gap="12">
             <Column gap="2">
-                <Label text="@Strings.screen.alu.chips" no_wrap="true" />
+                <Label text="@res:Strings.screen.alu.chips" no_wrap="true" />
                 <Row gap="0">
                     <Slot index="0" accepts="yog-vlsi:chip_wood yog-vlsi:chip_stone yog-vlsi:chip_iron yog-vlsi:chip_gold yog-vlsi:chip_diamond yog-vlsi:chip_netherite" />
                     <Slot index="1" accepts="yog-vlsi:chip_wood yog-vlsi:chip_stone yog-vlsi:chip_iron yog-vlsi:chip_gold yog-vlsi:chip_diamond yog-vlsi:chip_netherite" />

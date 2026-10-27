@@ -24,20 +24,20 @@
                no_wrap="true" />
     </Screen.Resources>
     <Grid w="100%" h="100%" rows="16,*,Auto" padding="4 8 8 8">
-        <Label style="@Header" text="@Strings.screen.workbench.title" />
+        <Label style="@Header" text="@res:Strings.screen.workbench.title" />
         <Row Grid.Row="1" gap="8">
             <!-- Chip out, resources in. -->
             <Column w="104" gap="2">
-                <Label style="@Header" text="@Strings.screen.workbench.chip" />
+                <Label style="@Header" text="@res:Strings.screen.workbench.chip" />
                 <Slot index="0" accepts="yog-vlsi:chip_wood yog-vlsi:chip_stone yog-vlsi:chip_iron yog-vlsi:chip_gold yog-vlsi:chip_diamond yog-vlsi:chip_netherite" />
-                <Label style="@Header" text="@Strings.screen.workbench.resources" />
+                <Label style="@Header" text="@res:Strings.screen.workbench.resources" />
                 <Row gap="4">
                     <Column gap="2">
                         <Row gap="2" align="center" tooltip="{x:Bind resource_tooltip(Resource::Redstone)}">
                             <Slot index="1" accepts="#yog:dusts/redstone #yog:storage_blocks/redstone" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column style="@Fill" h="{x:Bind vial(Resource::Redstone)}" bg="@Colors.vial.redstone" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Redstone)}" bg="@res:Colors.vial.redstone" />
                             </Column>
                             <Label style="@Count" text="{x:Bind amount(Resource::Redstone)}" />
                         </Row>
@@ -45,7 +45,7 @@
                             <Slot index="2" accepts="#yog:nuggets/iron #yog:ingots/iron #yog:storage_blocks/iron" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column style="@Fill" h="{x:Bind vial(Resource::Iron)}" bg="@Colors.vial.iron" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Iron)}" bg="@res:Colors.vial.iron" />
                             </Column>
                             <Label style="@Count" text="{x:Bind amount(Resource::Iron)}" />
                         </Row>
@@ -53,7 +53,7 @@
                             <Slot index="3" accepts="#yog:nuggets/gold #yog:ingots/gold #yog:storage_blocks/gold" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column style="@Fill" h="{x:Bind vial(Resource::Gold)}" bg="@Colors.vial.gold" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Gold)}" bg="@res:Colors.vial.gold" />
                             </Column>
                             <Label style="@Count" text="{x:Bind amount(Resource::Gold)}" />
                         </Row>
@@ -63,7 +63,7 @@
                             <Slot index="4" accepts="#yog:gems/quartz #yog:storage_blocks/quartz" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column style="@Fill" h="{x:Bind vial(Resource::Quartz)}" bg="@Colors.vial.quartz" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Quartz)}" bg="@res:Colors.vial.quartz" />
                             </Column>
                             <Label style="@Count" text="{x:Bind amount(Resource::Quartz)}" />
                         </Row>
@@ -71,7 +71,7 @@
                             <Slot index="5" accepts="#yog:logs" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column style="@Fill" h="{x:Bind vial(Resource::Wood)}" bg="@Colors.vial.wood" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Wood)}" bg="@res:Colors.vial.wood" />
                             </Column>
                             <Label style="@Count" text="{x:Bind amount(Resource::Wood)}" />
                         </Row>
@@ -79,7 +79,7 @@
                             <Slot index="6" accepts="#yog:cobblestones #yog:stones" />
                             <Column style="@Vial">
                                 <Spacer flex="1" />
-                                <Column style="@Fill" h="{x:Bind vial(Resource::Stone)}" bg="@Colors.vial.cobblestone" />
+                                <Column style="@Fill" h="{x:Bind vial(Resource::Stone)}" bg="@res:Colors.vial.cobblestone" />
                             </Column>
                             <Label style="@Count" text="{x:Bind amount(Resource::Stone)}" />
                         </Row>
@@ -90,13 +90,13 @@
             <!-- The blueprint and what's on it. -->
             <Column flex="1" h="100%" gap="2">
                 <Row gap="4" align="center">
-                    <Label style="@Header" text="@Strings.screen.workbench.blueprint" />
-                    <Label x:Name="help" style="@Info" tooltip="@Strings.screen.workbench.blueprint_help" />
+                    <Label style="@Header" text="@res:Strings.screen.workbench.blueprint" />
+                    <Label x:Name="help" style="@Info" tooltip="@res:Strings.screen.workbench.blueprint_help" />
                 </Row>
                 <Row gap="4" align="center">
                     <Slot index="7" accepts="yog-vlsi:blueprint" />
                     <Label x:Name="no_blueprint"
-                           text="@Strings.screen.workbench.no_blueprint"
+                           text="@res:Strings.screen.workbench.no_blueprint"
                            color="#FF505050"
                            visible="{x:Bind no_blueprint()}" />
                     <Label x:Name="design_name"
@@ -113,12 +113,12 @@
                              h="14"
                              max_length="32"
                              text="{x:Bind name, Mode=TwoWay}"
-                             placeholder="@Strings.screen.workbench.name_placeholder" />
-                    <Button x:Name="tier" style="@Action" text="{x:Bind tier_text()}" d:text="@Strings.tier_wood" command="{x:Bind next_tier()}" />
-                    <Button x:Name="template" style="@Action" text="{x:Bind template_text()}" d:text="@Strings.screen.workbench.template_empty" command="{x:Bind next_template()}" />
+                             placeholder="@res:Strings.screen.workbench.name_placeholder" />
+                    <Button x:Name="tier" style="@Action" text="{x:Bind tier_text()}" d:text="@res:Strings.tier_wood" command="{x:Bind next_tier()}" />
+                    <Button x:Name="template" style="@Action" text="{x:Bind template_text()}" d:text="@res:Strings.screen.workbench.template_empty" command="{x:Bind next_template()}" />
                     <Button x:Name="create"
                             style="@Action"
-                            text="@Strings.screen.workbench.create"
+                            text="@res:Strings.screen.workbench.create"
                             enabled="{x:Bind can_create()}"
                             command="{x:Bind create()}" />
                 </Column>
@@ -126,7 +126,7 @@
                 <!-- A design: what it is and what it costs. -->
                 <Column gap="1" visible="{x:Bind has_design()}">
                     <Label x:Name="design_tier" text="{x:Bind design_tier()}" font_scale="0.7" no_wrap="true" />
-                    <Label style="@Header" margin="3 0 0 0" text="@Strings.screen.workbench.cost" />
+                    <Label style="@Header" margin="3 0 0 0" text="@res:Strings.screen.workbench.cost" />
                     <ItemsControl x:Name="cost" w="100%" gap="1" items="{x:Bind cost_rows()}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="CostRow">
@@ -143,12 +143,12 @@
             <Column flex="1" gap="4">
                 <Button x:Name="edit"
                         style="@Action"
-                        text="@Strings.screen.workbench.edit"
+                        text="@res:Strings.screen.workbench.edit"
                         enabled="{x:Bind has_design()}"
                         command="{x:Bind edit()}" />
                 <Button x:Name="fabricate"
                         style="@Action"
-                        text="@Strings.screen.workbench.fabricate"
+                        text="@res:Strings.screen.workbench.fabricate"
                         enabled="{x:Bind can_fabricate()}"
                         command="{x:Bind fabricate()}" />
             </Column>

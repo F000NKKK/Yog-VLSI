@@ -1,2 +1,2 @@
-YOGD	name5@Strings.block.alu_diamondtooltip?@Strings.block.alu_diamond.desc	tags	alusblockhardness
+SDAT	name=@res:Strings.block.alu_diamondtooltipG@res:Strings.block.alu_diamond.desc	tags	alusblockhardness
 resistancesoundmetallight	toolpickaxerequires_toolinventoryyog-vlsi:aluconnect_groupsanalogdigitalmodelparentcube_bottom_toptexturestopO@texture:yog-vlsi:block/alu_top_diamondbottom2	sideQ@texture:yog-vlsi:block/alu_side_diamond
