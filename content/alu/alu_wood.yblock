@@ -1,2 +1,1 @@
-SDAT	name7@res:Strings.block.alu_woodtooltipA@res:Strings.block.alu_wood.desc	tags	alusblockhardness
-resistancesoundmetallight	toolpickaxerequires_toolinventoryyog-vlsi:aluconnect_groupsanalogdigitalmodelparentcube_bottom_toptexturestopI@texture:yog-vlsi:block/alu_top_woodbottom2	sideK@texture:yog-vlsi:block/alu_side_wood
+SDAT	nametooltip	tagsblockmodel7@res:Strings.block.alu_woodA@res:Strings.block.alu_wood.desc	alushardnessresistancesoundlight	toolrequires_toolinventoryconnect_groups•œmetal—pickaxeyog-vlsi:aluanalogdigitalparenttexturescube_bottom_toptopbottom	sideI@texture:yog-vlsi:block/alu_top_wood;K@texture:yog-vlsi:block/alu_side_wood

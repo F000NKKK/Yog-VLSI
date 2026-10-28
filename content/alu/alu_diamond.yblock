@@ -1,2 +1,1 @@
-SDAT	name=@res:Strings.block.alu_diamondtooltipG@res:Strings.block.alu_diamond.desc	tags	alusblockhardness
-resistancesoundmetallight	toolpickaxerequires_toolinventoryyog-vlsi:aluconnect_groupsanalogdigitalmodelparentcube_bottom_toptexturestopO@texture:yog-vlsi:block/alu_top_diamondbottom2	sideQ@texture:yog-vlsi:block/alu_side_diamond
+SDAT	nametooltip	tagsblockmodel=@res:Strings.block.alu_diamondG@res:Strings.block.alu_diamond.desc	alushardnessresistancesoundlight	toolrequires_toolinventoryconnect_groups•œmetal—pickaxeyog-vlsi:aluanalogdigitalparenttexturescube_bottom_toptopbottom	sideO@texture:yog-vlsi:block/alu_top_diamond;Q@texture:yog-vlsi:block/alu_side_diamond

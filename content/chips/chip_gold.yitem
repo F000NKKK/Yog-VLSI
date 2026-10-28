@@ -1,1 +1,1 @@
-SDAT	name7@res:Strings.item.chip_goldtooltipA@res:Strings.item.chip_gold.desc	tagschips	itemstack_sizemodelparentgeneratedtextureslayer0A@texture:yog-vlsi:item/chip_gold
+SDAT	nametooltip	tags	itemmodel7@res:Strings.item.chip_goldA@res:Strings.item.chip_gold.descchipsstack_size‘parenttexturesgeneratedlayer0A@texture:yog-vlsi:item/chip_gold

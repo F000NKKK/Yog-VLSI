@@ -1,8 +1,1 @@
-SDAT	kindtableid	tiercolumns	name	textsteps_per_ticku32world_sizemax_chipsusize!digital_channels	chip	itemalublock	rows	wood
--@res:Strings.tier_wood 1@item:yog-vlsi:chip_wood1@block:yog-vlsi:alu_woodstone
-/@res:Strings.tier_stone@@ 3@item:yog-vlsi:chip_stone3@block:yog-vlsi:alu_stone	gold
--@res:Strings.tier_gold€€01@item:yog-vlsi:chip_gold1@block:yog-vlsi:alu_gold	iron
--@res:Strings.tier_iron€€
-@1@item:yog-vlsi:chip_iron1@block:yog-vlsi:alu_irondiamond
-3@res:Strings.tier_diamond€@€`7@item:yog-vlsi:chip_diamond7@block:yog-vlsi:alu_diamondnetherite
-7@res:Strings.tier_netherite€€€€;@item:yog-vlsi:chip_netherite;@block:yog-vlsi:alu_netherite
+SDAT		kindidcolumns	rowstable	tier	namesteps_per_tickworld_sizemax_chips!digital_channels	chipalu	textu32.usize.	itemblock	woodstone	gold	irondiamondnetherite-@res:Strings.tier_wood˜ ’˜1@item:yog-vlsi:chip_wood1@block:yog-vlsi:alu_wood/@res:Strings.tier_stone°°“ 3@item:yog-vlsi:chip_stone3@block:yog-vlsi:alu_stone-@res:Strings.tier_gold€Ð”¨1@item:yog-vlsi:chip_gold1@block:yog-vlsi:alu_gold-@res:Strings.tier_iron€Ð•°1@item:yog-vlsi:chip_iron1@block:yog-vlsi:alu_iron3@res:Strings.tier_diamond€@€–À7@item:yog-vlsi:chip_diamond7@block:yog-vlsi:alu_diamond7@res:Strings.tier_netherite€€€˜Ð;@item:yog-vlsi:chip_netherite;@block:yog-vlsi:alu_netherite
